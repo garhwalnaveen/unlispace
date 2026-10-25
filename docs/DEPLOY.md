@@ -1,11 +1,23 @@
 # Production deployment
 
-Deploy Workers in this order:
+Set `ULS_WORKERS_DOMAIN` to the production `workers.dev` domain, such as
+`naveen-f3d.workers.dev`. Production Worker endpoints use a placeholder in Wrangler configs;
+the wrapper substitutes this environment variable for each Wrangler command and removes its
+temporary config afterwards. Keep the value as a hostname, without `https://`. The Mac app
+bundle and web build use the same setting to point sign-in and control-plane requests at
+`https://unlispace-api.$ULS_WORKERS_DOMAIN`. `ULS_API_URL` can override that full API URL when
+building the Mac app or web app.
 
-1. Deploy `cloud/data-plane`.
-2. Apply the API database migrations remotely with `npx wrangler d1 migrations apply unlispace-control --remote -c cloud/api/wrangler.jsonc`, then deploy `cloud/api`.
-3. Deploy `cloud/s3-gateway`.
-4. Build and deploy `web`.
+Run Wrangler production commands through `node scripts/wrangler-production.mjs`, passing the
+usual Wrangler arguments. Deploy Workers in this order:
+
+1. `node scripts/wrangler-production.mjs deploy --env production -c cloud/data-plane/wrangler.jsonc`
+2. `node scripts/wrangler-production.mjs d1 migrations apply unlispace-control --remote --env production -c cloud/api/wrangler.jsonc`, then `node scripts/wrangler-production.mjs deploy --env production -c cloud/api/wrangler.jsonc`.
+3. `node scripts/wrangler-production.mjs deploy --env production -c cloud/s3-gateway/wrangler.jsonc`
+4. Build `web` with `VITE_API_URL="${ULS_API_URL:-https://unlispace-api.$ULS_WORKERS_DOMAIN}" npm run build --prefix web`, then `node scripts/wrangler-production.mjs deploy --env production -c web/wrangler.jsonc`.
+
+Build the Mac app with `ULS_WORKERS_DOMAIN="$ULS_WORKERS_DOMAIN" bash mac/scripts/bundle.sh`.
+The engine CLI accepts the same API base through its existing `ULS_API` environment variable.
 
 Set these secrets on the corresponding Worker before deployment:
 

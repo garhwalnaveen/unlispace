@@ -23,7 +23,7 @@ existing keys and never prints secrets.
 |---|---|---|
 | `ULS_JWT_PRIVATE_JWK` | api (secret) | Ed25519 private JWK, with `kid` |
 | `ULS_JWT_PUBLIC_JWKS` | api + data plane | `{"keys":[<public JWK with kid>, ...]}`; more than one key allows rotation |
-| `ULS_ISSUER` | both | `https://api.unlispace.com`, or `http://127.0.0.1:8788` locally |
+| `ULS_ISSUER` | both | `https://unlispace-api.$ULS_WORKERS_DOMAIN` in production, or `http://127.0.0.1:8788` locally |
 | `ULS_DATA_ENDPOINT` | api | public base URL of the data plane, returned to clients |
 | `ULS_WEB_ORIGIN` | api | CORS allow-origin and redirect base for the web app |
 | `ULS_ALLOW_DEV_TOKEN` | data plane | `"1"` keeps the M0 static bearer working (dev only; default off) |
