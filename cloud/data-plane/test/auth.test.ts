@@ -176,12 +176,12 @@ describe("DataPlaneAdmin", () => {
 		const created = await admin().createDrive(id, "weur");
 		expect(created).toMatchObject({ driveId: id, placement: "weur" });
 		expect(created.createdAt).toBeGreaterThan(0);
-		expect(await admin().driveStats(id)).toEqual({ headSeq: 0, fileCount: 0, bytes: 0 });
+		expect(await admin().driveStats(id)).toEqual({ headSeq: 0, fileCount: 0, bytes: 0, ownBytes: 0, lineage: id, depth: 0, forkOf: null });
 		await expect(admin().createDrive(id)).rejects.toMatchObject({ name: "DriveExistsError", message: expect.stringContaining("drive_exists") });
 		await expect(admin().createDrive("AB")).rejects.toThrow();
 		await expect(admin().createDrive(`${id}-x`, "mars")).rejects.toThrow();
 		await putFile(id, "a.txt", "hello");
-		expect(await admin().driveStats(id)).toEqual({ headSeq: 1, fileCount: 1, bytes: 5 });
+		expect(await admin().driveStats(id)).toEqual({ headSeq: 1, fileCount: 1, bytes: 5, ownBytes: 5, lineage: id, depth: 0, forkOf: null });
 		// a drive token minted for it works end to end
 		expect((await api(`/v0/drives/${id}/stat?path=a.txt`, { token: await tok(id, "read") })).status).toBe(200);
 	});

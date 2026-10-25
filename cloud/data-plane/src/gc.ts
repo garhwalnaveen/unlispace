@@ -30,11 +30,15 @@ export interface GCProgress {
 	deleted: number;
 }
 
-/** One lineage = one drive until forks exist. Caller serializes steps with commits and shard registrations. */
+/** Caller serializes steps with commits and root membership registration. */
 export class LineageGC {
 	constructor(private sql: SqlStorage, private bucket: Pick<R2Bucket, "get" | "list" | "delete">, private lineage: string) {}
 
 	async step(generation: number, now: number, dryRun = true): Promise<GCProgress> {
+		const shared = this.sql.exec("SELECT 1 FROM sqlite_master WHERE name='lineage_members'").toArray().length &&
+			this.sql.exec("SELECT 1 FROM lineage_members WHERE drive_id<>? AND removed_at IS NULL LIMIT 1", this.lineage).toArray().length;
+		const child = this.sql.exec<{v: string}>("SELECT v FROM meta WHERE k='drive_id'").toArray()[0]?.v !== this.lineage;
+		if (shared || child || this.sql.exec("SELECT 1 FROM meta WHERE k='gc_restored' AND v='1'").toArray().length) return {done: true, dryRun: true, scanned: 0, candidates: 0, deleted: 0};
 		let state = this.sql.exec<State>("SELECT * FROM gc_state WHERE id=1").toArray()[0];
 		// A commit between pages invalidates the mark snapshot; never sweep against stale marks.
 		if (!state || state.generation !== generation || state.dry_run !== Number(dryRun) || state.phase === "done") {

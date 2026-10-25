@@ -18,6 +18,7 @@
   "vars": {
     // Must equal the issuer's ULS_ISSUER (the `iss` claim of drive tokens). Local api default shown.
     "ULS_ISSUER": "http://127.0.0.1:8788",
+    "ULS_WEB_ORIGINS": "http://localhost:5173",
     // DEV ONLY: "1" accepts the static ULS_DEV_TOKEN bearer as admin on all drives and enables the public
     // PUT /v0/drives/{id}. MUST be "0" (or unset) in production: override it in the production environment.
     "ULS_ALLOW_DEV_TOKEN": "1"
@@ -36,9 +37,11 @@
         "bindings": [{ "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }]
       },
       "vars": {
-        "ULS_ISSUER": "https://unlispace-api.naveen-f3d.workers.dev",
+        "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
         "ULS_ALLOW_DEV_TOKEN": "0",
-        "ULS_GC_DELETE": "0"
+        "ULS_GC_DELETE": "0",
+        // Fill the exact deployed web origin; no wildcard or unresolved domain is allowed.
+        "ULS_WEB_ORIGINS": ""
       }
     }
   }

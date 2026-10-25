@@ -13,6 +13,7 @@ import {
 } from "./types";
 import { extPath } from "./validate";
 import { loadManifest, storeManifest } from "./manifests";
+import { EXPORT_COLUMNS, validateExportRow, withinDeadline, type ExportHeader } from "./exports";
 import { GC_SCHEMA, GC_INTERVAL_MS, LineageGC } from "./gc";
 
 type Row = Record<string, SqlStorageValue>;
@@ -29,6 +30,7 @@ interface VersionRow extends Row {
 	mtime: number | null;
 }
 
+const SNAPSHOT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const PING_INTERVAL_MS = 30_000;
 /** Internal header the Worker sets (always overwritten) on /watch upgrades: token expiry in epoch seconds, or absent. */
 export const EXP_HEADER = "x-uls-token-exp";
@@ -78,7 +80,9 @@ const SCHEMA = [
 	`CREATE INDEX IF NOT EXISTS versions_path ON versions(path, seq)`,
 	`CREATE TABLE IF NOT EXISTS log(seq INTEGER NOT NULL, path TEXT NOT NULL, op TEXT NOT NULL, version TEXT)`,
 	`CREATE INDEX IF NOT EXISTS log_seq ON log(seq)`,
-	`CREATE TABLE IF NOT EXISTS shards_known(h TEXT PRIMARY KEY, n INTEGER NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS shards_known(h TEXT PRIMARY KEY, n INTEGER NOT NULL, inherited INTEGER NOT NULL DEFAULT 0)`,
+	`CREATE TABLE IF NOT EXISTS lineage_members(drive_id TEXT PRIMARY KEY, added_at INTEGER NOT NULL, removed_at INTEGER)`,
+	`CREATE TABLE IF NOT EXISTS export_rows(token TEXT NOT NULL, id INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(token,id))`,
 ];
 
 export interface DriveInfo {
@@ -92,6 +96,7 @@ export class DriveAuthority extends DurableObject<Env> {
 	private sql: SqlStorage;
 	private tree: NodeTree;
 	private pendingIO: Promise<unknown> = Promise.resolve();
+	private pendingSnapshot: Promise<string | null> | null = null;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -99,11 +104,19 @@ export class DriveAuthority extends DurableObject<Env> {
 		this.ctx.storage.transactionSync(() => {
 			for (const stmt of [...SCHEMA, ...GC_SCHEMA]) this.sql.exec(stmt);
 			migrateNodes(this.sql);
+			if (!this.sql.exec<{name: string}>("PRAGMA table_info(shards_known)").toArray().some(c => c.name === "inherited"))
+				this.sql.exec("ALTER TABLE shards_known ADD COLUMN inherited INTEGER NOT NULL DEFAULT 0");
+			const id = this.getMeta("drive_id");
+			if (id) {
+				if (!this.getMeta("lineage")) this.setMeta("lineage", id);
+				if (!this.getMeta("depth")) this.setMeta("depth", "0");
+				this.sql.exec("INSERT OR IGNORE INTO lineage_members VALUES(?,?,NULL)", id, Date.now());
+			}
 		});
 		this.tree = new NodeTree(this.sql);
 		if (this.getMeta("created_at") !== null) {
 			if (this.getMeta("gc_next_at") === null) this.setMeta("gc_next_at", String(Date.now() + GC_INTERVAL_MS));
-			this.ctx.waitUntil(this.scheduleAlarm(Number(this.getMeta("gc_next_at")), null));
+			this.ctx.waitUntil(this.scheduleAlarm(Math.min(Number(this.getMeta("gc_next_at")), this.snapshotDueAt()), null));
 		}
 	}
 
@@ -112,6 +125,12 @@ export class DriveAuthority extends DurableObject<Env> {
 		const task = this.pendingIO.then(fn);
 		this.pendingIO = task.catch(() => undefined);
 		return task;
+	}
+
+	private lineage(): string { return this.getMeta("lineage") ?? this.getMeta("drive_id")!; }
+
+	private snapshotDueAt(): number {
+		return Number(this.getMeta("snapshot_next_at") ?? (Number(this.getMeta("snapshot_at") ?? this.getMeta("created_at") ?? Date.now()) + SNAPSHOT_INTERVAL_MS));
 	}
 
 	// ---------- small helpers ----------
@@ -151,21 +170,52 @@ export class DriveAuthority extends DurableObject<Env> {
 
 	create(driveId: string, placement: Placement | null): Result<DriveInfo> {
 		// A deleted drive keeps its id: re-creating it is refused too.
-		if (this.getMeta("created_at") !== null) return fail(409, "drive_exists");
+		if (this.getMeta("created_at") !== null || this.getMeta("importing") !== null) return fail(409, "drive_exists");
 		const createdAt = Date.now();
 		this.ctx.storage.transactionSync(() => {
 			this.setMeta("drive_id", driveId);
+			this.setMeta("lineage", driveId);
+			this.setMeta("depth", "0");
+			this.sql.exec("INSERT OR REPLACE INTO lineage_members VALUES(?,?,NULL)", driveId, createdAt);
 			this.setMeta("placement", placement ?? "");
 			this.setMeta("head_seq", "0");
+			this.setMeta("deleted", "0");
 			this.setMeta("created_at", String(createdAt));
 		});
 		this.setMeta("gc_next_at", String(Date.now() + GC_INTERVAL_MS));
-		this.ctx.waitUntil(this.scheduleAlarm(Number(this.getMeta("gc_next_at")), null));
+		this.ctx.waitUntil(this.scheduleAlarm(Math.min(Number(this.getMeta("gc_next_at")), this.snapshotDueAt()), null));
 		return ok({ driveId, placement, createdAt });
 	}
 
 	/** Soft delete: refuse every request from now on and close all sockets. Idempotent; absent drives are left absent. */
-	delete(): Result<null> {
+	async delete(hard = false): Promise<Result<null>> {
+		if (hard) await this.pendingSnapshot?.catch(() => undefined);
+		return this.withIO(async () => {
+			if (!this.getMeta("drive_id")) return ok(null);
+			if (hard) {
+				for (const ws of this.ctx.getWebSockets()) ws.close(WS_CLOSE_DELETED, "drive_deleted");
+				this.ctx.storage.transactionSync(() => {
+					for (const table of ["nodes", "versions", "log", "shards_known", "gc_state", "gc_marks"]) this.sql.exec(`DELETE FROM ${table}`);
+					// Frozen exports must finish even if the source is hard-deleted mid-fork.
+					const importing = this.getMeta("importing");
+					if (importing) this.sql.exec("DELETE FROM export_rows WHERE token=?", importing);
+					// The root registry survives hard deletion so descendants remain protected.
+					this.sql.exec("DELETE FROM meta WHERE k NOT IN ('drive_id','lineage','depth')");
+					this.setMeta("deleted", "1");
+				});
+				await this.ctx.storage.deleteAlarm();
+				return ok(null);
+			}
+			return this.softDelete();
+		});
+	}
+
+	lineageInfo(): {lineage: string; driveId: string} | null {
+		const driveId = this.getMeta("drive_id");
+		return driveId ? {driveId, lineage: this.lineage()} : null;
+	}
+
+	private softDelete(): Result<null> {
 		if (this.getMeta("created_at") === null || this.getMeta("deleted") === "1") return ok(null);
 		this.setMeta("deleted", "1");
 		for (const ws of this.ctx.getWebSockets()) {
@@ -178,13 +228,198 @@ export class DriveAuthority extends DurableObject<Env> {
 		return ok(null);
 	}
 
-	describe(): Result<DriveInfo & { headSeq: number; fileCount: number; bytes: number }> {
+	describe(): Result<DriveInfo & {headSeq: number; fileCount: number; bytes: number; lineage: string; depth: number; forkOf: {driveId: string; forkPoint: number} | null}> {
 		const i = this.info();
 		if (!i) return this.noDrive();
-		const agg = this.sql
-			.exec<{ c: number; b: number }>(LIVE_TREE + " SELECT COUNT(*) AS c, COALESCE(SUM(size),0) AS b FROM tree WHERE type='file'")
-			.one();
-		return ok({ ...i, headSeq: this.headSeq(), fileCount: agg.c, bytes: agg.b });
+		const agg = this.sql.exec<{c: number; b: number}>(LIVE_TREE + " SELECT COUNT(*) AS c, COALESCE(SUM(size),0) AS b FROM tree WHERE type='file'").one();
+		const fork = this.getMeta("forkOf");
+		const forkOf = fork ? JSON.parse(fork) as {driveId: string; ts: number} : null;
+		return ok({...i, headSeq: this.headSeq(), fileCount: agg.c, bytes: agg.b, lineage: this.lineage(), depth: Number(this.getMeta("depth") ?? 0), forkOf: forkOf ? {driveId: forkOf.driveId, forkPoint: forkOf.ts} : null});
+	}
+
+	stats() {
+		return this.withIO(async () => {
+			const info = this.describe();
+			if (!info.ok) return info;
+			const hashes = new Set<string>();
+			for (const v of this.sql.exec<{manifest: string}>("SELECT manifest FROM versions WHERE manifest IS NOT NULL"))
+				for (const [h] of await loadManifest(this.env.SHARDS, this.lineage(), v.manifest)) hashes.add(h);
+			let bytes = 0;
+			for (const h of hashes) bytes += this.sql.exec<{n: number}>("SELECT n FROM shards_known WHERE h=? AND inherited=0", h).toArray()[0]?.n ?? 0;
+			return ok({...info.data, ownBytes: bytes});
+		});
+	}
+
+	/** Registry updates queue behind a running sweep, before any child can reference bytes. */
+	member(driveId: string, removed = false, deadline?: number): Promise<boolean> {
+		const task = this.withIO(async () => {
+			if (deadline !== undefined && Date.now() >= deadline) return false;
+			this.sql.exec("INSERT INTO lineage_members VALUES(?,?,?) ON CONFLICT(drive_id) DO UPDATE SET removed_at=excluded.removed_at",
+				driveId, Date.now(), removed ? Date.now() : null);
+			return true;
+		});
+		return deadline === undefined ? task : withinDeadline(task, deadline, () => false);
+	}
+
+	beginExport(requested = Date.now()): Promise<Result<ExportHeader>> {
+		const task = this.withIO(async () => {
+			if (Date.now() - requested >= 60_000) return fail(503, "slow_down");
+			const info = this.info();
+			if (!info) return this.noDrive();
+			const header: ExportHeader = {token: crypto.randomUUID(), driveId: info.driveId, lineage: this.lineage(),
+				depth: Number(this.getMeta("depth") ?? 0), seq: this.headSeq(), ts: Date.now(), placement: info.placement};
+			this.ctx.storage.transactionSync(() => {
+				let offset = 0;
+				for (const [table, columns] of Object.entries(EXPORT_COLUMNS)) {
+					const object = columns.map(c => `'${c}',${c}`).join(",");
+					this.sql.exec(`INSERT INTO export_rows SELECT ?,?+ROW_NUMBER() OVER (ORDER BY rowid),
+						json_object('table','${table}','row',json_object(${object})) FROM ${table}`, header.token, offset);
+					offset += this.sql.exec<{n: number}>(`SELECT COUNT(*) AS n FROM ${table}`).one().n;
+				}
+			});
+			return ok(header);
+		});
+		return withinDeadline<Result<ExportHeader>>(task, requested + 60_000, () => fail(503, "slow_down"));
+	}
+
+	exportPage(token: string, after = 0): { rows: {id: number; payload: string}[]; done: boolean } {
+		const rows: {id: number; payload: string}[] = [];
+		let bytes = 0;
+		for (const row of this.sql.exec<{id: number; payload: string}>("SELECT id,payload FROM export_rows WHERE token=? AND id>? ORDER BY id LIMIT 100", token, after)) {
+			if (rows.length && bytes + utf8Len(row.payload) > 512 * 1024) break;
+			rows.push(row); bytes += utf8Len(row.payload);
+		}
+		const last = rows.at(-1)?.id ?? after;
+		const done = !this.sql.exec("SELECT 1 FROM export_rows WHERE token=? AND id>? LIMIT 1", token, last).toArray().length;
+		return {rows, done};
+	}
+
+	endExport(token: string): void { this.sql.exec("DELETE FROM export_rows WHERE token=?", token); }
+
+	reserveImport(token: string): Result<null> {
+		if (this.getMeta("created_at") !== null || this.getMeta("importing") !== null ||
+			this.sql.exec("SELECT 1 FROM nodes UNION ALL SELECT 1 FROM versions LIMIT 1").toArray().length) return fail(409, "drive_exists");
+		this.setMeta("importing", token);
+		return ok(null);
+	}
+
+	importPage(token: string, rows: {id: number; payload: string}[]): void {
+		if (this.getMeta("importing") !== token) throw new Error("invalid import token");
+		this.ctx.storage.transactionSync(() => {
+			for (const row of rows) {
+				validateExportRow(JSON.parse(row.payload));
+				this.sql.exec("INSERT INTO export_rows VALUES(?,?,?)", token, row.id, row.payload);
+			}
+		});
+	}
+
+	finishImport(token: string, driveId: string, header: ExportHeader, fork: boolean): Promise<void> {
+		return this.withIO(async () => {
+			if (this.getMeta("importing") !== token) throw new Error("invalid import token");
+			this.ctx.storage.transactionSync(() => {
+				for (const {payload} of this.sql.exec<{payload: string}>("SELECT payload FROM export_rows WHERE token=? ORDER BY id", token)) {
+					const r = validateExportRow(JSON.parse(payload));
+					if (fork && r.table === "log") continue;
+					const cols = EXPORT_COLUMNS[r.table];
+					this.sql.exec(`INSERT OR REPLACE INTO ${r.table}(${cols.join(",")}) VALUES(${cols.map(() => "?").join(",")})`, ...cols.map(c => r.row[c]!));
+				}
+				this.setMeta("drive_id", driveId);
+				this.setMeta("lineage", header.lineage);
+				this.setMeta("head_seq", String(header.seq));
+				this.setMeta("deleted", "0");
+				if (!fork) {
+					this.setMeta("gc_restored", "1");
+					this.setMeta("snapshot_seq", String(header.seq));
+					this.setMeta("snapshot_at", String(Date.now()));
+					this.setMeta("snapshot_next_at", String(Date.now() + SNAPSHOT_INTERVAL_MS));
+				}
+				if (fork) {
+					this.setMeta("created_at", String(header.ts));
+					this.sql.exec("DELETE FROM meta WHERE k IN ('snapshot_seq','snapshot_at','snapshot_next_at')");
+					this.setMeta("depth", String(header.depth + 1));
+					this.setMeta("forkOf", JSON.stringify({driveId: header.driveId, seq: header.seq, ts: header.ts}));
+					this.sql.exec("UPDATE shards_known SET inherited=1");
+					this.sql.exec("DELETE FROM lineage_members");
+					this.sql.exec("INSERT INTO log(seq,path,op,version) VALUES(?,'','resync',NULL)", header.seq);
+				}
+				this.sql.exec("DELETE FROM meta WHERE k='importing'");
+				this.sql.exec("DELETE FROM export_rows WHERE token=?", token);
+				this.setMeta("gc_next_at", String(Date.now() + GC_INTERVAL_MS));
+			});
+			await this.scheduleAlarm(Date.now() + SNAPSHOT_INTERVAL_MS, null);
+		});
+	}
+
+	cancelImport(token: string): void {
+		if (this.getMeta("importing") === token) {
+			this.sql.exec("DELETE FROM meta WHERE k='importing'");
+			this.endExport(token);
+		}
+	}
+
+	snapshot(): Promise<string | null> {
+		if (this.pendingSnapshot) return this.pendingSnapshot;
+		const task = this.writeSnapshot();
+		this.pendingSnapshot = task;
+		return task.finally(() => { this.pendingSnapshot = null; });
+	}
+
+	private async writeSnapshot(): Promise<string | null> {
+		if (!this.info() || this.headSeq() <= Number(this.getMeta("snapshot_seq") ?? 0) ||
+			Date.now() - Number(this.getMeta("snapshot_at") ?? this.getMeta("created_at") ?? 0) < SNAPSHOT_INTERVAL_MS) return null;
+		const result = await this.beginExport();
+		if (!result.ok) return null;
+		const header = result.data;
+		const key = `snapshots/${header.driveId}/${header.seq}.ndjson.gz`;
+		let after = 0;
+		let started = false;
+		const source = new ReadableStream<Uint8Array>({pull: controller => {
+			if (!started) { controller.enqueue(new TextEncoder().encode(JSON.stringify({format: 1, ...header}) + "\n")); started = true; return; }
+			const page = this.exportPage(header.token, after);
+			for (const row of page.rows) controller.enqueue(new TextEncoder().encode(row.payload + "\n"));
+			after = page.rows.at(-1)?.id ?? after;
+			if (page.done) controller.close();
+		}});
+		try {
+			// R2 requires a known length for put(); multipart keeps snapshot memory bounded.
+			const upload = await this.env.SHARDS.createMultipartUpload(key);
+			const reader = source.pipeThrough(new CompressionStream("gzip")).getReader();
+			const parts: R2UploadedPart[] = [];
+			const partSize = 5 * 1024 * 1024;
+			let buffer = new Uint8Array(partSize);
+			let used = 0;
+			try {
+				for (;;) {
+					const {value, done} = await reader.read();
+					if (done) break;
+					let offset = 0;
+					while (offset < value.length) {
+						const n = Math.min(partSize - used, value.length - offset);
+						buffer.set(value.subarray(offset, offset + n), used); used += n; offset += n;
+						if (used === partSize) {
+							parts.push(await upload.uploadPart(parts.length + 1, buffer));
+							buffer = new Uint8Array(partSize); used = 0;
+						}
+					}
+				}
+				if (used) parts.push(await upload.uploadPart(parts.length + 1, buffer.subarray(0, used)));
+				await upload.complete(parts);
+			} catch (e) { await upload.abort(); throw e; }
+			finally { await reader.cancel().catch(() => undefined); }
+			this.setMeta("snapshot_seq", String(header.seq));
+			this.setMeta("snapshot_at", String(Date.now()));
+			this.setMeta("snapshot_next_at", String(Date.now() + SNAPSHOT_INTERVAL_MS));
+			const keys: R2Object[] = [];
+			let cursor: string | undefined;
+			do {
+				const page = await this.env.SHARDS.list({prefix: `snapshots/${header.driveId}/`, cursor});
+				keys.push(...page.objects);
+				cursor = page.truncated ? page.cursor : undefined;
+			} while (cursor);
+			keys.sort((a,b) => b.uploaded.getTime() - a.uploaded.getTime() || Number(b.key.split("/").pop()!.split(".")[0]) - Number(a.key.split("/").pop()!.split(".")[0]));
+			for (const object of keys.slice(7)) await this.env.SHARDS.delete(object.key);
+			return key;
+		} finally { this.endExport(header.token); }
 	}
 
 	// ---------- shards_known ----------
@@ -199,7 +434,7 @@ export class DriveAuthority extends DurableObject<Env> {
 	markShards(shards: [string, number][]): Promise<Result<null>> {
 		return this.withIO(async () => {
 			if (!this.info()) return this.noDrive();
-			const lineage = this.getMeta("drive_id")!;
+			const lineage = this.lineage();
 			const present: [string, number][] = [];
 			for (const [h] of shards) {
 				const object = await this.env.SHARDS.head(`shards/${lineage}/${h}`);
@@ -229,7 +464,7 @@ export class DriveAuthority extends DurableObject<Env> {
 
 	private async commitExclusive(ops: NormOp[], confirmed: [string, number][], actor: string): Promise<Result<CommitResponse>> {
 		if (!this.info()) return this.noDrive();
-		const lineage = this.getMeta("drive_id")!;
+		const lineage = this.lineage();
 		// Worker HEADs can race a sweep before this queued call starts; recheck under the IO lock.
 		const present: [string, number][] = [];
 		for (const [h] of confirmed) {
@@ -264,7 +499,7 @@ export class DriveAuthority extends DurableObject<Env> {
 		const v = this.getVersion(versionId);
 		if (!v || v.path !== key) return fail(404, "no_such_version", { path: key, versionId });
 		if (v.manifest === null) return fail(400, "not_restorable", { message: `version ${versionId} is a ${v.op}, not file content` });
-		const shards = await loadManifest(this.env.SHARDS, this.getMeta("drive_id")!, v.manifest);
+		const shards = await loadManifest(this.env.SHARDS, this.lineage(), v.manifest);
 		const op: NormOp = {
 			op: "restore",
 			key,
@@ -469,7 +704,7 @@ export class DriveAuthority extends DurableObject<Env> {
 			if (!v) return fail(404, "no_such_path");
 		}
 		if (v.manifest === null) return fail(404, "no_such_version", { message: `version ${v.id} has no content (${v.op})` });
-		const shards = (await loadManifest(this.env.SHARDS, this.getMeta("drive_id")!, v.manifest)).map(([h, n]) => ({ h, n }));
+		const shards = (await loadManifest(this.env.SHARDS, this.lineage(), v.manifest)).map(([h, n]) => ({ h, n }));
 		return ok({ path: key, versionId: v.id, size: v.size ?? 0, contentType: v.ctype, mtimeMs: v.mtime, shards });
 	}
 
@@ -535,7 +770,7 @@ export class DriveAuthority extends DurableObject<Env> {
 		const server = pair[1];
 		this.ctx.acceptWebSocket(server);
 		const last = this.lastEv();
-		if (last - after > MAX_BACKLOG_EVENTS) {
+		if (last - after > MAX_BACKLOG_EVENTS || (this.getMeta("forkOf") !== null && after === 0)) {
 			server.send(JSON.stringify({ type: "resync", headSeq: this.headSeq(), lastEv: last }));
 			server.close(1000, "resync");
 			return new Response(null, { status: 101, webSocket: client });
@@ -592,8 +827,13 @@ export class DriveAuthority extends DurableObject<Env> {
 	/** Internal RPC for operators/tests; also called by the shared alarm, never exposed over HTTP. */
 	gcStep() {
 		return this.withIO(async () => {
-			const lineage = this.getMeta("drive_id");
+			const lineage = this.lineage();
 			if (!lineage) return null;
+			// A local mark cannot prove a shared lineage is unreferenced. Keep all bytes until a union sweep exists.
+			if (lineage !== this.getMeta("drive_id") || this.sql.exec("SELECT 1 FROM lineage_members WHERE drive_id<>? AND removed_at IS NULL LIMIT 1", lineage).toArray().length) {
+				this.setMeta("gc_next_at", String(Date.now() + GC_INTERVAL_MS));
+				return { done: true, dryRun: true, scanned: 0, candidates: 0, deleted: 0 };
+			}
 			const result = await new LineageGC(this.sql, this.env.SHARDS, lineage).step(this.headSeq(), Date.now(), this.env.ULS_GC_DELETE !== "1");
 			const next = Date.now() + (result.done ? GC_INTERVAL_MS : 1000);
 			this.setMeta("gc_next_at", String(next));
@@ -604,8 +844,10 @@ export class DriveAuthority extends DurableObject<Env> {
 
 	async alarm(): Promise<void> {
 		const now = Date.now();
+		await this.snapshot();
+		if (this.snapshotDueAt() <= now) this.setMeta("snapshot_next_at", String(now + SNAPSHOT_INTERVAL_MS));
 		if (Number(this.getMeta("gc_next_at") ?? "Infinity") <= now) await this.gcStep();
-		const gcNext = Number(this.getMeta("gc_next_at") ?? "Infinity");
+		const gcNext = Math.min(Number(this.getMeta("gc_next_at") ?? "Infinity"), this.snapshotDueAt());
 		let nextAt = gcNext;
 		let open = 0;
 		let replaying = false;

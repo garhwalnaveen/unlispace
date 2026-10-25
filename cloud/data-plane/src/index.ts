@@ -2,6 +2,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { getShard, signBlocks, serveBlock } from "./blocks";
 import { readStreamCommit } from "./stream-commit";
 import { DriveAuthority, EXP_HEADER } from "./drive";
+import type { ExportHeader } from "./exports";
 import { ACCESS_RANK, verifyDriveToken, type Access } from "./jwt";
 import { PLACEMENTS, type Fail, type Placement } from "./types";
 import {
@@ -73,7 +74,7 @@ function requiredAccess(method: string, rest: string): Access | null {
 	return null;
 }
 
-const shardKey = (driveId: string, hash: string): string => `shards/${driveId}/${hash}`; // lineage = driveId (M0)
+const shardKey = (driveId: string, hash: string): string => `shards/${driveId}/${hash}`; // Roots retain their existing namespace.
 
 type DriveStub = ReturnType<typeof stubFor>;
 function stubFor(env: Env, driveId: string, hint?: Placement | null) {
@@ -137,7 +138,7 @@ async function putShard(request: Request, env: Env, stub: DriveStub, driveId: st
 	const declared = Number(lenHeader);
 	if (!Number.isInteger(declared) || declared < 0) return err(400, "bad_request", "bad Content-Length");
 
-	const key = shardKey(driveId, hash);
+	const key = shardKey(d.data.lineage, hash);
 	// Count bytes so a lying Content-Length (or chunked body) can't exceed the cap; the cap is
 	// enforced by aborting the stream, which makes the R2 put reject.
 	let seen = 0;
@@ -262,7 +263,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 		const unique = [...new Set(hashes as string[])];
 		const unknown = await stub.filterUnknown(unique);
 		if (!unknown.ok) return failResponse(unknown);
-		const present = await headAll(env, driveId, unknown.data);
+		const info = await stub.describe();
+		if (!info.ok) return failResponse(info);
+		const present = await headAll(env, info.data.lineage, unknown.data);
 		if (present.length) await stub.markShards(present);
 		const have = new Set(present.map(([h]) => h));
 		return json({ missing: unknown.data.filter((h) => !have.has(h)) });
@@ -274,7 +277,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 		if (method === "PUT") return putShard(request, env, stub, driveId, hash);
 		const d = await stub.describe();
 		if (!d.ok) return failResponse(d);
-		return getShard(request, env, driveId, hash);
+		return getShard(request, env, d.data.lineage, hash);
 	}
 
 	// commit / restore
@@ -290,7 +293,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 		if (wanted.size) {
 			const unknown = await stub.filterUnknown([...wanted]);
 			if (!unknown.ok) return failResponse(unknown);
-			confirmed = await headAll(env, driveId, unknown.data);
+			const info = await stub.describe();
+			if (!info.ok) return failResponse(info);
+			confirmed = await headAll(env, info.data.lineage, unknown.data);
 		}
 		const r = await stub.commit(ops, confirmed, actor);
 		return r.ok ? json(r.data) : failResponse(r);
@@ -316,7 +321,9 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 			const r = await stub.manifest(p.key, url.searchParams.get("versionId"));
 			if (!r.ok) return failResponse(r);
 			if (!env.ULS_BLOCK_KEY) return err(503, "block_signing_unavailable");
-			return json({ ...r.data, ...await signBlocks(url.origin, driveId, r.data.shards, env.ULS_BLOCK_KEY) });
+			const info = await stub.describe();
+			if (!info.ok) return failResponse(info);
+			return json({ ...r.data, ...await signBlocks(url.origin, driveId, r.data.shards, env.ULS_BLOCK_KEY, info.data.lineage) });
 		}
 		const limit = intParam(url, "limit", 1000, 1, 1000);
 		if (limit === null) return err(400, "bad_request", "limit must be a positive integer");
@@ -361,6 +368,10 @@ export class DriveExistsError extends Error {
 	}
 }
 
+function adminError(code: string, status: number): Error & {code: string; status: number} {
+	return Object.assign(new Error(code), {code, status});
+}
+
 export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
 	async createDrive(driveId: string, placement?: Placement): Promise<{ driveId: string; placement: string; createdAt: number }> {
 		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
@@ -375,28 +386,130 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
 		return { driveId, placement: r.data.placement ?? "", createdAt: r.data.createdAt };
 	}
 
-	async deleteDrive(driveId: string): Promise<{ ok: true }> {
+	async forkDrive(sourceId: string, newId: string) {
+		const requested = Date.now();
+		if (typeof sourceId !== "string" || typeof newId !== "string" || !DRIVE_ID_RE.test(sourceId) || !DRIVE_ID_RE.test(newId)) throw new TypeError("invalid driveId");
+		const source = stubFor(this.env, sourceId);
+		const info = await source.describe();
+		if (!info.ok) throw adminError("no_such_drive", 404);
+		if (info.data.depth >= 8) throw adminError("fork_depth_exceeded", 400);
+		const child = stubFor(this.env, newId, info.data.placement);
+		const token = crypto.randomUUID();
+		const reserved = await child.reserveImport(token);
+		if (!reserved.ok) throw new DriveExistsError(newId);
+		let header: ExportHeader | undefined;
+		try {
+			// Register before exporting: a sweep can finish first, but cannot start a local sweep afterwards.
+			if (!await stubFor(this.env, info.data.lineage).member(newId, false, requested + 60_000)) throw adminError("slow_down", 503);
+			const result = await source.beginExport(requested);
+			if (!result.ok) throw adminError(String((result as unknown as Fail).body.error), (result as unknown as Fail).status);
+			header = result.data;
+			if (header.depth >= 8) throw adminError("fork_depth_exceeded", 400);
+			let after = 0;
+			for (;;) {
+				const page = await source.exportPage(header.token, after);
+				await child.importPage(token, page.rows);
+				after = page.rows.at(-1)?.id ?? after;
+				if (page.done) break;
+			}
+			await child.finishImport(token, newId, header, true);
+			return {driveId: newId, sourceId, lineage: header.lineage, forkSeq: header.seq, forkPoint: header.ts, placement: header.placement ?? ""};
+		} catch (e) {
+			await child.cancelImport(token);
+			// Keep failed reservations in the registry conservatively; they must never enable a stale sweep.
+			throw e;
+		} finally { if (header) await source.endExport(header.token); }
+	}
+
+	async restoreSnapshot(driveId: string, key: string): Promise<{ok: true}> {
+		if (!DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
+		if (!key.startsWith(`snapshots/${driveId}/`) || !/^snapshots\/[^/]+\/\d+\.ndjson\.gz$/.test(key)) throw new TypeError("invalid snapshot key");
+		const stub = stubFor(this.env, driveId);
+		const token = crypto.randomUUID();
+		const reserved = await stub.reserveImport(token);
+		if (!reserved.ok) throw new DriveExistsError(driveId);
+		try {
+			const object = await this.env.SHARDS.get(key);
+			if (!object) throw new Error("snapshot missing");
+			const reader = object.body.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TextDecoderStream()).getReader();
+			let pending = "";
+			let header: ExportHeader | undefined;
+			let rows: {id: number; payload: string}[] = [];
+			let id = 0;
+			let pageBytes = 0;
+			try {
+				for (;;) {
+					const {value, done} = await reader.read();
+					pending += value ?? "";
+					let end: number;
+					while ((end = pending.indexOf("\n")) >= 0) {
+						const line = pending.slice(0, end); pending = pending.slice(end + 1);
+						if (line.length > 1024 * 1024) throw new Error("snapshot row too large");
+						if (!header) {
+							const parsed = JSON.parse(line) as ExportHeader & {format: number};
+							if (parsed.format !== 1 || parsed.driveId !== driveId || !DRIVE_ID_RE.test(parsed.lineage) ||
+								!Number.isSafeInteger(parsed.seq) || parsed.seq < 0 || !Number.isInteger(parsed.depth) || parsed.depth < 0 || parsed.depth > 8) throw new Error("invalid snapshot header");
+							header = parsed;
+						} else {
+							if (rows.length && pageBytes + line.length > 512 * 1024) {
+								await stub.importPage(token, rows); rows = []; pageBytes = 0;
+							}
+							rows.push({id: ++id, payload: line}); pageBytes += line.length;
+						}
+						if (rows.length >= 100) { await stub.importPage(token, rows); rows = []; pageBytes = 0; }
+					}
+					if (pending.length > 1024 * 1024) throw new Error("snapshot row too large");
+					if (done) break;
+				}
+			} finally { await reader.cancel().catch(() => undefined); }
+			if (!header || pending) throw new Error("truncated snapshot");
+			if (rows.length) await stub.importPage(token, rows);
+			await stubFor(this.env, header.lineage).member(driveId);
+			await stub.finishImport(token, driveId, header, false);
+			return {ok: true};
+		} catch (e) { await stub.cancelImport(token); throw e; }
+	}
+
+	async deleteDrive(driveId: string, opts?: {hard?: boolean}): Promise<{ ok: true }> {
 		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
-		await stubFor(this.env, driveId).delete();
+		const stub = stubFor(this.env, driveId);
+		const info = await stub.lineageInfo();
+		await stub.delete(opts?.hard === true);
+		if (opts?.hard && info) await stubFor(this.env, info.lineage).member(driveId, true);
 		return { ok: true };
 	}
 
-	async driveStats(driveId: string): Promise<{ headSeq: number; fileCount: number; bytes: number } | null> {
+	async driveStats(driveId: string) {
 		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) return null;
-		const r = await stubFor(this.env, driveId).describe();
+		const r = await stubFor(this.env, driveId).stats();
 		if (!r.ok) return null;
-		return { headSeq: r.data.headSeq, fileCount: r.data.fileCount, bytes: r.data.bytes };
+		const {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf} = r.data;
+		return {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf};
 	}
 }
 
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
-		try {
-			return await handle(request, env, ctx);
-		} catch (e) {
+		const path = new URL(request.url).pathname;
+		const cors = path === "/_blocks" || path === "/v0" || path.startsWith("/v0/") || path.startsWith("/_blocks/");
+		let response: Response;
+		try { response = cors && request.method === "OPTIONS" ? new Response(null, {status: 204}) : await handle(request, env, ctx); }
+		catch (e) {
 			console.error("unhandled", e);
-			return err(500, "internal", e instanceof Error ? e.message : "unknown");
+			response = err(500, "internal", e instanceof Error ? e.message : "unknown");
 		}
+		if (cors) {
+			// Preserve the WebSocket response while adding headers to its mutable wrapper.
+			response = new Response(response.body, response);
+			response.headers.append("Vary", "Origin");
+			const origin = request.headers.get("Origin");
+			if (origin && (env.ULS_WEB_ORIGINS ?? "").split(",").map(s => s.trim()).includes(origin)) {
+				response.headers.set("Access-Control-Allow-Origin", origin);
+				response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT");
+				response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+			}
+		}
+		return response;
 	},
 } satisfies ExportedHandler<Env>;
 

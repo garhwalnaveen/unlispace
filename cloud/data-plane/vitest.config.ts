@@ -16,6 +16,7 @@ export default defineConfig({
 		// via `rejects`) as an uncaught exception as well. Ignore exactly those; every other unhandled error still fails the run.
 		onUnhandledError(error) {
 			const e = error as { name?: string; message?: string; remote?: boolean };
+			if (e.remote && /^(no_such_drive|fork_depth_exceeded|slow_down|invalid snapshot row)$/.test(e.message ?? "")) return false;
 			if (e.remote && /^(DriveExistsError|TypeError)$/.test(e.name ?? "") && /drive_exists|invalid driveId|invalid placement/.test(e.message ?? "")) return false;
 		},
 	},
