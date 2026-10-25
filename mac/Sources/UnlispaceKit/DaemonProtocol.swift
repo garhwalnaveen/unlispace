@@ -74,7 +74,7 @@ public struct TransferInfo: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-/// Proposed wire event; see mac/NEEDS.md. `copy` is the preserved local edit.
+/// Daemon conflict event. `copy` is the preserved local edit.
 public struct ConflictEvent: Codable, Sendable, Equatable {
     public var driveId: String
     public var path: String
@@ -114,6 +114,7 @@ public enum DaemonEvent: Sendable, Equatable {
     case change(ChangeEvent)
     case state(StateEvent)
     case conflict(ConflictEvent)
+    case pin(OfflinePin)
     case unknown(name: String)
 }
 
@@ -180,6 +181,7 @@ public enum DaemonCodec {
             case "transfer": return .event(.transfer(try data.decode(TransferInfo.self)))
             case "change": return .event(.change(try data.decode(ChangeEvent.self)))
             case "state": return .event(.state(try data.decode(StateEvent.self)))
+            case "pin": return .event(.pin(try data.decode(OfflinePin.self)))
             case "conflict": return .event(.conflict(try data.decode(ConflictEvent.self)))
             default: return .event(.unknown(name: name))
             }

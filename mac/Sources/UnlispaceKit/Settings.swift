@@ -12,7 +12,8 @@ public struct AppSettings: Sendable {
         set { UserDefaults.standard.set(newValue, forKey: endpointKey) }
     }
 
-    public static let defaultAPIEndpoint = "https://api.unlispace.com"
+    public static let defaultAPIEndpoint = Bundle.main.object(forInfoDictionaryKey: "UnlispaceAPIEndpoint") as? String
+        ?? "https://api.unlispace.com"
 
     /// Control-plane API base used for browser sign-in. Developer override lives in Advanced.
     public static let apiEndpointKey = "apiEndpointOverride"

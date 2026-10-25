@@ -41,6 +41,10 @@ Events have no `id`. Clients must ignore unknown event names. Unknown fields are
 | `drive.mount` | `{"driveId": str}` | `{}` (returns once mounted or errors) |
 | `drive.unmount` | `{"driveId": str}` | `{}` |
 | `transfers` | none | `{"transfers": [Transfer]}` (active and queued) |
+| `uploads` | none | `{"pending": [{"driveId", "path", "bytes"}], "journalBytes", "journalCapBytes"}` |
+| `mounts.list` | none | `{"mounts": [{"driveId", "mountpoint", "readOnly", "adapter"}]}` |
+| `pins.list` | `{"driveId"?: str}` | `{"pins": [{"driveId", "path", "bytes", "cachedBytes"}]}` |
+| `drive.pin` | `{"driveId": str, "path": str, "pinned": bool}` | `{}` |
 | `config.set` | `{"endpoint"?: str, "token"?: str, "cacheCapBytes"?: int}` | `{}` |
 | `auth.set` | `{"apiEndpoint": str, "accessToken": str, "refreshToken": str}` | `{"user": {"id": str, "email": str}}` |
 | `auth.status` | none | `{"signedIn": bool, "user"?: {"id": str, "email": str}, "apiEndpoint"?: str}` |
@@ -72,6 +76,7 @@ Error codes: `no_such_drive`, `already_mounted`, `not_mounted`, `unauthorized`, 
 |---|---|
 | `transfer` | a `Transfer` (sent on start, throttled progress, and completion; `done`/`failed` ends it) |
 | `change` | `{"driveId": str, "seq": int, "paths": [str]}` remote change from the drive WebSocket |
+| `pin` | `{"driveId": str, "path": str, "cachedBytes": int, "bytes": int}` prefetch progress |
 | `conflict` | `{"driveId": str, "path": str, "copy": str}` |
 | `state` | `{"state": State, "message"?: str}` |
 
@@ -86,3 +91,6 @@ The server sends a `state` event immediately after a client connects.
 <- {"id":2,"result":{}}
 <- {"event":"state","data":{"state":"syncing"}}
 ```
+
+M3 methods are optional for older engines. Unknown-method errors hide that feature; unknown
+fields and future mount adapter strings are accepted. Other failures remain visible.

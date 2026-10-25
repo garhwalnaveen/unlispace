@@ -8,6 +8,10 @@ final class AppModel {
     var status: AppStatus = .signedOut
     var drives: [DriveInfo] = []
     var transfers: [TransferInfo] = []
+    var uploads: UploadsSnapshot?
+    var pins: [OfflinePin]?
+    var mounts: [DaemonMount]?
+    let updates = UpdateController()
     var usingMock = false
     var engineInstall: EngineInstallState = .notInstalled
     var lastError: String?
@@ -42,6 +46,7 @@ final class AppModel {
 
     func start() {
         guard pollTask == nil else { return }
+        updates.start()
         // M0 left a refresh token in the app Keychain; M1 apps never keep one.
         try? keychain.delete(account: Keychain.Account.legacyRefreshToken)
         pollTask = Task { [weak self] in
@@ -87,9 +92,11 @@ final class AppModel {
             if !usingMock, status != .signedOut {
                 drives = try await client.listDrives()
                 transfers = try await client.transfers()
+                try await refreshDistribution(using: client)
             } else {
                 drives = []
                 transfers = []
+                clearDistribution()
             }
             lastError = nil
         } catch {
@@ -101,6 +108,7 @@ final class AppModel {
                 usingMock = true
                 drives = []
                 transfers = []
+                clearDistribution()
             }
             status = .error
             lastError = LogFormat.describe(error)
@@ -127,7 +135,7 @@ final class AppModel {
         case .state(let s):
             status = AppStatus(engine: s.state)
             stateMessage = s.message
-            if s.state == .signedOut { account = nil; drives = []; transfers = []; lastConflict = nil }
+            if s.state == .signedOut { account = nil; drives = []; transfers = []; lastConflict = nil; clearDistribution() }
         case .transfer(let t):
             transfers.removeAll { $0.id == t.id }
             if !t.isFinished { transfers.append(t) }
@@ -141,8 +149,32 @@ final class AppModel {
                 do { try await conflictNotifications.post(conflict) }
                 catch { notificationMessage = "Could not show conflict notification: \(LogFormat.describe(error))" }
             }
+        case .pin(let pin):
+            if pins != nil {
+                pins?.removeAll { $0.id == pin.id }
+                pins?.append(pin)
+            }
         case .unknown: break
         }
+    }
+
+    func clearDistribution() { uploads = nil; pins = nil; mounts = nil }
+
+    func refreshDistribution(using client: any DaemonClient) async throws {
+        uploads = try await client.uploads()
+        pins = try await client.listPins(driveId: nil)
+        mounts = try await client.listMounts()
+        if let mounts {
+            for i in drives.indices {
+                let mount = mounts.first { $0.driveId == drives[i].driveId }
+                drives[i].mountPath = mount?.mountpoint
+                drives[i].mountState = mount == nil ? .unmounted : .mounted
+            }
+        }
+    }
+
+    func setPin(driveId: String, path: String, pinned: Bool) {
+        run { try await $0.pin(driveId: driveId, path: path, pinned: pinned) }
     }
 
     // MARK: sign in / out

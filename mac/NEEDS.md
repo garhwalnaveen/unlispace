@@ -9,20 +9,9 @@ The mac integration target currently uses a fresh HOME under `/tmp` and the daem
 `~/Library/Application Support/Unlispace/ulsd.sock` convention. No mounts, browser sign-in,
 Keychain session or remote service is used by this test.
 
-## Daemon/VFS agents: proposed conflict event
+## Conflict event status
 
-Propose adding this row to `mac/DAEMON-PROTOCOL.md` after agreement:
-
-| event | data |
-|---|---|
-| `conflict` | `{"driveId": str, "path": str, "copy": str}` |
-
-Example: `{"event":"conflict","data":{"driveId":"d-example","path":"/notes.txt","copy":"/notes (conflict, Mac, timestamp).txt"}}`.
-`path` is the original path; `copy` is the preserved local edit, matching
-`uls_vfs::VfsEvent::Conflict { path, copy }`. Emit after the conflict copy is successfully
-preserved, adding the drive id from the owning VFS. The app already decodes this proposal,
-shows the original/copy in the menu, and sends a UserNotifications alert if permission was
-granted. The existing protocol remains unchanged until this proposal is accepted.
+Resolved: the daemon emits `conflict` as of `30fb4c3`; the app decodes and displays it.
 
 ## Coordinator: distribution and manual review
 
@@ -35,3 +24,23 @@ bundle. This task forbids launching the app or registering login items.
 Spec interpretation: the current M1 Unix socket protocol and NFS prototype take precedence
 over product-design §5.1's future XPC transport. Network Volumes text describes macOS app
 access permission without claiming that SMB is wired into this M1 daemon.
+
+
+# 19-mac-distribution integration needs
+
+- Coordinator/release owner: supply Developer ID identity, notarytool profile, HTTPS feed URL,
+  public EdDSA key and private EdDSA key file via the documented environment variables.
+  No credentials were provisioned and nothing was published by this task.
+- Daemon agent: keep `status.pendingOps`, `uploads`, `mounts.list`, `pins.list`, `drive.pin`,
+  and `pin` events aligned with M3 §5.1. Unknown methods hide only the unavailable feature.
+  Update checks fail closed when the socket/status is unavailable. The updater unmounts all
+  mounted drives and rechecks pending work before handing control back to Sparkle.
+- Coordinator: manually validate actual update download/install/relaunch and the uploads/pins
+  UI against the new daemon. A fresh-status check followed by installation is not an atomic
+  daemon quiescence protocol; future writers outside mounted drives need a daemon update
+  barrier if they can enqueue writes after the final check.
+
+- Coordinator: rerun `bash mac/scripts/dmg.sh` outside this execution sandbox. Here the
+  diagnostic was `[DIHelperProxy threadSetupServer] Cannot start hdiejectd because app is
+  sandboxed`, followed by `hdiutil: create failed - Device not configured`. No DMG mount
+  occurred; read-only mount/content/detach verification remains blocked on host access.

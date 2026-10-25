@@ -1,3 +1,5 @@
+import Foundation
+
 import Testing
 import UnlispaceKit
 @testable import Unlispace
@@ -36,5 +38,63 @@ import UnlispaceKit
         #expect(!model.isSignedIn)
         #expect(model.drives.isEmpty)
         #expect(model.transfers.isEmpty)
+    }
+}
+
+@Suite @MainActor struct DistributionModelTests {
+    @Test func pinEventsUpdateOnlyAnAvailableFeatureAndSignOutClearsIt() {
+        let model = AppModel()
+        let pin = OfflinePin(driveId: "d", path: "/", bytes: 100, cachedBytes: 20)
+        model.apply(.pin(pin))
+        #expect(model.pins == nil)
+        model.pins = []
+        model.apply(.pin(pin))
+        var updated = pin
+        updated.cachedBytes = 80
+        model.apply(.pin(updated))
+        #expect(model.pins == [updated])
+        model.apply(.state(StateEvent(state: .signedOut)))
+        #expect(model.pins == nil)
+        #expect(model.uploads == nil)
+        #expect(model.mounts == nil)
+    }
+
+    @Test func refreshUsesM3Mountpoints() async throws {
+        let model = AppModel()
+        let mock = MockDaemonClient()
+        model.drives = try await mock.listDrives()
+        try await mock.mount(driveId: "demo")
+        try await model.refreshDistribution(using: mock)
+        #expect(model.drives.first?.mountPath == "/Volumes/Demo Drive")
+        #expect(model.drives.first?.mountState == .mounted)
+        #expect(model.uploads != nil)
+        #expect(model.pins == [])
+    }
+}
+
+@Suite @MainActor struct UpdateControllerTests {
+    @Test func requiresBothFeedKeys() {
+        #expect(!UpdateController(info: [:]).isEnabled)
+        #expect(!UpdateController(info: ["SUFeedURL": "https://example.invalid/feed"]).isEnabled)
+        #expect(UpdateController(info: ["SUFeedURL": "https://example.invalid/feed", "SUPublicEDKey": "test"]).isEnabled)
+    }
+
+    @Test func pendingWritesPostponeAndIdleUnmountsCleanly() async throws {
+        let mock = MockDaemonClient()
+        let updater = UpdateController(info: [:], makeClient: { mock })
+        try await mock.mount(driveId: "demo")
+        await mock.setUploads(UploadsSnapshot(pending: [PendingUpload(driveId: "demo", path: "/x", bytes: 1)], journalBytes: 1, journalCapBytes: 100))
+        #expect(await updater.prepareForInstallation() == false)
+        #expect(try await mock.listMounts()?.count == 1)
+        await mock.setUploads(UploadsSnapshot(pending: [], journalBytes: 0, journalCapBytes: 100))
+        #expect(await updater.prepareForInstallation())
+        #expect(try await mock.listMounts()?.isEmpty == true)
+    }
+
+    @Test func unreachableDaemonPostpones() async {
+        let updater = UpdateController(info: [:], makeClient: {
+            UnixSocketDaemonClient(socketPath: "/tmp/unlispace-no-socket-\(UUID().uuidString)")
+        })
+        #expect(await updater.prepareForInstallation() == false)
     }
 }

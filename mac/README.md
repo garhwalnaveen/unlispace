@@ -41,8 +41,9 @@ Menu or Settings -> "Sign in to Unlispace". Flow (`docs/design/m1-contract.md` 5
    only long-term holder of the refresh token. The app keeps no copy once the daemon acks, and
    deletes the old M0 `refresh-token` Keychain item on launch.
 
-API base defaults to `https://api.unlispace.com`; override under Settings -> Advanced -> Developer
-(e.g. `http://127.0.0.1:8788`).
+API base defaults to `https://api.unlispace.com`; set `ULS_WORKERS_DOMAIN` when running
+`scripts/bundle.sh` to embed the production API URL, or set `ULS_API_URL` to embed a specific
+base. Override under Settings -> Advanced -> Developer (e.g. `http://127.0.0.1:8788`).
 
 **Daemon absent fallback.** If the daemon is unreachable when sign-in finishes (no socket, the
 mock is active, connection lost, or it answers `offline`/`internal`), the session is stored as
@@ -76,10 +77,9 @@ updated by `transfer` events. Unknown totals show indeterminate progress. Finish
 leave the list; failures show an error in the menu. Native semantic colors follow light/dark
 appearance; controls and progress bars have VoiceOver labels and values.
 
-The proposed `conflict` event is rendered in the menu even when notifications are denied.
+The daemon `conflict` event is rendered in the menu even when notifications are denied.
 Setup and Settings offer an explicit “Enable conflict notifications…” action. Authorized
-alerts use UserNotifications, including while the app is foregrounded. See `NEEDS.md` for
-the daemon event proposal; the real daemon does not yet emit it.
+alerts use UserNotifications, including while the app is foregrounded. The real daemon emits it (commit `30fb4c3`).
 
 Logging: all error text goes through `LogFormat` (`scrub`/`describe`/`url`); secret-bearing types
 redact in `description`. Tokens, codes and verifiers are never logged.
@@ -113,3 +113,31 @@ Protocol: see `DAEMON-PROTOCOL.md`.
 - `uls://open` Finder opening is not exercised in tests (the parser, validator and path resolver are).
 - Finder Sync extension is not built (needs Xcode); see `FinderSync/README.md`.
 - Ad-hoc signing only; no hardened runtime, notarization, or Sparkle.
+
+
+## Distribution (Command Line Tools only)
+
+`bash mac/scripts/release.sh` tests, bundles, signs inside-out, creates a compressed read-only
+DMG with an Applications shortcut, and verifies the mounted copy before detaching. It never
+launches the app. Default signing is ad-hoc with hardened runtime; no credentials are needed.
+`ULSD_BIN` optionally embeds an existing daemon binary. `ULS_VERSION` (default `0.2.0`) and
+`ULS_BUILD` (default `1`) set bundle versions and the versioned DMG name.
+
+Set `ULS_SIGN_IDENTITY` to a Developer ID Application identity for real signing, and
+`ULS_NOTARY_PROFILE` to an existing notarytool profile for submission, waiting, and stapling.
+Without a profile, notarization explicitly skips. Provision credentials separately.
+Set both `ULS_SU_FEED_URL` (HTTPS) and `ULS_SU_PUBLIC_ED_KEY` at bundle time to enable Sparkle;
+otherwise both plist keys are omitted and Check for Updates is hidden. Sparkle is pinned to
+2.6.4 and copied from its resolved XCFramework, with an executable-relative framework rpath.
+Set `ULS_EDDSA_KEY_FILE` to an existing private EdDSA key file to generate `build/feed/appcast.xml`
+using the resolved Sparkle `generate_appcast`. Without a key, appcast generation skips. Publish
+the signed feed and DMG separately. Never commit private keys.
+
+Install/relaunch waits for fresh `status.pendingOps == 0` and an empty `uploads.pending`,
+then cleanly unmounts drives and checks again. Failed/disconnected checks retry every 30 seconds.
+An older daemon's unknown-method response hides uploads, pins or mounts independently;
+other errors remain errors. Transfers shows the upload queue and journal usage. Each drive's
+Keep offline menu pins the whole drive and lists paths with live `pin` progress and unpin actions.
+
+The default test gate skips `KeychainTests` and `HandoffTests` to avoid Keychain access.
+Run with `ULS_TEST_KEYCHAIN=1` only when explicitly authorized to exercise Keychain storage.

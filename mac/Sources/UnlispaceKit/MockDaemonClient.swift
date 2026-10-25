@@ -5,6 +5,8 @@ public actor MockDaemonClient: DaemonClient {
     private var drives: [DriveInfo]
     private var state: EngineState
     private var activeTransfers: [TransferInfo] = []
+    private var offlinePins: [OfflinePin] = []
+    private var uploadSnapshot = UploadsSnapshot(pending: [], journalBytes: 0, journalCapBytes: 10 * 1024 * 1024 * 1024)
     private var user: AuthUser?
     private var apiEndpoint: String?
     private let demoEmail: String
@@ -29,7 +31,7 @@ public actor MockDaemonClient: DaemonClient {
 
     public func status() async throws -> DaemonStatus {
         let state = user == nil && self.state == .idle ? EngineState.signedOut : self.state
-        return DaemonStatus(version: "mock", state: state, message: "Mock engine", pendingOps: activeTransfers.count)
+        return DaemonStatus(version: "mock", state: state, message: "Mock engine", pendingOps: activeTransfers.count + uploadSnapshot.pending.count)
     }
 
     public func listDrives() async throws -> [DriveInfo] { drives }
@@ -52,6 +54,26 @@ public actor MockDaemonClient: DaemonClient {
     }
 
     public func transfers() async throws -> [TransferInfo] { activeTransfers }
+
+    public func uploads() async throws -> UploadsSnapshot? { uploadSnapshot }
+    public func setUploads(_ snapshot: UploadsSnapshot) { uploadSnapshot = snapshot }
+    public func listPins(driveId: String? = nil) async throws -> [OfflinePin]? {
+        offlinePins.filter { driveId == nil || $0.driveId == driveId }
+    }
+    public func listMounts() async throws -> [DaemonMount]? {
+        drives.compactMap { d in
+            d.mountPath.map { DaemonMount(driveId: d.driveId, mountpoint: $0, readOnly: false, adapter: "smb") }
+        }
+    }
+    public func pin(driveId: String, path: String, pinned: Bool) async throws {
+        offlinePins.removeAll { $0.driveId == driveId && $0.path == path }
+        if pinned { pushPin(OfflinePin(driveId: driveId, path: path, bytes: 0, cachedBytes: 0)) }
+    }
+    public func pushPin(_ pin: OfflinePin) {
+        offlinePins.removeAll { $0.id == pin.id }
+        offlinePins.append(pin)
+        emit(.pin(pin))
+    }
 
     public private(set) var lastConfig: DaemonConfig?
     public func setConfig(_ config: DaemonConfig) async throws { lastConfig = config }

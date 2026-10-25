@@ -8,11 +8,15 @@ let package = Package(
         .executable(name: "Unlispace", targets: ["Unlispace"]),
         .library(name: "UnlispaceKit", targets: ["UnlispaceKit"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.6.4"),
+    ],
     targets: [
         // All logic lives in the library so it is unit-testable.
         .target(name: "UnlispaceKit"),
         // Thin SwiftUI/AppKit shell.
-        .executableTarget(name: "Unlispace", dependencies: ["UnlispaceKit"]),
+        .executableTarget(name: "Unlispace", dependencies: ["UnlispaceKit", .product(name: "Sparkle", package: "Sparkle")],
+                          linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "UnlispaceKitTests", dependencies: ["UnlispaceKit"]),
         .testTarget(name: "DaemonIntegrationTests", dependencies: ["UnlispaceKit"]),
         .testTarget(name: "UnlispaceAppTests", dependencies: ["Unlispace"]),

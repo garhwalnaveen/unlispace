@@ -173,6 +173,32 @@ public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
     public func transfers() async throws -> [TransferInfo] {
         try await call("transfers", params: Nothing?.none).decode(TransfersResult.self).transfers
     }
+    private struct PinsResult: Decodable { var pins: [OfflinePin] }
+    private struct MountsResult: Decodable { var mounts: [DaemonMount] }
+    private struct PinParams: Encodable { var driveId: String; var path: String; var pinned: Bool }
+    private struct PinsParams: Encodable { var driveId: String? }
+
+    // M3 methods are optional on older engines; all other failures remain visible.
+    private func optionalCall<P: Encodable>(_ method: String, params: P?) async throws -> JSONValue? {
+        do { return try await call(method, params: params) }
+        catch DaemonClientError.remote(let error) {
+            if error.isUnknownMethod { return nil }
+            throw DaemonClientError.remote(error)
+        }
+    }
+    public func uploads() async throws -> UploadsSnapshot? {
+        try await optionalCall("uploads", params: Nothing?.none)?.decode(UploadsSnapshot.self)
+    }
+    public func listPins(driveId: String? = nil) async throws -> [OfflinePin]? {
+        try await optionalCall("pins.list", params: PinsParams(driveId: driveId))?.decode(PinsResult.self).pins
+    }
+    public func listMounts() async throws -> [DaemonMount]? {
+        try await optionalCall("mounts.list", params: Nothing?.none)?.decode(MountsResult.self).mounts
+    }
+    public func pin(driveId: String, path: String, pinned: Bool) async throws {
+        _ = try await call("drive.pin", params: PinParams(driveId: driveId, path: path, pinned: pinned))
+    }
+
     public func setConfig(_ config: DaemonConfig) async throws {
         _ = try await call("config.set", params: config)
     }

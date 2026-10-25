@@ -26,7 +26,7 @@ struct MenuContent: View {
                 Button(model.transferLine ?? "Transfers") { showingTransfers.toggle() }
                     .accessibilityLabel("Show transfers")
                     .accessibilityValue(model.transferLine ?? "No transfers in progress")
-                    .popover(isPresented: $showingTransfers) { TransfersView(transfers: model.transfers) }
+                    .popover(isPresented: $showingTransfers) { TransfersView(transfers: model.transfers, uploads: model.uploads) }
                 if let conflict = model.lastConflict {
                     Label("Conflicting edit: \(conflict.path). Saved as \(conflict.copy).", systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -42,6 +42,21 @@ struct MenuContent: View {
                 }
                 ForEach(model.drives) { d in
                     Menu("\(d.name) — \(d.mountState.rawValue)") {
+                        if let mounts = model.mounts,
+                           let mount = mounts.first(where: { $0.driveId == d.driveId }) {
+                            Text("\(mount.mountpoint) (\(mount.adapter)\(mount.readOnly ? ", read only" : ""))")
+                        }
+                        if let pins = model.pins {
+                            Menu("Keep offline") {
+                                Button("Keep entire drive offline") { model.setPin(driveId: d.driveId, path: "/", pinned: true) }
+                                ForEach(pins.filter { $0.driveId == d.driveId }) { pin in
+                                    Text("\(pin.path) — \(Int(pin.progress * 100))% cached")
+                                    Button("Stop keeping \(pin.path) offline") {
+                                        model.setPin(driveId: d.driveId, path: pin.path, pinned: false)
+                                    }
+                                }
+                            }
+                        }
                         if d.mountState == .mounted {
                             Button("Open in Finder") { model.openInFinder(d) }
                             Button("Unmount") { model.unmount(d) }
@@ -65,6 +80,9 @@ struct MenuContent: View {
             .keyboardShortcut(",")
             if showsSignedInUI {
                 Button("Sign out") { model.signOut() }
+            }
+            if model.updates.isEnabled {
+                Button("Check for Updates…") { model.updates.checkForUpdates() }
             }
             Button("Quit Unlispace") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
