@@ -93,6 +93,16 @@ pub struct ChangeEvent {
     pub paths: Vec<String>,
 }
 
+/// A concurrent remote edit won; the local edit was preserved at `copy`. Both paths have a
+/// leading slash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictEvent {
+    pub drive_id: String,
+    pub path: String,
+    pub copy: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateEvent {
     pub state: State,
@@ -105,6 +115,7 @@ pub struct StateEvent {
 pub enum Event {
     Transfer(Transfer),
     Change(ChangeEvent),
+    Conflict(ConflictEvent),
     State(StateEvent),
 }
 

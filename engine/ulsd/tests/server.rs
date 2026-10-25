@@ -334,7 +334,8 @@ async fn graceful_shutdown_unmounts_but_remembers_and_restart_restores() {
     e2.start().await;
     // Restoring reopens the journal; allow for a loaded machine (parallel test binaries).
     for _ in 0..500 {
-        if !mounted.lock().unwrap().is_empty() {
+        let rotated = uls_auth::SecretStore::get(&*store, "u_1").unwrap().as_deref() == Some("rt_2");
+        if !mounted.lock().unwrap().is_empty() && rotated {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;

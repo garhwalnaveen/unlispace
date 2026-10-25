@@ -72,6 +72,7 @@ Error codes: `no_such_drive`, `already_mounted`, `not_mounted`, `unauthorized`, 
 |---|---|
 | `transfer` | a `Transfer` (sent on start, throttled progress, and completion; `done`/`failed` ends it) |
 | `change` | `{"driveId": str, "seq": int, "paths": [str]}` remote change from the drive WebSocket |
+| `conflict` | `{"driveId": str, "path": str, "copy": str}` |
 | `state` | `{"state": State, "message"?: str}` |
 
 The server sends a `state` event immediately after a client connects.

@@ -1,5 +1,5 @@
-//! The M1 [`MountAdapter`]: the read-only loopback NFSv3 server from `nfs.rs`, mounted with
-//! `mount_nfs`.
+//! The NFS fallback [`MountAdapter`]: the loopback NFSv3 server from `nfs.rs` over the drive's
+//! Vfs, mounted with `mount_nfs`.
 
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
@@ -13,7 +13,11 @@ use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAcce
 use crate::nfs::{UlsFs, mount_args};
 use crate::protocol::ErrorBody;
 
-pub struct NfsAdapter;
+#[derive(Default)]
+pub struct NfsAdapter {
+    /// Serve and mount read-only.
+    pub read_only: bool,
+}
 
 struct NfsHandle {
     mountpoint: PathBuf,
@@ -27,7 +31,7 @@ fn err(msg: impl Into<String>) -> MountError {
 #[async_trait]
 impl MountAdapter for NfsAdapter {
     fn access(&self) -> NeedAccess {
-        NeedAccess::Read
+        if self.read_only { NeedAccess::Read } else { NeedAccess::Write }
     }
 
     async fn mount(&self, req: MountRequest) -> Result<std::sync::Arc<dyn MountHandle>, MountError> {
@@ -45,7 +49,7 @@ impl MountAdapter for NfsAdapter {
             _ => err("cannot open drive"),
         })?;
 
-        let fs = UlsFs::new(req.client, req.drive_id, md.uid(), md.gid()).with_invalidations(&req.vfs);
+        let fs = UlsFs::new(req.vfs, md.uid(), md.gid(), self.read_only);
         let listener = NFSTcpListener::bind("127.0.0.1:0", fs).await.map_err(|_| err("cannot bind NFS server"))?;
         let port = listener.get_listen_port();
         let server = tokio::spawn(async move {
@@ -53,7 +57,7 @@ impl MountAdapter for NfsAdapter {
         });
 
         let out = tokio::process::Command::new("/sbin/mount_nfs")
-            .args(mount_args(port, &mountpoint))
+            .args(mount_args(port, &mountpoint, self.read_only))
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true)
             .output();

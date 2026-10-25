@@ -10,7 +10,7 @@ use uls_proto::NodeType;
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8787";
 
 #[derive(Parser)]
-#[command(version, about = "Unlispace engine and CLI (M0)", long_about = "Unlispace engine and CLI (M0).\n\nEnvironment:\n  ULS_ENDPOINT   Worker URL (default http://127.0.0.1:8787)\n  ULS_DEV_TOKEN  static bearer token (never printed)")]
+#[command(version, about = "Unlispace engine and CLI", long_about = "Unlispace engine and CLI (M0).\n\nEnvironment:\n  ULS_ENDPOINT   Worker URL (default http://127.0.0.1:8787)\n  ULS_DEV_TOKEN  static bearer token (never printed)")]
 pub struct Cli {
     #[command(subcommand)]
     /// Defaults to `daemon` when omitted (how the LaunchAgent runs it).
@@ -20,7 +20,21 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Cmd {
     /// Run the background daemon the Mac app talks to
-    Daemon,
+    Daemon {
+        /// Control socket path (default <state dir>/ulsd.sock)
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        /// Keep the state file, drive journals, shard cache, socket and mounts under this
+        /// directory instead of ~/Library/Application Support/Unlispace
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+        /// Where refresh tokens are kept. `memory` creates no Keychain item (for tests).
+        #[arg(long, value_enum, default_value_t = SecretStoreKind::Keychain)]
+        secret_store: SecretStoreKind,
+        /// Mount drives read-only
+        #[arg(long)]
+        read_only: bool,
+    },
     /// Sign in from a terminal (desktop PKCE flow)
     Login {
         /// Control-plane API (default $ULS_API or http://127.0.0.1:8788)
@@ -82,7 +96,7 @@ pub enum Cmd {
         #[arg(long, default_value_t = 0)]
         since: u64,
     },
-    /// Mount a drive read-only over loopback NFSv3
+    /// Mount a drive over loopback NFSv3 (writable unless --read-only)
     Mount {
         drive: String,
         mountpoint: PathBuf,
@@ -92,7 +106,20 @@ pub enum Cmd {
         /// TCP port for the NFS server (0 = pick a free one)
         #[arg(long, default_value_t = 0)]
         port: u16,
+        /// Do not allow writes
+        #[arg(long)]
+        read_only: bool,
+        /// Directory for this mount's write journal (default <support dir>/cli/<drive>)
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum SecretStoreKind {
+    #[default]
+    Keychain,
+    Memory,
 }
 
 #[derive(Subcommand)]
@@ -133,8 +160,10 @@ fn human(n: u64) -> String {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
-    match cli.cmd.unwrap_or(Cmd::Daemon) {
-        Cmd::Daemon => return crate::daemon::run().await,
+    match cli.cmd.unwrap_or(Cmd::Daemon { socket: None, state_dir: None, secret_store: SecretStoreKind::Keychain, read_only: false }) {
+        Cmd::Daemon { socket, state_dir, secret_store, read_only } => {
+            return crate::daemon::run(crate::daemon::DaemonOptions { socket, state_dir, secret_store, read_only }).await;
+        }
         Cmd::Login { api } => return crate::login::login(api).await,
         Cmd::Put { drive, local, path, if_version } => {
             let c = client(false, false)?;
@@ -215,8 +244,12 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Cmd::Mount { drive, mountpoint, no_mount, port } => {
-            crate::nfs::mount(client(true, true)?, drive, mountpoint, no_mount, port).await?;
+        Cmd::Mount { drive, mountpoint, no_mount, port, read_only, state_dir } => {
+            let state_dir = match state_dir {
+                Some(d) => d,
+                None => crate::daemon::support_dir()?.join("cli").join(&drive),
+            };
+            crate::nfs::mount(client(true, true)?, drive, mountpoint, no_mount, port, read_only, state_dir).await?;
         }
     }
     Ok(())
