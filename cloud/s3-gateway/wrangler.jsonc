@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "unlispace-s3",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "services": [
+    { "binding": "DATA_PLANE", "service": "unlispace-data-plane" },
+    { "binding": "DATA_PLANE_ADMIN", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
+  ],
+  "durable_objects": { "bindings": [{ "name": "S3_STATE", "class_name": "S3State" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["S3State"] }],
+  "vars": {
+    "ULS_ISSUER": "http://127.0.0.1:8788",
+    "ULS_S3_HOST": "s3.unlispace.com",
+    "ULS_S3_DEV_KEYS": "[]"
+  },
+  "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_S3_MASTER_KEY"] }
+}
