@@ -1,0 +1,3 @@
+Shimming not enabled - defaulting to legacy behavior.
+mount_smbfs: failed to intitialize the smb library: Device not configured
+Exit: 69

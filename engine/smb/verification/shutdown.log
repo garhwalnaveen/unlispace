@@ -1,0 +1,5 @@
+SMB listening on 127.0.0.1:56742 (share ULS, signing required, encryption false)
+2026-10-25T08:57:05.058119Z  INFO smb_server{listen=Some(127.0.0.1:56742)}: smb_server::server: server starting
+2026-10-25T09:13:39.835377Z  INFO smb_server{listen=Some(127.0.0.1:56742)}: smb_server::server: shutdown requested; stopping accept loop
+2026-10-25T09:13:39.840683Z  INFO smb_server{listen=Some(127.0.0.1:56742)}: smb_server::server: server stopped
+Unmounted; server stopped.

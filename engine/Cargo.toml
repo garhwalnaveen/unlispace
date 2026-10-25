@@ -42,6 +42,7 @@ tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 tempfile = "=3.27.0"
 wiremock = "=0.6.5"
 axum = "=0.8.9"
+rusqlite = { version = "=0.41.0", features = ["bundled"] }
 base64 = "=0.22.1"
 security-framework = "=3.7.0"
 
