@@ -14,12 +14,6 @@ integration.
 batches, so the daemon reports one aggregate upload at path `/` per drive (queued and done). Per-file
 active/progress/failed events need a richer VFS event/pending contract.
 
-## uls-vfs: AppleDouble sidecars over NFS
-
-macOS emulates xattrs on NFS with `._name` files, which are published to the drive as real files
-(seen in the native test). Either hide/drop `._*` in the NFS adapter (needs a decision) or expose
-`Vfs` xattrs through NFS, which NFSv3 cannot carry.
-
 ## Known limits of the NFS fallback
 
 - mode, uid/gid and times in `setattr` are accepted but not stored; only size changes.

@@ -3,11 +3,12 @@ import { spawn } from 'node:child_process';
 import { generateKeyPairSync, createHash, randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
-import { access, mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { otpFromLog, uploadResult, watchHas, fixture } from './helpers.mjs';
+import { DaemonSocket, smbEnabled } from './daemon-socket.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const work = process.argv[2];
@@ -18,7 +19,9 @@ const inspectorPort = Number(process.env.E2E_INSPECTOR_PORT ?? 9230);
 const api = `http://127.0.0.1:${apiPort}`;
 const endpoint = `http://127.0.0.1:${dpPort}`;
 const mountpoint = join(work, 'mount');
-const binary = join(root, 'engine/target/debug/ulsd');
+const builtBinary = join(root, 'engine/target/debug/ulsd');
+// Other agents build the shared target; pin the executable for this run.
+const binary = join(work, 'ulsd');
 const wrangler = join(root, 'cloud/api/node_modules/wrangler/bin/wrangler.js');
 const rows = [];
 const children = new Set();
@@ -41,6 +44,8 @@ let writeToken, readToken, session, drive, code, apiWorker, dpWorker, watcher, n
 let original, initial, duplicate, edited, restored;
 let cacheSandbox = [];
 let cleanupPromise;
+let smbDaemon, control, smbMountpoint;
+const smbRoot = join(work, 'smb-state/mnt');
 
 function safe(message) {
   let result = String(message);
@@ -104,10 +109,10 @@ async function command(executable, args, extraEnv, timeout = 30000) {
   }
 }
 
-async function cli(args, { token = writeToken, allowFailure = false } = {}) {
+async function cli(args, { token = writeToken, allowFailure = false, timeout = 30000 } = {}) {
   assert(token && drive, 'requires a provisioned drive and token');
   const prefix = cacheSandbox.length ? cacheSandbox : [binary];
-  const result = await command(prefix[0], [...prefix.slice(1), ...args], { ULS_ENDPOINT: endpoint, ULS_DEV_TOKEN: token, RUST_LOG: 'warn' });
+  const result = await command(prefix[0], [...prefix.slice(1), ...args], { ULS_ENDPOINT: endpoint, ULS_DEV_TOKEN: token, RUST_LOG: 'warn' }, timeout);
   assert(allowFailure || result.code === 0, `CLI ${args[0]} exited ${result.code}: ${safe(result.stderr)}`);
   return result;
 }
@@ -142,7 +147,10 @@ function dp(path, options = {}) {
 async function until(predicate, milliseconds, message) {
   const deadline = performance.now() + milliseconds;
   do {
-    if (await predicate()) return;
+    if (await predicate()) {
+      assert(performance.now() <= deadline, message);
+      return;
+    }
     await delay(20);
   } while (performance.now() < deadline);
   throw new Error(message);
@@ -160,7 +168,7 @@ async function freePort(port) {
 async function setup() {
   assert.equal(new Set([apiPort, dpPort, inspectorPort, inspectorPort + 1]).size, 4, 'HTTP and inspector ports must be distinct');
   for (const port of [apiPort, dpPort, inspectorPort, inspectorPort + 1]) await freePort(port);
-  await access(binary);
+  await copyFile(builtBinary, binary);
   const require = createRequire(join(root, 'cloud/api/package.json'));
   const installed = require('wrangler/package.json').version;
   assert(installed.startsWith('4.'), 'install the pinned cloud/api Wrangler v4 dependency first');
@@ -171,7 +179,8 @@ async function setup() {
     assert(!parsed.error, `cannot parse ${service} Wrangler config`);
     const config = parsed.config;
     assert(!config.build?.command, 'custom build commands are outside the local harness scope');
-    assert(!config.env, 'review environment-specific bindings before using this harness');
+    // Only top-level local bindings enter the isolated config, never production environments.
+    delete config.env;
     config.main = resolve(dirname(path), config.main);
     delete config.$schema;
     delete config.observability;
@@ -399,7 +408,7 @@ async function engineChecks() {
     // Restore the large file after the race so NFS traverses multiple shards.
     await cli(['restore', drive, 'engine.bin', initial.version]);
     const prefix = cacheSandbox.length ? cacheSandbox : [binary];
-    nfs = start(prefix[0], [...prefix.slice(1), 'mount', drive, mountpoint], { ULS_ENDPOINT: endpoint, ULS_DEV_TOKEN: readToken });
+    nfs = start(prefix[0], [...prefix.slice(1), 'mount', drive, mountpoint, '--read-only', '--state-dir', join(work, 'nfs-state')], { ULS_ENDPOINT: endpoint, ULS_DEV_TOKEN: readToken });
     await until(() => {
       assert.equal(nfs.child.exitCode, null, `NFS mount exited: ${safe(nfs.stderr)}`);
       return nfs.stderr.includes(`mounted at ${mountpoint}`);
@@ -417,23 +426,190 @@ async function engineChecks() {
   });
 }
 
+async function smbChecks() {
+  const enabled = smbEnabled(process.env.E2E_SMB, await readFile(binary));
+  if (!enabled) { console.log('SMB phase disabled (E2E_SMB=1 enables it)'); return; }
+  let independentToken;
+  const local = join(work, 'smb-source.bin');
+  const payload = randomBytes(8 * 1024 * 1024);
+  const text = Buffer.from('saved through SMB\n');
+  const replacement = Buffer.from('safe save replacement\n');
+  async function native(executable, args, timeout = 10000) {
+    assert(smbMountpoint, 'requires a verified SMB mount');
+    const result = await command(executable, args, {}, timeout);
+    assert.equal(result.code, 0, `SMB ${executable} failed: ${safe(result.stderr)}`);
+    return result.stdout;
+  }
+  async function copyIn(source, target) {
+    assert(smbMountpoint, 'requires a verified SMB mount');
+    await native('/bin/cp', [source, join(smbMountpoint, target)]);
+  }
+  async function remoteBytes(path, expected, timeout = 10000) {
+    assert(independentToken && smbMountpoint, 'requires mounted daemon and independent token');
+    const output = join(work, 'smb-download.bin');
+    const deadline = performance.now() + timeout;
+    await until(async () => {
+      const result = await cli(['get', drive, path, output], { token: independentToken, allowFailure: true, timeout: Math.max(1, deadline - performance.now()) });
+      return result.code === 0 && (await readFile(output)).equals(expected);
+    }, timeout, `remote bytes differ or missing: ${path}`);
+    await unlink(output);
+  }
+  async function gone(path) {
+    const result = await request(endpoint, `/v0/drives/${drive}/stat?path=${encodeURIComponent(path)}`, { token: independentToken });
+    assert([200, 404].includes(result.status), `unexpected stat HTTP ${result.status}`);
+    return result.status === 404 && result.data?.error === 'no_such_path';
+  }
+  await check('smb daemon auth.set + drives.list + native mount', async () => {
+    assert.equal(process.platform, 'darwin', 'native SMB requires macOS');
+    assert(session && drive, 'requires OTP session and drive');
+    assert(smbEnabled(undefined, await readFile(binary)), 'E2E_SMB=1 requires a binary built with --features smb');
+    // Cloud checks deliberately revoked their refresh family; sign in again for this phase.
+    const email = session.user.email;
+    const logOffset = apiWorker.stdout.length;
+    await json(api, '/auth/otp/start', { body: { email } });
+    let freshCode;
+    await until(() => { freshCode = otpFromLog(apiWorker.stdout.slice(logOffset), email); return !!freshCode; }, 5000, 'fresh SMB OTP missing');
+    secrets.push(freshCode);
+    session = await json(api, '/auth/otp/verify', { body: { email, code: freshCode } });
+    secrets.push(session.accessToken, session.refreshToken);
+    independentToken = (await json(api, `/drives/${drive}/token`, { token: session.accessToken, body: { access: 'write' } })).token;
+    secrets.push(independentToken);
+    assert(independentToken, 'requires fresh independent drive token');
+    const socket = join(work, 'ulsd.sock');
+    smbDaemon = start(binary, ['daemon', '--state-dir', join(work, 'smb-state'), '--socket', socket, '--secret-store', 'memory'], { ULS_ENDPOINT: endpoint, RUST_LOG: 'warn' });
+    await until(async () => {
+      assert.equal(smbDaemon.child.exitCode, null, `daemon exited: ${safe(smbDaemon.stderr)}`);
+      try { await access(socket); return true; } catch { return false; }
+    }, 5000, 'daemon socket not created');
+    control = new DaemonSocket(socket);
+    const auth = await control.call('auth.set', { apiEndpoint: api, accessToken: session.accessToken, refreshToken: session.refreshToken });
+    assert.equal(auth.user.id, session.user.id);
+    assert((await control.call('drives.list')).drives.some(item => item.driveId === drive));
+    try { await control.call('drive.mount', { driveId: drive }); }
+    catch (error) { throw new Error(`${error.message}: ${safe(error.daemonMessage ?? 'no mount detail')}; ${safe(smbDaemon.stderr)}`); }
+    const mounted = (await control.call('drives.list')).drives.find(item => item.driveId === drive);
+    assert.equal(mounted?.mountState, 'mounted');
+    assert(mounted.mountPath?.startsWith(smbRoot + '/'), 'SMB mount must be under isolated state directory');
+    const table = await command('/sbin/mount', []);
+    const entry = table.stdout.split('\n').find(line => line.includes(` on ${mounted.mountPath} (`));
+    assert(entry?.includes('smbfs'), 'kernel mount table must confirm SMB before writes');
+    smbMountpoint = mounted.mountPath;
+    return 'memory secret store; isolated state; kernel smbfs confirmed';
+  });
+  await check('smb text save -> independent remote bytes within 10 s', async () => {
+    await writeFile(local, text);
+    await copyIn(local, 'smb-text.txt');
+    await remoteBytes('smb-text.txt', text);
+  });
+  await check('smb cp random 8 MiB -> independent remote bytes within 10 s', async () => {
+    await writeFile(local, payload);
+    await copyIn(local, 'smb-big.bin');
+    await remoteBytes('smb-big.bin', payload);
+    return '8388608 random bytes compared through a fresh-token CLI client';
+  });
+  await check('smb mkdir -p + mv -> remote bytes and old path gone', async () => {
+    assert(smbMountpoint, 'requires SMB mount');
+    await native('/bin/mkdir', ['-p', join(smbMountpoint, 'a/b')]);
+    await native('/bin/mv', [join(smbMountpoint, 'smb-text.txt'), join(smbMountpoint, 'a/b/moved.txt')]);
+    await remoteBytes('a/b/moved.txt', text);
+    await until(() => gone('smb-text.txt'), 10000, 'renamed source still exists remotely');
+  });
+  await check('smb rename over existing safe save -> remote replacement', async () => {
+    await writeFile(local, text);
+    await copyIn(local, 'smb-safe.txt');
+    await remoteBytes('smb-safe.txt', text);
+    await writeFile(local, replacement);
+    await copyIn(local, 'smb-safe.tmp');
+    await native('/bin/mv', ['-f', join(smbMountpoint, 'smb-safe.tmp'), join(smbMountpoint, 'smb-safe.txt')]);
+    await remoteBytes('smb-safe.txt', replacement);
+    await until(() => gone('smb-safe.tmp'), 10000, 'safe save temporary path survives');
+  });
+  await check('smb rm -> previously published remote file gone within 10 s', async () => {
+    assert(smbMountpoint, 'requires SMB mount');
+    await native('/bin/rm', [join(smbMountpoint, 'smb-big.bin')]);
+    await until(() => gone('smb-big.bin'), 10000, 'removed file still exists remotely');
+  });
+  await check('smb xattr write/read preserves file bytes', async () => {
+    assert(smbMountpoint, 'requires SMB mount');
+    const target = join(smbMountpoint, 'smb-safe.txt');
+    await native('/usr/bin/xattr', ['-w', 'com.unlispace.e2e', 'metadata-value', target]);
+    assert.equal((await native('/usr/bin/xattr', ['-p', 'com.unlispace.e2e', target])).trim(), 'metadata-value');
+    await remoteBytes('smb-safe.txt', replacement);
+  });
+  await check('smb remote CLI commit -> mount + change event within 5 s', async () => {
+    assert(smbMountpoint, 'requires SMB mount');
+    await native('/bin/ls', [smbMountpoint]);
+    assert.notEqual((await command('/usr/bin/stat', [join(smbMountpoint, 'smb-incoming.txt')])).code, 0, 'incoming path already exists');
+    await writeFile(local, text);
+    const started = performance.now();
+    await cli(['put', drive, local, 'smb-incoming.txt'], { token: independentToken });
+    await until(async () => {
+      const result = await command('/usr/bin/cmp', [local, join(smbMountpoint, 'smb-incoming.txt')], {}, 1000);
+      return result.code === 0 && control.events.some(event => event.event === 'change' && event.data.driveId === drive && event.data.paths.includes('/smb-incoming.txt'));
+    }, Math.max(1, 5000 - (performance.now() - started)), 'remote commit did not appear locally with change event');
+    assert(performance.now() - started < 5000, 'remote appearance exceeded 5 s');
+    return `${(performance.now() - started).toFixed(1)} ms including CLI commit; bytes compared`;
+  });
+  await check('smb concurrent edits -> conflict event + both remote contents survive', async () => {
+    assert(smbMountpoint, 'requires SMB mount');
+    const base = await dp('/stat?path=smb-incoming.txt');
+    const localEdit = Buffer.from('local conflicting edit\n');
+    const remoteEdit = Buffer.from('remote conflicting edit\n');
+    await writeFile(local, localEdit);
+    await copyIn(local, 'smb-incoming.txt');
+    // Finish the remote commit during the VFS's 2 s quiet window, and prove it beat publication.
+    await writeFile(local, remoteEdit);
+    const result = await cli(['put', drive, local, 'smb-incoming.txt', '--if-version', base.versionId], { token: independentToken });
+    const remote = uploadResult(result.stdout);
+    let event;
+    await until(() => {
+      event = control.events.find(item => item.event === 'conflict' && item.data.driveId === drive && item.data.path === '/smb-incoming.txt');
+      return !!event;
+    }, 10000, 'daemon did not emit conflict event');
+    assert.match(event.data.copy, /^\/smb-incoming \(conflict, .+\)\.txt$/);
+    await remoteBytes('smb-incoming.txt', remoteEdit);
+    await remoteBytes(event.data.copy.slice(1), localEdit);
+    assert.equal((await dp('/stat?path=smb-incoming.txt')).versionId, remote.version);
+    const copies = await cli(['ls', drive], { token: independentToken });
+    assert(copies.stdout.includes(event.data.copy.slice(1)), 'conflict copy missing from independent listing');
+    return 'conflict event captured; remote head retained; local copy byte-identical';
+  });
+  await check('smb drive.unmount + daemon shutdown leaves no mounts', async () => {
+    assert(smbMountpoint && control, 'requires SMB mount');
+    await control.call('drive.unmount', { driveId: drive });
+    assert.equal((await control.call('drives.list')).drives.find(item => item.driveId === drive)?.mountState, 'unmounted');
+    control.close(); control = undefined;
+    signal(smbDaemon, 'SIGTERM');
+    const result = await Promise.race([smbDaemon.done, delay(10000).then(() => { throw new Error('daemon shutdown timed out'); })]);
+    assert.equal(result.code, 0, 'daemon did not shut down cleanly');
+    await stop(smbDaemon); smbDaemon = undefined;
+    assert(!(await command('/sbin/mount', [])).stdout.includes(` on ${smbRoot}/`), 'SMB mount remains');
+    smbMountpoint = undefined;
+  });
+}
+
 async function cleanup() {
   return cleanupPromise ??= (async () => {
     if (watcher) await stop(watcher);
     let unmountError;
+    if (control) {
+      try { await control.call('drive.unmount', { driveId: drive }, 10000); } catch { /* Kernel fallback below also covers failed mounts. */ }
+      control.close(); control = undefined;
+    }
     try {
       const mounted = await command('/sbin/mount', []);
-      if (mounted.stdout.includes(` on ${mountpoint} (`)) {
-        let unmounted = await command('/sbin/umount', [mountpoint]);
-        if (unmounted.code !== 0) unmounted = await command('/sbin/umount', ['-f', mountpoint]);
+      const owned = mounted.stdout.split('\n').map(line => line.match(/ on (.+) \(/)?.[1]).filter(path => path === mountpoint || path?.startsWith(smbRoot + '/'));
+      for (const path of owned) {
+        let unmounted = await command('/sbin/umount', [path]);
+        if (unmounted.code !== 0) unmounted = await command('/sbin/umount', ['-f', path]);
         assert.equal(unmounted.code, 0, `unmount failed: ${safe(unmounted.stderr)}`);
       }
     } catch (error) { unmountError = error; }
     for (const child of [...children]) await stop(child);
     if (unmountError) throw unmountError;
     const remaining = await command('/sbin/mount', []);
-    assert(!remaining.stdout.includes(` on ${mountpoint} (`), 'NFS mount remains');
-    return 'owned processes stopped; no NFS mount remains; shell trap removes temporary data';
+    assert(!remaining.stdout.includes(` on ${mountpoint} (`) && !remaining.stdout.includes(` on ${smbRoot}/`), 'owned mount remains');
+    return 'owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data';
   })();
 }
 
@@ -448,6 +624,7 @@ try {
   if (rows[0].status === 'PASS') {
     await cloudChecks();
     await engineChecks();
+    await smbChecks();
   }
 } catch (error) {
   rows.push({ status: 'FAIL', check: 'harness', detail: safe(error.message) });

@@ -9,6 +9,7 @@
 //! is already durable in the journal and the publisher uploads it after the quiet window.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -36,6 +37,16 @@ pub struct UlsFs {
     read_only: bool,
     /// id -> path (no leading or trailing slash; the root is ""). Ids come from the Vfs.
     paths: Mutex<HashMap<fileid3, String>>,
+    /// macOS metadata sidecars are visible only for this mount session.
+    sidecars: Mutex<HashMap<String, Vec<u8>>>,
+}
+
+static NEXT_SIDECAR_ID: AtomicU64 = AtomicU64::new(1);
+
+fn is_sidecar(name: &str) -> bool { name.starts_with("._") || name == ".DS_Store" }
+
+fn sidecar_attr(id: fileid3, size: u64) -> Attr {
+    Attr { id, kind: Kind::File, size, created: 0, accessed: 0, modified: 0, changed: 0, readonly: false }
 }
 
 fn join(dir: &str, name: &str) -> String {
@@ -94,7 +105,7 @@ impl UlsFs {
     pub fn new(vfs: Vfs, uid: u32, gid: u32, read_only: bool) -> UlsFs {
         let mut paths = HashMap::new();
         paths.insert(ROOT, String::new());
-        UlsFs { vfs, uid, gid, read_only, paths: Mutex::new(paths) }
+        UlsFs { vfs, uid, gid, read_only, paths: Mutex::new(paths), sidecars: Mutex::new(HashMap::new()) }
     }
 
     fn paths(&self) -> std::sync::MutexGuard<'_, HashMap<fileid3, String>> {
@@ -103,6 +114,17 @@ impl UlsFs {
 
     fn path_of(&self, id: fileid3) -> Result<String, nfsstat3> {
         self.paths().get(&id).cloned().ok_or(nfsstat3::NFS3ERR_STALE)
+    }
+
+    fn sidecars(&self) -> std::sync::MutexGuard<'_, HashMap<String, Vec<u8>>> {
+        self.sidecars.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn sidecar_id(&self, path: &str) -> fileid3 {
+        if let Some(id) = self.paths().iter().find_map(|(id, p)| (p == path).then_some(*id)) { return id; }
+        let id = (1u64 << 63) | NEXT_SIDECAR_ID.fetch_add(1, Ordering::Relaxed);
+        self.remember(id, path);
+        id
     }
 
     fn remember(&self, id: fileid3, path: &str) {
@@ -142,6 +164,9 @@ impl UlsFs {
     /// (replaced, renamed over) makes the handle stale.
     async fn attr_of(&self, id: fileid3) -> Result<(String, Attr), nfsstat3> {
         let path = self.path_of(id)?;
+        if let Some(data) = self.sidecars().get(&path) {
+            return Ok((path, sidecar_attr(id, data.len() as u64)));
+        }
         let a = self.vfs.lookup(&path).await.map_err(handle_err)?;
         if a.id != id {
             return Err(nfsstat3::NFS3ERR_STALE);
@@ -161,6 +186,7 @@ impl UlsFs {
     /// journal, this marks the file ready to publish after the quiet window.
     pub async fn commit(&self, id: fileid3) -> Result<(), nfsstat3> {
         let path = self.path_of(id)?;
+        if self.sidecars().contains_key(&path) { return Ok(()); }
         self.vfs.flush(&path).await.map_err(handle_err)
     }
 
@@ -190,6 +216,10 @@ impl NFSFileSystem for UlsFs {
             n if n.is_empty() || n.contains('/') => return Err(nfsstat3::NFS3ERR_NOENT),
             n => join(&dir, n),
         };
+        if self.sidecars().contains_key(&path) {
+            return Ok(self.sidecar_id(&path));
+        }
+        if is_sidecar(name) { return Err(nfsstat3::NFS3ERR_NOENT); }
         let a = self.vfs.lookup(&path).await.map_err(map_err)?;
         self.remember(a.id, &path);
         Ok(a.id)
@@ -203,6 +233,14 @@ impl NFSFileSystem for UlsFs {
     async fn setattr(&self, id: fileid3, setattr: sattr3) -> Result<fattr3, nfsstat3> {
         self.writable()?;
         let (path, a) = self.attr_of(id).await?;
+        if self.sidecars().contains_key(&path) {
+            let mut overlay = self.sidecars();
+            let data = overlay.get_mut(&path).ok_or(nfsstat3::NFS3ERR_STALE)?;
+            if let set_size3::size(n) = setattr.size {
+                data.resize(usize::try_from(n).map_err(|_| nfsstat3::NFS3ERR_FBIG)?, 0);
+            }
+            return Ok(self.fattr(&sidecar_attr(id, data.len() as u64)));
+        }
         // Mode, ownership and times are not stored; only a size change has an effect.
         if let set_size3::size(n) = setattr.size {
             if a.kind == Kind::Directory {
@@ -217,6 +255,11 @@ impl NFSFileSystem for UlsFs {
 
     async fn read(&self, id: fileid3, offset: u64, count: u32) -> Result<(Vec<u8>, bool), nfsstat3> {
         let (path, a) = self.attr_of(id).await?;
+        if let Some(data) = self.sidecars().get(&path) {
+            let start = usize::try_from(offset).unwrap_or(usize::MAX).min(data.len());
+            let end = start.saturating_add(count as usize).min(data.len());
+            return Ok((data[start..end].to_vec(), end == data.len()));
+        }
         if a.kind == Kind::Directory {
             return Err(nfsstat3::NFS3ERR_ISDIR);
         }
@@ -231,6 +274,16 @@ impl NFSFileSystem for UlsFs {
     async fn write(&self, id: fileid3, offset: u64, data: &[u8]) -> Result<fattr3, nfsstat3> {
         self.writable()?;
         let (path, a) = self.attr_of(id).await?;
+        if self.sidecars().contains_key(&path) {
+            let mut overlay = self.sidecars();
+            let bytes = overlay.get_mut(&path).ok_or(nfsstat3::NFS3ERR_STALE)?;
+            let start = usize::try_from(offset).map_err(|_| nfsstat3::NFS3ERR_FBIG)?;
+            let end = start.checked_add(data.len()).ok_or(nfsstat3::NFS3ERR_FBIG)?;
+            if start > bytes.len() { bytes.resize(start, 0); }
+            if end > bytes.len() { bytes.resize(end, 0); }
+            bytes[start..end].copy_from_slice(data);
+            return Ok(self.fattr(&sidecar_attr(id, bytes.len() as u64)));
+        }
         if a.kind == Kind::Directory {
             return Err(nfsstat3::NFS3ERR_ISDIR);
         }
@@ -244,6 +297,15 @@ impl NFSFileSystem for UlsFs {
         self.writable()?;
         let dir = self.dir_path(dirid).await?;
         let path = join(&dir, name_of(filename)?);
+        if is_sidecar(name_of(filename)?) || self.sidecars().contains_key(&path) {
+            self.sidecars().entry(path.clone()).or_default();
+            let id = self.sidecar_id(&path);
+            if let set_size3::size(n) = attr.size {
+                self.sidecars().get_mut(&path).unwrap().resize(usize::try_from(n).map_err(|_| nfsstat3::NFS3ERR_FBIG)?, 0);
+            }
+            let a = self.attr_of(id).await?.1;
+            return Ok((id, self.fattr(&a)));
+        }
         let a = match self.vfs.create(&path, Kind::File).await {
             Ok(a) => a,
             // UNCHECKED create of an existing file succeeds (GUARDED was rejected by the server).
@@ -269,6 +331,10 @@ impl NFSFileSystem for UlsFs {
         self.writable()?;
         let dir = self.dir_path(dirid).await?;
         let path = join(&dir, name_of(filename)?);
+        if is_sidecar(name_of(filename)?) || self.sidecars().contains_key(&path) {
+            self.sidecars().entry(path.clone()).or_default();
+            return Ok(self.sidecar_id(&path));
+        }
         let a = self.vfs.create(&path, Kind::File).await.map_err(map_err)?;
         self.remember(a.id, &path);
         self.commit_path(&path).await;
@@ -289,6 +355,11 @@ impl NFSFileSystem for UlsFs {
         self.writable()?;
         let dir = self.dir_path(dirid).await?;
         let path = join(&dir, name_of(filename)?);
+        if is_sidecar(name_of(filename)?) || self.sidecars().contains_key(&path) {
+            if self.sidecars().remove(&path).is_none() { return Err(nfsstat3::NFS3ERR_NOENT); }
+            self.paths().retain(|_, p| p != &path);
+            return Ok(());
+        }
         self.vfs.remove(&path).await.map_err(map_err)?;
         self.paths().retain(|_, p| !within(p, &path));
         Ok(())
@@ -300,6 +371,17 @@ impl NFSFileSystem for UlsFs {
         let to_dir = self.dir_path(to_dirid).await?;
         let from = join(&from_dir, name_of(from_filename)?);
         let to = join(&to_dir, name_of(to_filename)?);
+        if is_sidecar(name_of(from_filename)?) || is_sidecar(name_of(to_filename)?) {
+            let mut overlay = self.sidecars();
+            if let Some(data) = overlay.remove(&from) {
+                overlay.insert(to.clone(), data);
+                let mut paths = self.paths();
+                paths.retain(|_, p| p != &to);
+                for p in paths.values_mut() { if p == &from { *p = to.clone(); } }
+                return Ok(());
+            }
+            return Err(nfsstat3::NFS3ERR_NOENT);
+        }
         self.vfs.rename(&from, &to, true).await.map_err(map_err)?;
         // The Vfs keeps attr ids across rename; only the path table needs to follow.
         let mut p = self.paths();
@@ -316,7 +398,15 @@ impl NFSFileSystem for UlsFs {
 
     async fn readdir(&self, dirid: fileid3, start_after: fileid3, max_entries: usize) -> Result<ReadDirResult, nfsstat3> {
         let dir = self.dir_path(dirid).await?;
-        let entries = self.vfs.readdir(&dir).await.map_err(map_err)?;
+        let mut entries: Vec<_> = self.vfs.readdir(&dir).await.map_err(map_err)?.into_iter()
+            .filter(|e| !is_sidecar(&e.name)).collect();
+        let overlays = self.sidecars();
+        for (path, data) in overlays.iter().filter(|(p, _)| parent_of(p) == dir) {
+            let name = path.rsplit('/').next().unwrap_or(path).to_string();
+            let id = self.sidecar_id(path);
+            entries.push(uls_vfs::DirEntry { name, attr: sidecar_attr(id, data.len() as u64) });
+        }
+        drop(overlays);
         for e in &entries {
             self.remember(e.attr.id, &join(&dir, &e.name));
         }
@@ -577,6 +667,41 @@ mod tests {
         assert!(matches!(fs.create_exclusive(ROOT, &fname("x")).await, Err(nfsstat3::NFS3ERR_EXIST)));
         assert!(matches!(fs.create(ROOT, &fname("a/b"), sattr3::default()).await, Err(nfsstat3::NFS3ERR_INVAL)));
         assert_eq!(fs.lookup(ROOT, &fname("x")).await.unwrap(), id);
+        vfs.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn macos_sidecars_stay_in_mount_overlay() {
+        let (_s, c, dir, vfs, fs) = setup(false).await;
+        for name in ["._remote", ".DS_Store"] {
+            let source = dir.path().join("seed");
+            std::fs::write(&source, b"remote metadata").unwrap();
+            c.upload_file("demo", &source, name, None).await.unwrap();
+        }
+        let listed = fs.readdir(ROOT, 0, 20).await.unwrap();
+        assert!(listed.entries.is_empty(), "remote sidecars are hidden");
+
+        for (name, content, remote) in [("._a", b"appledouble".as_slice(), "._remote"), (".DS_Store", b"finder", ".DS_Store") ] {
+            let (id, _) = fs.create(ROOT, &fname(name), sattr3::default()).await.unwrap();
+            fs.write(id, 0, content).await.unwrap();
+            assert_eq!(fs.read(id, 0, 100).await.unwrap().0, content);
+            assert_eq!(fs.lookup(ROOT, &fname(name)).await.unwrap(), id);
+            assert!(fs.readdir(ROOT, 0, 20).await.unwrap().entries.iter().any(|entry| entry.name.0 == name.as_bytes()));
+            let pending = vfs.pending().await;
+            assert_eq!(pending.files + pending.metadata_ops, 0);
+            assert!(c.stat("demo", remote).await.is_ok(), "preexisting remote item remains untouched");
+        }
+
+        let apple = fs.lookup(ROOT, &fname("._a")).await.unwrap();
+        fs.rename(ROOT, &fname("._a"), ROOT, &fname("._renamed")).await.unwrap();
+        assert_eq!(fs.read(apple, 0, 100).await.unwrap().0, b"appledouble");
+        assert_eq!(vfs.pending().await.files, 0);
+
+        let (normal, _) = fs.create(ROOT, &fname("normal.txt"), sattr3::default()).await.unwrap();
+        fs.write(normal, 0, b"published").await.unwrap();
+        drained(&vfs).await;
+        assert_eq!(c.read_range("demo", "normal.txt", 0, 100).await.unwrap().as_ref(), b"published");
+        assert!(c.stat("demo", "._a").await.is_err());
         vfs.shutdown().await.unwrap();
     }
 

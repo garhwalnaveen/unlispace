@@ -29,6 +29,8 @@ create, write, setattr (truncate), rename, remove/rmdir, mkdir. File ids are the
 they survive rename. `nfsserve` 0.11 does not dispatch NFSPROC3_COMMIT and replies `FILE_SYNC` to
 every WRITE, so every write, create and truncate also calls `Vfs::flush` (what COMMIT would do).
 Bytes are durable in the journal at once and the publisher uploads them after its quiet window.
+macOS `._*` AppleDouble files and `.DS_Store` stay in a per-mount memory overlay for Finder
+readback, are hidden when found remotely, and are discarded when the mount ends.
 `ulsd mount <drive> <dir> [--read-only] [--state-dir <journal dir>]` runs it standalone; it
 drains the journal on Ctrl-C.
 
@@ -58,9 +60,6 @@ drwxr-xr-x@ 2 naveen  wheel  4096 Oct 25 18:07 b
 Read back from the remote after the publisher drained (`ulsd ls/get/stat`):
 
 ```
-   4.0 KiB  ._a            (macOS AppleDouble files, see NEEDS.md)
-   4.0 KiB  ._f
-   4.0 KiB  ._moved.bin
          -  a/
        3 B  f
   20.0 MiB  moved.bin

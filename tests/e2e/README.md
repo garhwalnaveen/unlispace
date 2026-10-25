@@ -1,4 +1,4 @@
-# Local Worker + Rust CLI E2E gate
+# Local Worker + Rust CLI/SMB daemon E2E gate
 
 From the repository root:
 
@@ -8,9 +8,10 @@ bash tests/e2e/run.sh
 
 Requires Node 22+, the existing pinned `cloud/api/node_modules` dependencies (Wrangler
 4 and TypeScript), and an already-built `engine/target/debug/ulsd`. Build that binary
-with `cargo build -p ulsd --manifest-path engine/Cargo.toml` if necessary; the runner
+with `cargo build -p ulsd --features smb --manifest-path engine/Cargo.toml` to include SMB; the runner
 never installs packages, rebuilds the engine, or changes the repository's Workers,
-configuration, keys, or local databases. On macOS, native NFS requires the system
+configuration, keys, or local databases. It copies the executable into its temporary
+directory so concurrent builds cannot change adapters mid-run. On macOS, native NFS requires the system
 `mount_nfs` permission. The runner never uses sudo or changes system settings.
 
 It generates ephemeral Ed25519 and block-signing keys, copies the current JSONC Worker configuration
@@ -35,7 +36,7 @@ hard-coded `~/Library/Caches/com.unlispace` cache; downloads still work with the
 cache disabled. A managed filesystem sandbox may forbid nesting `sandbox-exec`.
 **Only when that parent sandbox already denies writes to this cache**, use
 `E2E_MANAGED_SANDBOX=1` to acknowledge that protection. This does not change `HOME`,
-touch Keychain, or run the persistent daemon. On Linux `XDG_CACHE_HOME` redirects
+touch Keychain, or run the persistent per-user daemon. On Linux `XDG_CACHE_HOME` redirects
 the CLI cache to the temp directory; the native macOS NFS check fails explicitly.
 
 ## Assertions
@@ -65,16 +66,62 @@ Eight engine checks use the multicall CLI against those real Workers:
    commit and delivery; it is stricter than timing from commit acknowledgment.
 8. Restore the large fixture, mount it through the CLI with the read token at a
    canonical `/private/tmp/.../mount` path, verify a read-only NFS kernel mount,
-   compare all 8 MiB with `cmp`, and require a write to fail.
+   compare all 8 MiB with `cmp`, and require a write to fail. Explicit `--read-only`
+   and `--state-dir` keep this check read-only with an isolated journal.
+
+## SMB daemon phase
+
+SMB runs automatically when the copied `engine/target/debug/ulsd` contains the
+compiled SMB adapter. `E2E_SMB=1` requires the phase (and fails if the binary lacks
+that feature); `E2E_SMB=0` explicitly disables it. Detection uses the adapter's
+compiled mount error string; no daemon is started to probe features.
+
+```sh
+cargo build -p ulsd --features smb --manifest-path engine/Cargo.toml
+E2E_SMB=1 bash tests/e2e/run.sh
+```
+
+Ten additional checks exercise the actual daemon and macOS kernel SMB mount:
+
+1. Sign in again via dev OTP (the cloud auth checks revoked their session family),
+   mint a separate write token for the second CLI client, and start the daemon with
+   a temporary `--state-dir`, `--socket`, and `--secret-store memory`. Send newline
+   JSON `auth.set`, `drives.list`, and `drive.mount`. Verify `smbfs` in the kernel
+   mount table before any filesystem writes.
+2. Save text and compare the remote bytes through the independent CLI within 10 s.
+3. `cp` an 8 MiB random file and compare every remote byte within 10 s.
+4. `mkdir -p a/b`, move the text into it, compare remote contents, and verify the
+   old path is absent.
+5. Rename a temporary file over a previously published destination; verify the
+   replacement bytes and absence of the temporary path remotely.
+6. Remove the previously published large file; require remote absence within 10 s.
+7. Set and read back an xattr; verify file bytes remain intact remotely. This does
+   not assert cross-client xattr persistence.
+8. Warm the local directory/negative lookup, commit a new file through the second
+   CLI, then require identical mounted bytes and a daemon `change` event within
+   5 s, including the CLI invocation.
+9. Save locally, then commit remotely with the original `--if-version` during the
+   VFS's 2 s quiet window. Require a daemon `conflict` event, a listed conflict copy,
+   the remote head unchanged by publication, and both edits byte-identical remotely.
+   If the remote writer misses this race, the assertion fails rather than retries
+   hiding it.
+10. Send `drive.unmount`, verify unmounted protocol state, terminate the daemon
+    gracefully, and require zero remaining mounts under its isolated mount root.
+
+The socket parser has dependency-free local tests for frame fragmentation,
+interleaved events, pipelined/out-of-order responses, errors, deadlines, and close.
+Native macOS filesystem permissions are required. Mount failures remain FAILs;
+plain local-directory writes never stand in for SMB results.
 
 Each assertion produces a PASS/FAIL row. Failures do not suppress independent
 checks; dependent checks fail with their missing prerequisite. Setup failure stops
 the workload and still runs cleanup. Any failed row returns exit status 1. There
-are 26 rows on a complete run: setup + 16 cloud + 8 engine + cleanup.
+are 26 rows without SMB, or 36 with SMB: setup + 16 cloud + 8 engine +
+10 SMB + cleanup.
 
 Workers, CLI subprocesses and their descendants run in owned process groups. The
 runner has bounded startup/HTTP/CLI/mount waits; EXIT/INT/TERM traps stop children,
-unmount before stopping NFS, and delete temporary keys, logs, fixtures, databases
+unmount before stopping filesystem servers, and delete temporary keys, logs, fixtures, databases
 and caches. If unmount fails, cleanup fails and preserves the mount directory
 instead of recursively deleting through a mounted filesystem. Fixture and shard
 data stay below 64 MiB. No external test service, deployment, global install, or
@@ -90,12 +137,15 @@ bash -n tests/e2e/run.sh
 node --check tests/e2e/harness.mjs
 node --check tests/e2e/helpers.mjs
 node --check tests/e2e/helpers.test.mjs
-node --test tests/e2e/helpers.test.mjs
+node --check tests/e2e/daemon-socket.mjs
+node --check tests/e2e/daemon-socket.test.mjs
+node --test tests/e2e/helpers.test.mjs tests/e2e/daemon-socket.test.mjs
 bash tests/e2e/run.sh
 ```
 
 Parser/fixture self-tests run without Workers or network access. They verify both
 OTP log layouts, recipient isolation, upload metric parsing, exact watch matching,
 and deterministic fixture/edit generation. The end-to-end gate does not verify
-the GUI, Google login, Keychain sessions, writable NFS/SMB, VFS publication,
-offline/reconnect recovery, deployment, or production latency.
+the GUI, Google login, Keychain sessions, writable NFS, offline/reconnect
+recovery, deployment, or production latency. Without the SMB phase it also does
+not verify writable SMB, VFS publication, or daemon conflict events.

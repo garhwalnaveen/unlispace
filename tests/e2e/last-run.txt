@@ -21,9 +21,19 @@ PASS  engine 4 KiB edit uploads exactly one shard: 4096 bytes edited; 1 of 3 sha
 PASS  engine CLI versions + historical get: three ordered versions; first version bytes verified
 PASS  engine CLI restore creates new head: new version; original bytes restored
 PASS  engine concurrent ifVersion has exactly one winner: exit codes 0,2; one new version; winner bytes verified
-PASS  engine second CLI client watches change in < 1 s: 42.9 ms from writer invocation to exact version observed
+PASS  engine second CLI client watches change in < 1 s: 39.9 ms from writer invocation to exact version observed
 PASS  engine native read-only NFS mount + byte-identical read: 8 MiB compared through kernel NFS; write rejected
-PASS  cleanup: owned processes stopped; no NFS mount remains; shell trap removes temporary data
+PASS  smb daemon auth.set + drives.list + native mount: memory secret store; isolated state; kernel smbfs confirmed
+PASS  smb text save -> independent remote bytes within 10 s
+PASS  smb cp random 8 MiB -> independent remote bytes within 10 s: 8388608 random bytes compared through a fresh-token CLI client
+PASS  smb mkdir -p + mv -> remote bytes and old path gone
+PASS  smb rename over existing safe save -> remote replacement
+PASS  smb rm -> previously published remote file gone within 10 s
+PASS  smb xattr write/read preserves file bytes
+PASS  smb remote CLI commit -> mount + change event within 5 s: 67.0 ms including CLI commit; bytes compared
+PASS  smb concurrent edits -> conflict event + both remote contents survive: conflict event captured; remote head retained; local copy byte-identical
+PASS  smb drive.unmount + daemon shutdown leaves no mounts
+PASS  cleanup: owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
 STATUS | CHECK | DETAIL
 -------|-------|-------
 PASS | setup local Workers + D1 | Wrangler 4.152.0; api :8788, data :8787, inspector :9230; D1 migrated
@@ -49,7 +59,17 @@ PASS | engine 4 KiB edit uploads exactly one shard | 4096 bytes edited; 1 of 3 s
 PASS | engine CLI versions + historical get | three ordered versions; first version bytes verified
 PASS | engine CLI restore creates new head | new version; original bytes restored
 PASS | engine concurrent ifVersion has exactly one winner | exit codes 0,2; one new version; winner bytes verified
-PASS | engine second CLI client watches change in < 1 s | 42.9 ms from writer invocation to exact version observed
+PASS | engine second CLI client watches change in < 1 s | 39.9 ms from writer invocation to exact version observed
 PASS | engine native read-only NFS mount + byte-identical read | 8 MiB compared through kernel NFS; write rejected
-PASS | cleanup | owned processes stopped; no NFS mount remains; shell trap removes temporary data
-RESULT: 26 passed, 0 failed
+PASS | smb daemon auth.set + drives.list + native mount | memory secret store; isolated state; kernel smbfs confirmed
+PASS | smb text save -> independent remote bytes within 10 s | 
+PASS | smb cp random 8 MiB -> independent remote bytes within 10 s | 8388608 random bytes compared through a fresh-token CLI client
+PASS | smb mkdir -p + mv -> remote bytes and old path gone | 
+PASS | smb rename over existing safe save -> remote replacement | 
+PASS | smb rm -> previously published remote file gone within 10 s | 
+PASS | smb xattr write/read preserves file bytes | 
+PASS | smb remote CLI commit -> mount + change event within 5 s | 67.0 ms including CLI commit; bytes compared
+PASS | smb concurrent edits -> conflict event + both remote contents survive | conflict event captured; remote head retained; local copy byte-identical
+PASS | smb drive.unmount + daemon shutdown leaves no mounts | 
+PASS | cleanup | owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
+RESULT: 36 passed, 0 failed

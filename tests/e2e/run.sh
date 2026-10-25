@@ -13,9 +13,11 @@ cleanup() {
     wait "$runner" 2>/dev/null || true
   fi
   # Never recurse through a mount, including when the Node runner was interrupted.
-  if /sbin/mount | grep -Fq " on $work/mount ("; then
-    /sbin/umount "$work/mount" || { echo 'FAIL  cleanup: unmount failed; temporary directory retained'; exit 1; }
-  fi
+  # The daemon can leave a mount even if drive.mount timed out before returning its path.
+  while IFS= read -r target; do
+    [[ -z "$target" ]] && continue
+    /sbin/umount "$target" || { echo 'FAIL  cleanup: unmount failed; temporary directory retained'; exit 1; }
+  done < <(/sbin/mount | sed -n "s|.* on \($work/mount\) (.*|\1|p; s|.* on \($work/smb-state/mnt/.*\) (.*|\1|p")
   rm -rf "$work"
   exit "$status"
 }
