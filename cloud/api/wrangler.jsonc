@@ -3,6 +3,7 @@
   "name": "unlispace-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  "triggers": { "crons": ["17 * * * *"] },
   "observability": { "enabled": true },
   "dev": { "ip": "127.0.0.1", "port": 8788 },
   // Local dev values. Production overrides these (see README). Secrets never go here.
@@ -31,6 +32,7 @@
     "production": {
       "name": "unlispace-api",
       "workers_dev": true,
+      "triggers": { "crons": ["17 * * * *"] },
       "preview_urls": false,
       "d1_databases": [
         {
@@ -44,9 +46,9 @@
         { "binding": "DATA_PLANE", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
       ],
       "vars": {
-        "ULS_ISSUER": "https://unlispace-api.naveen-f3d.workers.dev",
-        "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.naveen-f3d.workers.dev",
-        "ULS_WEB_ORIGIN": "https://unlispace-web.naveen-f3d.workers.dev",
+        "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
+        "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.__WORKERS_DOMAIN__",
+        "ULS_WEB_ORIGIN": "https://unlispace-web.__WORKERS_DOMAIN__",
         "DODO_PAYMENTS_ENVIRONMENT": "test_mode"
       }
     }

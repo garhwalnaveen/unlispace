@@ -19,6 +19,8 @@ export async function genKey(kid: string): Promise<{ priv: Jwk; pub: Jwk }> {
 export class FakeDataPlane implements DataPlaneAdmin {
 	created: string[] = [];
 	deleted: string[] = [];
+	deleteOptions: { driveId: string; hard: boolean }[] = [];
+	failDelete = false;
 	failCreate = false;
 	stats = new Map<string, number>();
 	failStats = false;
@@ -27,13 +29,22 @@ export class FakeDataPlane implements DataPlaneAdmin {
 		this.created.push(driveId);
 		return { driveId, placement: null, createdAt: Date.now() };
 	}
-	async deleteDrive(driveId: string) {
+	depths = new Map<string, number>();
+	async forkDrive(sourceId: string, driveId: string) {
+		const depth = (this.depths.get(sourceId) ?? 0) + 1;
+		if (depth > 8) throw Object.assign(new Error("fork_depth_exceeded"), { code: "fork_depth_exceeded" });
+		this.depths.set(driveId, depth);
+		return { driveId, sourceId, lineage: sourceId, forkSeq: 0, forkPoint: Date.now(), placement: null };
+	}
+	async deleteDrive(driveId: string, opts?: { hard?: boolean }) {
+		if (this.failDelete) throw new Error("data plane down");
+		this.deleteOptions.push({ driveId, hard: opts?.hard ?? false });
 		this.deleted.push(driveId);
 		return { ok: true as const };
 	}
 	async driveStats(driveId: string) {
 		if (this.failStats) throw new Error("data plane down");
-		return { headSeq: 0, fileCount: 0, bytes: this.stats.get(driveId) ?? 0 };
+		return { headSeq: 0, fileCount: 0, bytes: this.stats.get(driveId) ?? 0, ownBytes: this.stats.get(driveId) ?? 0, lineage: driveId, depth: this.depths.get(driveId) ?? 0, forkOf: null };
 	}
 }
 

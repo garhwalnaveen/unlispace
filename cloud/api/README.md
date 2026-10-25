@@ -1,4 +1,4 @@
-# Unlispace control-plane API (M1 + M2)
+# Unlispace control-plane API (M1 + M2 + M3)
 
 Worker `unlispace-api`: auth (email OTP, Google OIDC, desktop PKCE), sessions, orgs, drives, and drive-token minting.
 Implements `docs/design/m1-contract.md`. Storage is D1 (`DB`); drive lifecycle goes to the data plane through the
@@ -8,8 +8,10 @@ M2 adds versioned HMAC-derived S3 access keys with parent scopes/transitive revo
 Payments billing (public catalog, checkout, billing state, invoices, portal and signed webhooks).
 The complete request/response and configuration contracts are in [M2-API.md](M2-API.md);
 cross-owner integration needs and verification limits are in [NEEDS.md](NEEDS.md).
-Expired trials receive read-only drive tokens; over-quota write-token requests return
-`403 quota_exceeded`. Existing tokens retain the M1 lifetime.
+M3 adds aliases, forks, hard deletion, the `ControlPlane` RPC entrypoint and hourly own-byte
+metering. See [M3-API.md](M3-API.md), which supersedes M2 quota semantics: write-token requests
+without entitlement or over quota return `403 over_quota`; explicit reads remain available.
+Existing tokens retain the M1 lifetime.
 
 ## Run locally
 
@@ -52,7 +54,8 @@ The sending domain must be onboarded first (`npx wrangler email sending enable <
 - `src/access-keys.ts` key scopes, derivation, revocation and internal verification/last-use helpers
 - `src/billing.ts`, `src/billing-catalog.ts`, `src/entitlements.ts` billing routes and token entitlements
 - `src/dodo.ts` injectable provider interface, REST adapter and Standard Webhooks verification
-- `migrations/0001_init.sql`, `migrations/0002_keys_billing.sql`; `test/` suite (all external I/O mocked)
+- `src/control-plane.ts` gateway RPC methods; `src/entitlements.ts` hourly metering and quotas
+- `migrations/0001_init.sql`, `migrations/0002_keys_billing.sql`, `migrations/0003_m3.sql`; `test/` suite (all external I/O mocked)
 
 Gate (from this directory): `npx tsc --noEmit && npm test`. For a sandbox that cannot write the
 user's global Wrangler log folder, set `WRANGLER_LOG_PATH=./.wrangler/logs` for the gate.

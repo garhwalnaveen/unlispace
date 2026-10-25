@@ -1,3 +1,6 @@
+import { meterUsage } from "./entitlements";
+import { rpcContext } from "./control-plane";
+export { ControlPlane } from "./control-plane";
 import type { AppEnv } from "./env";
 import type { Ctx, Deps } from "./ctx";
 import { selectSender } from "./email";
@@ -104,7 +107,7 @@ async function route(ctx: Ctx): Promise<Response> {
 	}
 
 	// ---- authenticated resources ----
-	const known = p === "/me" || p === "/orgs" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/token)?)$/.test(p);
+	const known = p === "/me" || p === "/orgs" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork))?)$/.test(p);
 	if (!known) throw new HttpError(404, "not_found");
 	const a = await authenticate(ctx);
 	if (seg[0] === "keys") {
@@ -123,6 +126,8 @@ async function route(ctx: Ctx): Promise<Response> {
 		if (m === "GET") return R.listOrgs(ctx, a);
 	} else if (seg[0] === "orgs") {
 		if (m === "POST") return R.createDrive(ctx, a, seg[1]!);
+	} else if (seg[2] === "fork") {
+		if (m === "POST") return R.forkDrive(ctx, a, seg[1]!);
 	} else if (seg[2] === "token") {
 		if (m === "POST") return R.driveToken(ctx, a, seg[1]!);
 	} else {
@@ -136,7 +141,7 @@ async function route(ctx: Ctx): Promise<Response> {
 export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promise<Response> {
 	const cors = corsHeaders(env, req);
 	if (req.method === "OPTIONS") return preflight(env, req);
-	const f = deps.fetch ?? fetch;
+	const f = deps.fetch ?? fetch.bind(globalThis);
 	const ctx: Ctx = { env, req, url: new URL(req.url), now: deps.now ? deps.now() : Date.now(), fetch: f, email: deps.email ?? selectSender(env, f), dodo: deps.dodo };
 	let res: Response;
 	try {
@@ -157,5 +162,6 @@ export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promis
 
 export default {
 	fetch: (req: Request, env: AppEnv): Promise<Response> => handle(req, env),
+ scheduled: async (_event: ScheduledController, env: AppEnv) => meterUsage(rpcContext(env)),
 } satisfies ExportedHandler<AppEnv>;
 

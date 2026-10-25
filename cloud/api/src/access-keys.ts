@@ -22,6 +22,8 @@ interface KeyRow {
 
 const keyJson = (k: KeyRow) => ({ accessKeyId: k.id, workspaceId: k.org_id, access: k.access, drives: k.drives === null ? null : JSON.parse(k.drives) as string[], label: k.label, parent: k.parent, createdAt: k.created_at, lastUsedAt: k.last_used_at, revokedAt: k.revoked_at });
 
+export type PublicKey = ReturnType<typeof keyJson>;
+
 async function membership(ctx: Ctx, userId: string, orgId: string): Promise<Access> {
 	const m = await ctx.env.DB.prepare("SELECT role FROM memberships WHERE user_id = ? AND org_id = ?").bind(userId, orgId).first<{ role: string }>();
 	if (!m) throw new HttpError(404, "no_such_org");
@@ -49,12 +51,19 @@ export async function resolveAccessKey(ctx: Ctx, id: string) {
 	const k = await ctx.env.DB.prepare("SELECT * FROM access_keys WHERE id = ? AND revoked_at IS NULL").bind(id).first<KeyRow>();
 	if (!k) throw new HttpError(401, "invalid_key");
 	const ancestors = (await ctx.env.DB.prepare(`WITH RECURSIVE chain AS (
-		SELECT * FROM access_keys WHERE id = ? UNION ALL SELECT p.* FROM access_keys p JOIN chain c ON p.id = c.parent
-	) SELECT c.revoked_at, m.role FROM chain c LEFT JOIN memberships m ON m.org_id = c.org_id AND m.user_id = c.user_id`).bind(id).all<{ revoked_at: number | null; role: string | null }>()).results;
-	if (ancestors.some(p => p.revoked_at !== null || p.role === null)) throw new HttpError(401, "invalid_key");
+		SELECT * FROM access_keys WHERE id = ? UNION SELECT p.* FROM access_keys p JOIN chain c ON p.id = c.parent
+	) SELECT c.id, c.parent, c.org_id, c.access, c.drives, c.revoked_at, m.role FROM chain c LEFT JOIN memberships m ON m.org_id = c.org_id AND m.user_id = c.user_id`).bind(id).all<{ id: string; parent: string | null; org_id: string; access: Access; drives: string | null; revoked_at: number | null; role: string | null }>()).results;
+	if (ancestors.some(p => p.revoked_at !== null || p.role === null || p.org_id !== k.org_id || (p.parent !== null && !ancestors.some(a => a.id === p.parent)))) throw new HttpError(401, "invalid_key");
 	let access = k.access;
-	for (const p of ancestors) if (rank[roleAccess(p.role!)] < rank[access]) access = roleAccess(p.role!);
-	return { ...keyJson(k), access, userId: k.user_id, secretAccessKey: await deriveAccessKeySecret(ctx.env, id) };
+	let drives = k.drives === null ? null : JSON.parse(k.drives) as string[];
+	for (const p of ancestors) {
+		for (const cap of [p.access, roleAccess(p.role!)]) if (rank[cap] < rank[access]) access = cap;
+		if (p.drives !== null) {
+			const scope = JSON.parse(p.drives) as string[];
+			drives = drives === null ? scope : drives.filter(d => scope.includes(d));
+		}
+	}
+	return { ...keyJson(k), access, drives, userId: k.user_id, secretAccessKey: await deriveAccessKeySecret(ctx.env, id) };
 }
 
 export async function recordAccessKeyUse(ctx: Ctx, id: string): Promise<void> {

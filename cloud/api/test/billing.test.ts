@@ -1,3 +1,5 @@
+import { meterUsage } from "../src/entitlements";
+import { rpcContext } from "../src/control-plane";
 import { describe, expect, it, vi } from "vitest";
 import type { CheckoutInput, DodoPayments } from "../src/dodo";
 import { verifyJwt } from "../src/jwt";
@@ -206,7 +208,8 @@ describe("drive-token entitlements", () => {
 		const { w, s, org, call } = await fixture();
 		expect(await tokenAccess(w, s.accessToken, org.drives[0].id)).toEqual({ status: 200, access: "write" });
 		await w.env.DB.prepare("UPDATE orgs SET trial_ends_at = ? WHERE id = ?").bind(w.clock.t, org.id).run();
-		expect(await tokenAccess(w, s.accessToken, org.drives[0].id)).toEqual({ status: 200, access: "read" });
+		expect(await tokenAccess(w, s.accessToken, org.drives[0].id)).toEqual({ status: 403, error: "over_quota" });
+  expect(await tokenAccess(w,s.accessToken,org.drives[0].id,"read")).toEqual({status:200,access:"read"});
 		expect(await json(await call())).toMatchObject({ state: "expired", writable: false });
 	});
 
@@ -214,10 +217,12 @@ describe("drive-token entitlements", () => {
 		const { w, s, org, activate } = await fixture();
 		const id = org.drives[0].id;
 		w.dp.stats.set(id, 1_000_000_000_000);
+  await meterUsage(rpcContext(w.env));
 		expect(await tokenAccess(w, s.accessToken, id)).toMatchObject({ access: "write" });
 		await w.env.DB.prepare("INSERT INTO drives(id,org_id,name,status,created_at) VALUES(?,?,?,'ready',?)").bind("d_second", org.id, "Second", w.clock.t).run();
 		w.dp.stats.set("d_second", 1);
-		expect(await tokenAccess(w, s.accessToken, id)).toEqual({ status: 403, error: "quota_exceeded" });
+  await meterUsage(rpcContext(w.env));
+		expect(await tokenAccess(w, s.accessToken, id)).toEqual({ status: 403, error: "over_quota" });
 		expect(await tokenAccess(w, s.accessToken, id, "read")).toEqual({ status: 200, access: "read" });
 		const viewer = await signIn(w, "view@example.com");
 		await w.env.DB.prepare("INSERT INTO memberships VALUES(?,?,?,?)").bind(org.id, viewer.user.id, "viewer", w.clock.t).run();
@@ -229,13 +234,14 @@ describe("drive-token entitlements", () => {
 		expect(await tokenAccess(w, s.accessToken, id)).toEqual({ status: 200, access: "write" });
 	});
 
-	it("fails closed on unavailable/invalid usage and still permits read-only tokens", async () => {
+	it("metering rejects unavailable/invalid stats while token issuance uses its last measurement", async () => {
 		const { w, s, org } = await fixture();
 		w.dp.failStats = true;
-		expect(await tokenAccess(w, s.accessToken, org.drives[0].id)).toEqual({ status: 503, error: "usage_unavailable" });
+		await expect(meterUsage(rpcContext(w.env))).rejects.toThrow();
+  expect(await tokenAccess(w,s.accessToken,org.drives[0].id)).toEqual({status:200,access:"write"});
 		expect(await tokenAccess(w, s.accessToken, org.drives[0].id, "read")).toEqual({ status: 200, access: "read" });
 		w.dp.failStats = false;
 		w.dp.stats.set(org.drives[0].id, -1);
-		expect((await tokenAccess(w, s.accessToken, org.drives[0].id)).status).toBe(503);
+		await expect(meterUsage(rpcContext(w.env))).rejects.toMatchObject({code:"usage_unavailable"});
 	});
 });

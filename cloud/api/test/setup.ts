@@ -10,7 +10,7 @@ beforeEach(async () => {
 		await applyD1Migrations(e.DB, e.TEST_MIGRATIONS);
 		migrated = true;
 	}
-	for (const t of ["access_keys", "billing_checkouts", "billing", "dodo_events", "users", "orgs", "memberships", "drives", "sessions", "otp_codes", "one_time_codes", "rate_limits"]) {
+	for (const t of ["drive_usage", "access_keys", "billing_checkouts", "billing", "dodo_events", "users", "orgs", "memberships", "drives", "sessions", "otp_codes", "one_time_codes", "rate_limits"]) {
 		await e.DB.prepare(`DELETE FROM ${t}`).run();
 	}
 });

@@ -5,8 +5,9 @@ export const PLACEMENTS: readonly Placement[] = ["wnam", "enam", "weur", "eeur",
 /** RPC surface of the data plane's `DataPlaneAdmin` WorkerEntrypoint (contract section 4). */
 export interface DataPlaneAdmin {
 	createDrive(driveId: string, placement?: Placement | null): Promise<{ driveId: string; placement: string | null; createdAt: number }>;
-	deleteDrive(driveId: string): Promise<{ ok: true }>;
-	driveStats(driveId: string): Promise<{ headSeq: number; fileCount: number; bytes: number } | null>;
+	forkDrive(sourceId: string, newId: string): Promise<{driveId: string; sourceId: string; lineage: string; forkSeq: number; forkPoint: number; placement: string | null}>;
+	deleteDrive(driveId: string, opts?: {hard?: boolean}): Promise<{ ok: true }>;
+	driveStats(driveId: string): Promise<{ headSeq: number; fileCount: number; bytes: number; ownBytes: number; lineage: string; depth: number; forkOf: {driveId: string; forkPoint: number} | null } | null>;
 }
 
 export interface AppEnv {

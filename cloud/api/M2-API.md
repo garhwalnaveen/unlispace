@@ -1,5 +1,7 @@
 # M2 control-plane additions
 
+For current drive/RPC and quota behavior, see [M3-API.md](M3-API.md); its metering and entitlement rules supersede the M2 usage section below.
+
 This extends `docs/design/m1-contract.md`. JSON responses are `Cache-Control: no-store`;
 errors retain `{error, message?}`. Authenticated routes use the existing bearer access token
 and live session-family check. Unknown orgs are 404; members without a management role get 403
