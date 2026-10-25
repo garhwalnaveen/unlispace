@@ -48,45 +48,60 @@ public enum CallbackParser {
     }
 }
 
-public struct AuthTokens: Sendable, Equatable {
-    public let accessToken: String
-    public let refreshToken: String
-}
-
-/// M1 sign-in flow. Behind a flag and untested against a server.
-@MainActor
-public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContextProviding {
-    public static let enabledDefaultsKey = "m1AuthEnabled"
-    public static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledDefaultsKey) }
-
-    private let keychain: Keychain
-    private let session: URLSession
-    private var webSession: ASWebAuthenticationSession?
-
-    public init(keychain: Keychain = Keychain(), session: URLSession = .shared) {
-        self.keychain = keychain
-        self.session = session
-    }
-
-    public func startURL(api: URL, challenge: String, state: String) throws -> URL {
+/// Pure request/response pieces of the contract §5.1 desktop flow (unit-tested).
+public enum DesktopAuthWire {
+    /// `GET {api}/auth/desktop/start?state&code_challenge&code_challenge_method=S256`
+    public static func startURL(api: URL, challenge: String, state: String) throws -> URL {
         guard var c = URLComponents(url: api.appendingPathComponent("auth/desktop/start"), resolvingAgainstBaseURL: false) else {
             throw AuthError.badEndpoint
         }
         c.queryItems = [
+            URLQueryItem(name: "state", value: state),
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "redirect_uri", value: "uls://auth/callback"),
         ]
         guard let u = c.url else { throw AuthError.badEndpoint }
         return u
     }
 
-    public func signIn(api: URL) async throws {
+    /// `POST {api}/auth/desktop/exchange {code, codeVerifier}`
+    public static func exchangeRequest(api: URL, code: String, verifier: String) throws -> URLRequest {
+        struct Body: Encodable { var code: String; var codeVerifier: String }
+        var req = URLRequest(url: api.appendingPathComponent("auth/desktop/exchange"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 20
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        req.httpBody = try enc.encode(Body(code: code, codeVerifier: verifier))
+        return req
+    }
+
+    public static func decodeExchange(status: Int, data: Data) throws -> Session {
+        guard status == 200 else { throw AuthError.exchangeFailed(status) }
+        guard let s = try? JSONDecoder().decode(Session.self, from: data) else { throw AuthError.badResponse }
+        return s
+    }
+}
+
+/// M1 sign-in: ASWebAuthenticationSession (callback scheme `uls`) -> state check -> exchange.
+/// Returns the `Session`; the caller hands it to the daemon via `SessionHandoff`. This type
+/// stores nothing.
+@MainActor
+public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private let session: URLSession
+    private var webSession: ASWebAuthenticationSession?
+
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    public func signIn(api: URL) async throws -> Session {
         let verifier = PKCE.makeVerifier()
         let challenge = PKCE.challenge(forVerifier: verifier)
         let state = PKCE.makeState()
-        let url = try startURL(api: api, challenge: challenge, state: state)
+        let url = try DesktopAuthWire.startURL(api: api, challenge: challenge, state: state)
 
         let callbackURL: URL = try await withCheckedThrowingContinuation { cont in
             let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "uls") { url, error in
@@ -105,26 +120,17 @@ public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContext
         webSession = nil
 
         let cb = try CallbackParser.parse(callbackURL, expectedState: state)
-        let tokens = try await exchange(api: api, code: cb.code, verifier: verifier)
-        try keychain.set(tokens.refreshToken, account: Keychain.Account.refreshToken)
-        Log.auth.info("desktop sign-in completed")
-    }
-
-    func exchange(api: URL, code: String, verifier: String) async throws -> AuthTokens {
-        var req = URLRequest(url: api.appendingPathComponent("auth/desktop/exchange"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: ["code": code, "code_verifier": verifier])
+        let req = try DesktopAuthWire.exchangeRequest(api: api, code: cb.code, verifier: verifier)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw AuthError.badResponse }
-        guard http.statusCode == 200 else { throw AuthError.exchangeFailed(http.statusCode) }
-        struct Body: Decodable { var access_token: String; var refresh_token: String }
-        guard let b = try? JSONDecoder().decode(Body.self, from: data) else { throw AuthError.badResponse }
-        return AuthTokens(accessToken: b.access_token, refreshToken: b.refresh_token)
+        let result = try DesktopAuthWire.decodeExchange(status: http.statusCode, data: data)
+        Log.auth.info("desktop sign-in exchange completed")
+        return result
     }
 
-    public func signOut() {
-        try? keychain.delete(account: Keychain.Account.refreshToken)
+    public func cancel() {
+        webSession?.cancel()
+        webSession = nil
     }
 
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {

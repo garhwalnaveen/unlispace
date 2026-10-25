@@ -10,6 +10,10 @@ public protocol DaemonClient: Sendable {
     func unmount(driveId: String) async throws
     func transfers() async throws -> [TransferInfo]
     func setConfig(_ config: DaemonConfig) async throws
+    /// `auth.set`: hands the M1 session to the daemon, which becomes the only refresh-token holder.
+    func authSet(_ params: AuthSetParams) async throws -> AuthSetResult
+    func authStatus() async throws -> AuthStatus
+    func authSignOut() async throws
     /// Server-push events. Finishes when the connection drops.
     func events() -> AsyncStream<DaemonEvent>
 }

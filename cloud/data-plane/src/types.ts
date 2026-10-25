@@ -41,6 +41,8 @@ export interface CommitResponse {
 	results: CommitResult[];
 }
 export interface ChangeEntry {
+	/** event id: the log rowid, unique and increasing per drive */
+	ev: number;
 	seq: number;
 	path: string;
 	op: string;

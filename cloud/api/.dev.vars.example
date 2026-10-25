@@ -1,0 +1,9 @@
+# Copy to .dev.vars, or run `node ../scripts/dev-keys.mjs` to create the two JWT lines.
+ULS_JWT_PRIVATE_JWK=
+ULS_JWT_PUBLIC_JWKS=
+ULS_DEV_LOG_OTP=1
+# Optional:
+# RESEND_API_KEY=
+# ULS_EMAIL_FROM=login@yourdomain.com
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=

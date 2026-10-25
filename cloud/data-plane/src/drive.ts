@@ -37,7 +37,35 @@ interface VersionRow extends Row {
 }
 
 const PING_INTERVAL_MS = 30_000;
-const ACTOR = "dev"; // M0: single static bearer token, one actor
+/** Internal header the Worker sets (always overwritten) on /watch upgrades: token expiry in epoch seconds, or absent. */
+export const EXP_HEADER = "x-uls-token-exp";
+/** WebSocket close code: token expired (contract M1 §3). Clients reconnect with a fresh token. */
+export const WS_CLOSE_EXPIRED = 4401;
+/** WebSocket close code: drive deleted. */
+export const WS_CLOSE_DELETED = 4404;
+
+/** Per-socket state kept across hibernation via serializeAttachment. */
+interface WsAttachment {
+	/** token expiry, epoch seconds; null for the dev token (never expires) */
+	exp: number | null;
+	/** Replay in progress: last event id already sent. Live events are not pushed to a socket until replay completes. */
+	replayAfter: number | null;
+}
+
+export const MAX_SUBTREE_NODES = 100_000;
+export const MAX_BACKLOG_EVENTS = 100_000;
+const REPLAY_BATCH = 500;
+const REPLAY_TICK_MS = 5;
+const NODE_PAGE = 500;
+const MAX_PATH_BYTES = 1024;
+interface EventRow extends Row {
+	ev: number;
+	seq: number;
+	path: string;
+	op: string;
+	version: string | null;
+}
+const utf8Len = (s: string): number => new TextEncoder().encode(s).length;
 
 /** Thrown inside transactionSync to roll back the whole commit. */
 class Abort {
@@ -45,6 +73,7 @@ class Abort {
 }
 
 interface CommitCtx {
+	actor: string;
 	seq: number;
 	ts: number;
 	events: ChangeEntry[];
@@ -95,9 +124,10 @@ export class DriveAuthority extends DurableObject<Env> {
 	private setMeta(k: string, v: string): void {
 		this.sql.exec("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", k, v);
 	}
+	/** The drive, or null if it was never created or has been (soft) deleted. */
 	private info(): DriveInfo | null {
 		const createdAt = this.getMeta("created_at");
-		if (createdAt === null) return null;
+		if (createdAt === null || this.getMeta("deleted") === "1") return null;
 		const placement = this.getMeta("placement");
 		return {
 			driveId: this.getMeta("drive_id") ?? "",
@@ -121,7 +151,8 @@ export class DriveAuthority extends DurableObject<Env> {
 	// ---------- drives ----------
 
 	create(driveId: string, placement: Placement | null): Result<DriveInfo> {
-		if (this.info()) return fail(409, "drive_exists");
+		// A deleted drive keeps its id: re-creating it is refused too.
+		if (this.getMeta("created_at") !== null) return fail(409, "drive_exists");
 		const createdAt = Date.now();
 		this.ctx.storage.transactionSync(() => {
 			this.setMeta("drive_id", driveId);
@@ -130,6 +161,20 @@ export class DriveAuthority extends DurableObject<Env> {
 			this.setMeta("created_at", String(createdAt));
 		});
 		return ok({ driveId, placement, createdAt });
+	}
+
+	/** Soft delete: refuse every request from now on and close all sockets. Idempotent; absent drives are left absent. */
+	delete(): Result<null> {
+		if (this.getMeta("created_at") === null || this.getMeta("deleted") === "1") return ok(null);
+		this.setMeta("deleted", "1");
+		for (const ws of this.ctx.getWebSockets()) {
+			try {
+				ws.close(WS_CLOSE_DELETED, "drive_deleted");
+			} catch {
+				// already closed
+			}
+		}
+		return ok(null);
 	}
 
 	describe(): Result<DriveInfo & { headSeq: number; fileCount: number; bytes: number }> {
@@ -164,26 +209,26 @@ export class DriveAuthority extends DurableObject<Env> {
 	 * Atomic commit. `confirmed` lists shards the Worker has already HEADed in R2 (hash, size),
 	 * so unknown-but-present hashes are accepted and added to shards_known.
 	 */
-	commit(ops: NormOp[], confirmed: [string, number][]): Result<CommitResponse> {
+	commit(ops: NormOp[], confirmed: [string, number][], actor: string): Result<CommitResponse> {
 		if (!this.info()) return this.noDrive();
-		if (confirmed.length) this.markShards(confirmed);
-
-		// shard presence + size consistency (sync, so no interleaving with other commits)
-		const missing = new Set<string>();
-		for (const op of ops) {
-			if (op.op !== "put") continue;
-			for (const [h, n] of op.shards) {
-				const row = this.sql.exec<{ n: number }>("SELECT n FROM shards_known WHERE h=?", h).toArray()[0];
-				if (!row) missing.add(h);
-				else if (row.n !== n) return fail(400, "bad_manifest", { message: `shard ${h} is ${row.n} bytes, manifest says ${n}` });
+		// Shard registration, consistency checks and the ops share ONE transaction: a failed commit leaves nothing behind.
+		return this.runCommit(actor, (c) => {
+			for (const [h, n] of confirmed) this.sql.exec("INSERT OR IGNORE INTO shards_known(h,n) VALUES(?,?)", h, n);
+			const missing = new Set<string>();
+			for (const op of ops) {
+				if (op.op !== "put") continue;
+				for (const [h, n] of op.shards) {
+					const row = this.sql.exec<{ n: number }>("SELECT n FROM shards_known WHERE h=?", h).toArray()[0];
+					if (!row) missing.add(h);
+					else if (row.n !== n) throw new Abort(fail(400, "bad_manifest", { message: `shard ${h} is ${row.n} bytes, manifest says ${n}` }));
+				}
 			}
-		}
-		if (missing.size) return fail(409, "missing_shards", { hashes: [...missing] });
-
-		return this.runCommit((c) => ops.map((op) => this.applyOp(op, c)));
+			if (missing.size) throw new Abort(fail(409, "missing_shards", { hashes: [...missing] }));
+			return ops.map((op) => this.applyOp(op, c));
+		});
 	}
 
-	restore(key: string, versionId: string, ifVersion: string | null): Result<CommitResponse> {
+	restore(key: string, versionId: string, ifVersion: string | null, actor: string): Result<CommitResponse> {
 		if (!this.info()) return this.noDrive();
 		const v = this.getVersion(versionId);
 		if (!v || v.path !== key) return fail(404, "no_such_version", { path: key, versionId });
@@ -200,15 +245,15 @@ export class DriveAuthority extends DurableObject<Env> {
 			manifest: v.manifest,
 			shards,
 		};
-		return this.runCommit((c) => [this.applyOp(op, c)]);
+		return this.runCommit(actor, (c) => [this.applyOp(op, c)]);
 	}
 
-	private runCommit(fn: (c: CommitCtx) => CommitResult[]): Result<CommitResponse> {
+	private runCommit(actor: string, fn: (c: CommitCtx) => CommitResult[]): Result<CommitResponse> {
 		let events: ChangeEntry[] = [];
 		let response: CommitResponse;
 		try {
 			response = this.ctx.storage.transactionSync(() => {
-				const c: CommitCtx = { seq: this.headSeq() + 1, ts: Date.now(), events: [] };
+				const c: CommitCtx = { actor, seq: this.headSeq() + 1, ts: Date.now(), events: [] };
 				const results = fn(c);
 				this.setMeta("head_seq", String(c.seq));
 				events = c.events;
@@ -224,14 +269,15 @@ export class DriveAuthority extends DurableObject<Env> {
 
 	private logRow(c: CommitCtx, path: string, op: string, versionId: string | null): void {
 		this.sql.exec("INSERT INTO log(seq,path,op,version) VALUES(?,?,?,?)", c.seq, path, op, versionId);
-		c.events.push({ seq: c.seq, path, op, versionId });
+		const row = this.sql.exec<{ ev: number }>("SELECT last_insert_rowid() AS ev").one();
+		c.events.push({ ev: row.ev, seq: c.seq, path, op, versionId });
 	}
 
 	private newVersion(c: CommitCtx, key: string, op: string, size: number | null, manifest: string | null, ctype: string | null, mtime: number | null): string {
 		const id = "v_" + this.ulid();
 		this.sql.exec(
 			"INSERT INTO versions(id,path,op,size,manifest,seq,ts,actor,ctype,mtime) VALUES(?,?,?,?,?,?,?,?,?,?)",
-			id, key, op, size, manifest, c.seq, c.ts, ACTOR, ctype, mtime,
+			id, key, op, size, manifest, c.seq, c.ts, c.actor, ctype, mtime,
 		);
 		return id;
 	}
@@ -301,8 +347,10 @@ export class DriveAuthority extends DurableObject<Env> {
 				const size = node.size ?? 0;
 				if (op.isFolder) {
 					const [lo, hi] = subtree(op.key);
-					const kids = this.sql.exec<NodeRow>("SELECT * FROM nodes WHERE path>=? AND path<?", lo, hi).toArray();
-					for (const k of kids) this.newVersion(c, k.path, "delete", null, null, null, null);
+					this.checkSubtreeSize(lo, hi);
+					this.eachNode(lo, hi, (k) => {
+						this.newVersion(c, k.path, "delete", null, null, null, null);
+					});
 					this.sql.exec("DELETE FROM nodes WHERE path>=? AND path<?", lo, hi);
 				}
 				const vid = this.newVersion(c, op.key, "delete", null, null, null, null);
@@ -328,8 +376,12 @@ export class DriveAuthority extends DurableObject<Env> {
 				};
 				if (op.isFolder) {
 					const [lo, hi] = subtree(op.from);
-					const kids = this.sql.exec<NodeRow>("SELECT * FROM nodes WHERE path>=? AND path<? ORDER BY path", lo, hi).toArray();
-					for (const k of kids) moveOne(k, op.to + k.path.slice(op.from.length));
+					this.checkSubtreeSize(lo, hi);
+					this.checkRenamedPathLengths(lo, hi, op.from, op.to);
+					// Move in key order, one bounded page at a time. The destination is disjoint from the source subtree.
+					this.eachNode(lo, hi, (k) => {
+						moveOne(k, op.to + k.path.slice(op.from.length));
+					});
 					this.sql.exec("DELETE FROM nodes WHERE path>=? AND path<?", lo, hi);
 				}
 				const vid = moveOne(src, op.to);
@@ -340,6 +392,40 @@ export class DriveAuthority extends DurableObject<Env> {
 				return { path: extTo, versionId: vid, size: op.isFolder ? 0 : (src.size ?? 0) };
 			}
 		}
+	}
+
+	/** Aborts the commit if the subtree [lo,hi) has more than MAX_SUBTREE_NODES nodes (bounded count). */
+	private checkSubtreeSize(lo: string, hi: string): void {
+		const n = this.sql
+			.exec<{ n: number }>("SELECT COUNT(*) AS n FROM (SELECT 1 FROM nodes WHERE path>=? AND path<? LIMIT ?)", lo, hi, MAX_SUBTREE_NODES + 1)
+			.one().n;
+		if (n > MAX_SUBTREE_NODES) throw new Abort(fail(400, "subtree_too_large", { limit: MAX_SUBTREE_NODES }));
+	}
+
+	/** Visits nodes in [lo,hi) in key order in bounded pages (keyset pagination; no toArray over the whole subtree). */
+	private eachNode(lo: string, hi: string, fn: (n: NodeRow) => void): void {
+		let after = "";
+		for (;;) {
+			const page = this.sql
+				.exec<NodeRow>("SELECT * FROM nodes WHERE path>=? AND path<? AND path>? ORDER BY path LIMIT ?", lo, hi, after, NODE_PAGE)
+				.toArray();
+			for (const n of page) fn(n);
+			if (page.length < NODE_PAGE) return;
+			after = page[page.length - 1]!.path;
+		}
+	}
+
+	/** Every descendant's new external path must stay within 1024 bytes; otherwise the whole commit aborts. */
+	private checkRenamedPathLengths(lo: string, hi: string, from: string, to: string): void {
+		const delta = utf8Len(to) - utf8Len(from);
+		if (delta <= 0) return;
+		const row = this.sql
+			.exec<{ path: string; type: string }>(
+				"SELECT path, type FROM nodes WHERE path>=? AND path<? AND LENGTH(CAST(path AS BLOB)) + (type='folder') + ? > ? LIMIT 1",
+				lo, hi, delta, MAX_PATH_BYTES,
+			)
+			.toArray()[0];
+		if (row) throw new Abort(fail(400, "path_too_long", { path: extPath(to + row.path.slice(from.length), row.type === "folder") }));
 	}
 
 	// ---------- reads ----------
@@ -405,28 +491,41 @@ export class DriveAuthority extends DurableObject<Env> {
 		return ok({ path: key, versionId: v.id, size: v.size ?? 0, contentType: v.ctype, mtimeMs: v.mtime, shards });
 	}
 
-	versions(key: string) {
+	versions(key: string, cursor: string | null, limit: number) {
 		if (!this.info()) return this.noDrive();
+		// cursor = rowid of the last returned version (oldest first == rowid order, since versions are only appended)
+		const after = cursor === null ? 0 : Number(cursor);
+		if (!Number.isSafeInteger(after) || after < 0) return fail(400, "bad_request", { message: "invalid cursor" });
 		const rows = this.sql
-			.exec<VersionRow>("SELECT id,op,size,seq,ts,actor FROM versions WHERE path=? ORDER BY seq, rowid", key)
+			.exec<VersionRow & { rid: number }>("SELECT rowid AS rid,id,op,size,seq,ts,actor FROM versions WHERE path=? AND rowid>? ORDER BY rowid LIMIT ?", key, after, limit + 1)
 			.toArray();
-		return ok({ versions: rows.map((r) => ({ versionId: r.id, op: r.op, size: r.size, seq: r.seq, ts: r.ts, actor: r.actor })) });
+		const page = rows.slice(0, limit);
+		return ok({
+			versions: page.map((r) => ({ versionId: r.id, op: r.op, size: r.size, seq: r.seq, ts: r.ts, actor: r.actor })),
+			cursor: rows.length > limit ? String(page[page.length - 1]!.rid) : null,
+		});
 	}
 
-	changes(since: number, limit: number) {
+	/** Event id of the last event of commit `seq` (0 if none): `since=<seq>` means `after=<that>`. */
+	private evAfterSeq(seq: number): number {
+		return this.sql.exec<{ m: number }>("SELECT COALESCE(MAX(rowid),0) AS m FROM log WHERE seq<=?", seq).one().m;
+	}
+	private lastEv(): number {
+		return this.sql.exec<{ m: number }>("SELECT COALESCE(MAX(rowid),0) AS m FROM log").one().m;
+	}
+
+	changes(cursor: { after: number } | { since: number }, limit: number) {
 		if (!this.info()) return this.noDrive();
-		const rows = this.readLog(since, limit + 1);
-		return ok({ changes: rows.slice(0, limit), headSeq: this.headSeq(), more: rows.length > limit });
+		const after = "after" in cursor ? cursor.after : this.evAfterSeq(cursor.since);
+		const rows = this.readLog(after, limit + 1);
+		return ok({ changes: rows.slice(0, limit), headSeq: this.headSeq(), lastEv: this.lastEv(), more: rows.length > limit });
 	}
 
-	private readLog(since: number, limit: number): ChangeEntry[] {
+	private readLog(after: number, limit: number): ChangeEntry[] {
 		return this.sql
-			.exec<{ seq: number; path: string; op: string; version: string | null }>(
-				"SELECT seq,path,op,version FROM log WHERE seq>? ORDER BY seq, rowid LIMIT ?",
-				since, limit,
-			)
+			.exec<EventRow>("SELECT rowid AS ev,seq,path,op,version FROM log WHERE rowid>? ORDER BY rowid LIMIT ?", after, limit)
 			.toArray()
-			.map((r) => ({ seq: r.seq, path: r.path, op: r.op, versionId: r.version }));
+			.map((r) => ({ ev: r.ev, seq: r.seq, path: r.path, op: r.op, versionId: r.version }));
 	}
 
 	// ---------- watch (hibernatable WebSockets) ----------
@@ -436,35 +535,50 @@ export class DriveAuthority extends DurableObject<Env> {
 			return Response.json({ error: "upgrade_required" }, { status: 426 });
 		}
 		if (!this.info()) return Response.json({ error: "no_such_drive" }, { status: 404 });
-		const raw = new URL(request.url).searchParams.get("since");
-		const since = raw === null ? this.headSeq() : Number(raw);
-		if (!Number.isSafeInteger(since) || since < 0) return Response.json({ error: "bad_request", message: "since must be a non-negative integer" }, { status: 400 });
+		const q = new URL(request.url).searchParams;
+		const rawAfter = q.get("after");
+		const rawSince = q.get("since");
+		let after: number;
+		if (rawAfter !== null) after = Number(rawAfter);
+		else if (rawSince !== null) after = Number.isSafeInteger(Number(rawSince)) && Number(rawSince) >= 0 ? this.evAfterSeq(Number(rawSince)) : NaN;
+		else after = this.lastEv();
+		if (!Number.isSafeInteger(after) || after < 0) return Response.json({ error: "bad_request", message: "since/after must be a non-negative integer" }, { status: 400 });
+		const rawExp = request.headers.get(EXP_HEADER);
+		const exp = rawExp === null ? null : Number(rawExp);
+		// A token inside its +30 s verification leeway is accepted here; the first alarm tick closes it with 4401.
+		if (exp !== null && !Number.isFinite(exp)) return Response.json({ error: "unauthorized" }, { status: 401 });
 
 		const pair = new WebSocketPair();
 		const client = pair[0];
 		const server = pair[1];
 		this.ctx.acceptWebSocket(server);
-
-		// Replay, then live pushes follow. No await between here and return, so no commit can interleave.
-		let cursor = since;
-		for (;;) {
-			const batch = this.readLog(cursor, 1000);
-			for (const e of batch) server.send(JSON.stringify({ type: "change", ...e }));
-			if (batch.length < 1000) break;
-			cursor = batch[batch.length - 1]!.seq;
+		const last = this.lastEv();
+		if (last - after > MAX_BACKLOG_EVENTS) {
+			server.send(JSON.stringify({ type: "resync", headSeq: this.headSeq(), lastEv: last }));
+			server.close(1000, "resync");
+			return new Response(null, { status: 101, webSocket: client });
 		}
-		if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + PING_INTERVAL_MS);
+		// Replay runs from the alarm in bounded batches; live events skip this socket until it has caught up.
+		server.serializeAttachment({ exp, replayAfter: after < last ? after : null } satisfies WsAttachment);
+		await this.scheduleAlarm(after < last ? Date.now() + REPLAY_TICK_MS : Date.now() + PING_INTERVAL_MS, exp);
 		return new Response(null, { status: 101, webSocket: client });
+	}
+
+	/** Sets the alarm to min(requested, token expiry), never later than an alarm that is already pending. */
+	private async scheduleAlarm(at: number, exp: number | null): Promise<void> {
+		const wake = Math.max(Math.min(at, exp === null ? Infinity : exp * 1000), Date.now() + 1);
+		const current = await this.ctx.storage.getAlarm();
+		if (current === null || wake < current) await this.ctx.storage.setAlarm(wake);
 	}
 
 	private broadcast(events: ChangeEntry[]): void {
 		if (!events.length) return;
-		const sockets = this.ctx.getWebSockets();
-		for (const e of events) {
-			const msg = JSON.stringify({ type: "change", ...e });
-			for (const ws of sockets) {
+		for (const ws of this.ctx.getWebSockets()) {
+			// Sockets still replaying will pick these up from the log; sending now could overtake the replay.
+			if ((ws.deserializeAttachment() as WsAttachment | null)?.replayAfter != null) continue;
+			for (const e of events) {
 				try {
-					ws.send(msg);
+					ws.send(JSON.stringify({ type: "change", ...e }));
 				} catch {
 					// socket already closing; the close handler will clean up
 				}
@@ -494,15 +608,44 @@ export class DriveAuthority extends DurableObject<Env> {
 	}
 
 	async alarm(): Promise<void> {
-		const sockets = this.ctx.getWebSockets();
-		if (!sockets.length) return;
-		for (const ws of sockets) {
+		const now = Date.now();
+		let nextAt = Infinity;
+		let open = 0;
+		let replaying = false;
+		const lastPing = (await this.ctx.storage.get<number>("lastPing")) ?? 0;
+		const ping = lastPing + PING_INTERVAL_MS <= now + REPLAY_TICK_MS;
+		for (const ws of this.ctx.getWebSockets()) {
+			const att = (ws.deserializeAttachment() as WsAttachment | null) ?? { exp: null, replayAfter: null };
+			if (att.exp !== null && att.exp * 1000 <= now) {
+				try {
+					ws.close(WS_CLOSE_EXPIRED, "token_expired");
+				} catch {
+					// already closed
+				}
+				continue;
+			}
+			open++;
+			if (att.exp !== null) nextAt = Math.min(nextAt, att.exp * 1000);
 			try {
-				ws.send(JSON.stringify({ type: "ping" }));
+				if (att.replayAfter !== null) {
+					const batch = this.readLog(att.replayAfter, REPLAY_BATCH);
+					for (const e of batch) ws.send(JSON.stringify({ type: "change", ...e }));
+					const cursor = batch.length ? batch[batch.length - 1]!.ev : att.replayAfter;
+					// Caught up when nothing newer exists; from then on live broadcasts take over (same synchronous turn).
+					const done = batch.length < REPLAY_BATCH;
+					ws.serializeAttachment({ exp: att.exp, replayAfter: done ? null : cursor } satisfies WsAttachment);
+					if (!done) replaying = true;
+				} else if (ping) {
+					ws.send(JSON.stringify({ type: "ping" }));
+				}
 			} catch {
 				// closing
 			}
 		}
-		await this.ctx.storage.setAlarm(Date.now() + PING_INTERVAL_MS);
+		if (open === 0) return;
+		if (ping) await this.ctx.storage.put("lastPing", now);
+		const nextPing = (ping ? now : lastPing) + PING_INTERVAL_MS;
+		nextAt = Math.min(nextAt, replaying ? now + REPLAY_TICK_MS : nextPing);
+		await this.ctx.storage.setAlarm(Math.max(nextAt, now + 1));
 	}
 }

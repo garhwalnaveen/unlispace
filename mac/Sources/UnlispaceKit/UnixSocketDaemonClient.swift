@@ -177,6 +177,16 @@ public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
         _ = try await call("config.set", params: config)
     }
 
+    public func authSet(_ params: AuthSetParams) async throws -> AuthSetResult {
+        try await call("auth.set", params: params).decode(AuthSetResult.self)
+    }
+    public func authStatus() async throws -> AuthStatus {
+        try await call("auth.status", params: Nothing?.none).decode(AuthStatus.self)
+    }
+    public func authSignOut() async throws {
+        _ = try await call("auth.signOut", params: Nothing?.none)
+    }
+
     public func events() -> AsyncStream<DaemonEvent> {
         AsyncStream { continuation in
             let key = UUID()

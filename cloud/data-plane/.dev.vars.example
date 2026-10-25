@@ -1,1 +1,3 @@
+# Local development only. `node cloud/scripts/dev-keys.mjs` fills ULS_JWT_PUBLIC_JWKS (same value as the api's).
 ULS_DEV_TOKEN=dev-token-change-me
+ULS_JWT_PUBLIC_JWKS={"keys":[]}

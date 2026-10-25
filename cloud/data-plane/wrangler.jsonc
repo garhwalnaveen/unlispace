@@ -15,6 +15,15 @@
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["DriveAuthority"] }
   ],
-  // Set with `wrangler secret put ULS_DEV_TOKEN` when deploying; locally it comes from .dev.vars.
-  "secrets": { "required": ["ULS_DEV_TOKEN"] }
+  "vars": {
+    // Must equal the issuer's ULS_ISSUER (the `iss` claim of drive tokens). Local api default shown.
+    "ULS_ISSUER": "http://127.0.0.1:8788",
+    // DEV ONLY: "1" accepts the static ULS_DEV_TOKEN bearer as admin on all drives and enables the public
+    // PUT /v0/drives/{id}. MUST be "0" (or unset) in production: override it in the production environment.
+    "ULS_ALLOW_DEV_TOKEN": "1"
+  },
+  // Secrets are never in this file. Set with `wrangler secret put ULS_JWT_PUBLIC_JWKS` when deploying
+  // ({"keys":[<Ed25519 public JWK with kid>, ...]}, same value as the api's); locally they come from .dev.vars.
+  // ULS_DEV_TOKEN is only needed while ULS_ALLOW_DEV_TOKEN is "1".
+  "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS"] }
 }

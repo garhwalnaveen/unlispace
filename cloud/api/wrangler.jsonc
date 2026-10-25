@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unlispace-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "dev": { "ip": "127.0.0.1", "port": 8788 },
+  // Local dev values. Production overrides these (see README). Secrets never go here.
+  "vars": {
+    "ULS_ISSUER": "http://127.0.0.1:8788",
+    "ULS_DATA_ENDPOINT": "http://127.0.0.1:8787",
+    "ULS_WEB_ORIGIN": "http://127.0.0.1:5173"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "unlispace-control-dev",
+      // Placeholder: local dev/test never touches a remote database. Replace before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "services": [
+    { "binding": "DATA_PLANE", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
+  ],
+  // Cloudflare Email Service binding. Sending domain must be onboarded; see README.
+  "send_email": [{ "name": "EMAIL" }],
+  // Set with `wrangler secret put`; locally they come from .dev.vars (node ../scripts/dev-keys.mjs).
+  "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] }
+}

@@ -10,6 +10,9 @@ export const HASH_RE = /^[0-9a-f]{64}$/;
 const VERSION_RE = /^v_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const enc = new TextEncoder();
+/** Marker message: the Worker maps it to `400 bad_path` (lone surrogates). */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+export const BAD_UNICODE = "path is not well-formed Unicode (lone surrogate)";
 
 export interface ParsedPath {
 	/** path without trailing slash; "" is the root */
@@ -22,6 +25,7 @@ export function parsePath(p: unknown, allowRoot = false): ParsedPath | string {
 	if (typeof p !== "string") return "path must be a string";
 	if (p === "") return allowRoot ? { key: "", isFolder: true } : "path must not be empty";
 	if (p.includes("\0")) return "path contains NUL";
+	if (LONE_SURROGATE_RE.test(p)) return BAD_UNICODE;
 	if (p.startsWith("/")) return "path must not start with '/'";
 	if (enc.encode(p).length > 1024) return "path longer than 1024 bytes";
 	const isFolder = p.endsWith("/");
@@ -36,7 +40,7 @@ export function parsePath(p: unknown, allowRoot = false): ParsedPath | string {
 /** External path form: folders end with "/", root is "". */
 export const extPath = (key: string, isFolder: boolean): string => (isFolder && key !== "" ? key + "/" : key);
 
-const bad = (message: string): Fail => fail(400, "bad_request", { message });
+const bad = (message: string): Fail => (message.includes(BAD_UNICODE) ? fail(400, "bad_path", { message }) : fail(400, "bad_request", { message }));
 
 function parseIfVersion(v: unknown): string | null | Fail {
 	if (v === undefined || v === null) return null;

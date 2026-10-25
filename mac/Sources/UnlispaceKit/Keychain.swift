@@ -12,7 +12,10 @@ public struct Keychain: Sendable {
 
     public enum Account {
         public static let devToken = "dev-token"
-        public static let refreshToken = "refresh-token"
+        /// M0-era app-side refresh token. No longer written; deleted on launch and sign-out.
+        public static let legacyRefreshToken = "refresh-token"
+        /// Session waiting for the daemon to be reachable (see `SessionHandoff`).
+        public static let pendingSession = "pending-session"
     }
 
     public let service: String

@@ -42,9 +42,21 @@ Events have no `id`. Clients must ignore unknown event names. Unknown fields are
 | `drive.unmount` | `{"driveId": str}` | `{}` |
 | `transfers` | none | `{"transfers": [Transfer]}` (active and queued) |
 | `config.set` | `{"endpoint"?: str, "token"?: str, "cacheCapBytes"?: int}` | `{}` |
+| `auth.set` | `{"apiEndpoint": str, "accessToken": str, "refreshToken": str}` | `{"user": {"id": str, "email": str}}` |
+| `auth.status` | none | `{"signedIn": bool, "user"?: {"id": str, "email": str}, "apiEndpoint"?: str}` |
+| `auth.signOut` | none | `{}` (daemon calls `/auth/logout`, unmounts all drives, wipes its Keychain item) |
 
-`config.set` is how the app hands the daemon the endpoint, token and cache cap it holds in the
-Keychain/preferences. Omitted fields are unchanged. The daemon must not log `token`.
+`config.set` is how the app hands the daemon the cache cap. `endpoint`/`token` are the M0
+dev-token path and are kept only for local testing. Omitted fields are unchanged. The daemon
+must not log `token`.
+
+**M1 sign-in (see `docs/design/m1-contract.md` §5.1).** The app runs the desktop PKCE flow, then
+hands the resulting session to the daemon with `auth.set` and keeps no copy. From then on the
+daemon is the only holder of the refresh token. It stores it in the macOS Keychain (service
+`com.unlispace.ulsd`, account = user id), rotates it on refresh, and mints drive tokens with
+`POST /drives/{id}/token`. `drives.list` returns the drives from `GET /orgs`. Once signed in, the
+daemon emits `state` with `idle`; when refresh fails with `invalid_refresh`, it emits
+`signed_out`.
 
 Error codes: `no_such_drive`, `already_mounted`, `not_mounted`, `unauthorized`, `offline`,
 `bad_request`, `internal`. Unknown methods return `bad_request`.

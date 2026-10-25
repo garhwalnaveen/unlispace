@@ -105,14 +105,31 @@ Version ids look like `v_` + 26-char ULID. Clients treat them as opaque.
 
 ### 3.5 Changes
 
-`GET /v0/drives/{driveId}/changes?since=<seq>&limit=<≤1000>` returns `200 {"changes":[{"seq","path","op","versionId"|null}],"headSeq","more":bool}`.
+**Amended 2026-10-25 (review finding: seq-only pagination dropped events).** Every log entry gets
+`ev`, an integer event id that is unique and strictly increasing per drive (the log rowid). One
+commit (`seq`) can produce many events, for example auto-created parents or folder moves.
 
-`GET /v0/drives/{driveId}/watch?since=<seq>` is a **WebSocket upgrade** (bearer passed as `?token=` because browsers can't set headers; header auth is also accepted).
-- The server first replays any changes after `since`.
-- It then pushes `{"type":"change","seq","path","op","versionId"}` for each change as it is committed.
-- It sends `{"type":"ping"}` every 30 s; clients reply `{"type":"pong"}`.
-- The DO uses the hibernation API (`ctx.acceptWebSocket`).
-- Clients reconnect with the last `seq` they saw.
+`GET /v0/drives/{driveId}/changes?after=<ev>&limit=<≤1000>` returns
+`200 {"changes":[{"ev","seq","path","op","versionId"|null}],"headSeq","lastEv","more":bool}`.
+`after` is exclusive. Pages are cut by `ev`, so a commit larger than `limit` spans pages without
+losing anything. `since=<seq>` is still accepted, meaning "events of commits with seq > since"; it
+is equivalent to `after = <last ev of commit seq>`.
+
+`GET /v0/drives/{driveId}/watch?after=<ev>` (or `since=<seq>`) is a **WebSocket upgrade**. The bearer can be passed as `?token=`, because browsers can't set headers on a WebSocket; header auth is also accepted.
+- The server returns `101` promptly, then replays events after the cursor in bounded batches, with the replay cursor stored per socket.
+- Live events for that socket are queued behind the replay, so they can never overtake it.
+- Each event is `{"type":"change","ev","seq","path","op","versionId"}`.
+- The server sends `{"type":"ping"}` every 30 s, and clients reply `{"type":"pong"}`. The DO uses the hibernation API (`ctx.acceptWebSocket`).
+- Clients persist the last `ev` they processed and reconnect with `after=<ev>`.
+- If the backlog exceeds 100,000 events, the server sends `{"type":"resync","headSeq","lastEv"}` and closes. The client then re-lists from scratch and resumes from `lastEv`.
+
+### 3.6 Amendments from review (2026-10-25)
+- `GET /versions` takes `cursor` and `limit` (≤ 1000, default 1000) and returns `{"versions":[…],"cursor":string|null}`, oldest first. History is never silently truncated.
+- `mkdir` on an existing folder is **idempotent**. It returns the existing versionId and creates no version or log entry. This overrides "every op gets its own new version id" for that case only.
+- Every path a commit *produces* must also meet the §3.3 path rules, including descendants of a folder rename. If any would be over 1024 bytes, the whole commit fails with `400 {"error":"path_too_long","path"}`.
+- Paths must be well-formed Unicode; lone surrogates get `400 bad_path`.
+- JSON bodies are read as a stream with a byte cap, never buffered whole. Going over the cap gives `413 too_large`.
+- Folder delete and rename are limited to subtrees of ≤ 100,000 nodes per commit. Larger subtrees get `400 {"error":"subtree_too_large","limit":100000}`. M1's node-id tree makes these operations constant-time and removes the limit.
 
 ## 4. DO storage (SQLite) — reference schema
 

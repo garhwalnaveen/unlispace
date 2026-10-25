@@ -1,4 +1,4 @@
-# Contract interpretation notes (M0)
+# Contract interpretation notes (M0 + M1 auth)
 
 Where `docs/design/m0-contract.md` was ambiguous, this is what the data plane does.
 
@@ -33,7 +33,34 @@ Where `docs/design/m0-contract.md` was ambiguous, this is what the data plane do
     `400 bad_manifest` on disagreement.
 14. **Schema additions** (reference schema otherwise as written): `nodes.parent` (+ index) for paginated listing,
     `versions.ctype`/`versions.mtime` so historical manifests return their own content type and mtime.
-15. **Large manifests (> 1 MiB, R2 `manifests/...`) are not implemented.** A commit body is capped at 1 MiB and a
+15. (M0) **Large manifests (> 1 MiB, R2 `manifests/...`) are not implemented.** A commit body is capped at 1 MiB and a
     manifest entry is about 70 bytes of JSON, so inline manifests fit well under the 2 MB DO row cap. Needed for M1.
 16. **Folder `stat`** returns `size: 0`, `contentType: null`. Root stat (`path=`) returns a synthetic folder.
 17. **Errors beyond the contract:** `400 bad_request`, `404 not_found`/`no_such_version`, `405`, `411`, `426`.
+
+## M1 (auth, lifecycle) and review amendments
+
+18. **JWT format verified** (`src/jwt.ts`): `b64url(header).b64url(payload).b64url(sig)`, header `{alg:"EdDSA",typ:"JWT",kid}`,
+    signature = raw 64-byte Ed25519 over the ASCII `header.payload`, JWKS `{"keys":[{kty:"OKP",crv:"Ed25519",kid,x}]}`.
+    Claims checked: `iss == ULS_ISSUER`, `typ == "drive"`, `exp` (seconds, +30 s leeway), `nbf` if present, `sub` non-empty
+    string, `drives[]` of `{id, access}`. Anything else fails closed with 401. Entries with an unknown `access` are ignored.
+19. **Access** is ordered read < write < admin; the highest grant for a drive id wins. A route/method outside the §3 table
+    gets `405`/`404 not_found` after auth. Unknown drive, drive not in claim, or too little access are all `404 no_such_drive`
+    (before any DO call), so existence is not probeable. The dev token skips the claim check.
+20. **Expiry and `4401`.** The Worker passes the token `exp` to the DO in an internal header (client copies are stripped);
+    the DO stores it in the socket attachment and an alarm closes with `4401 token_expired` at `exp`. A token inside its
+    30 s verification leeway can still open a socket; the first alarm tick (immediately) closes it with 4401. Dev-token sockets never expire.
+21. **Soft delete**: DO `meta.deleted=1`; every DO method answers `404 no_such_drive`, sockets are closed with `4404 drive_deleted`,
+    `deleteDrive` is idempotent (also for absent ids), and the id can **not** be re-created (`createDrive` gives `drive_exists`).
+    R2 shards and DO data are kept (no hard purge in M1).
+22. **`createDrive` error**: a thrown `DriveExistsError` (`name`, `message` = `drive_exists: <id>`; `code`/`status` properties
+    may not survive every RPC boundary, so match on `name` or the `drive_exists` message prefix). Invalid ids or placements throw `TypeError`.
+23. **Existence**: shard and commit calls on a never-created drive are `404 no_such_drive` for every principal (M0 behaviour kept).
+24. **Review fixes** (see `m0-contract.md` §3.5/§3.6): shard PUT passes `sha256` to R2 (checksum failure -> `400 hash_mismatch`, no
+    delete path); log entries carry `ev` (rowid), `/changes` and `/watch` take `after=<ev>` and `since=<seq>`, watch replays in bounded
+    alarm-driven batches with live events withheld until caught up, backlog > 100k events -> `resync` + close; JSON bodies are
+    stream-capped (413); `/versions` is paginated (opaque cursor = last version rowid); folder delete/rename page through the
+    subtree, > 100,000 nodes -> `400 subtree_too_large`; descendants of a folder rename > 1024 bytes -> `400 path_too_long`; lone
+    surrogates -> `400 bad_path`; shard registration happens in the commit transaction; query tokens only for GET watch upgrades;
+    dev-token compare uses `crypto.subtle.timingSafeEqual` over SHA-256 digests; existing-folder mkdir stays idempotent.
+25. **Shard PUT size** is `Content-Length` (R2 enforces the stream length via `FixedLengthStream`); if the object already existed, its R2 size is recorded.

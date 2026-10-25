@@ -5,9 +5,15 @@ public actor MockDaemonClient: DaemonClient {
     private var drives: [DriveInfo]
     private var state: EngineState
     private var activeTransfers: [TransferInfo] = []
+    private var user: AuthUser?
+    private var apiEndpoint: String?
+    private let demoEmail: String
     private var subscribers: [UUID: AsyncStream<DaemonEvent>.Continuation] = [:]
 
-    public init(drives: [DriveInfo]? = nil, state: EngineState = .idle) {
+    public init(drives: [DriveInfo]? = nil, state: EngineState = .idle, signedInAs email: String? = nil,
+                demoEmail: String = "demo@unlispace.local") {
+        self.demoEmail = demoEmail
+        if let email { self.user = AuthUser(id: "u_mock", email: email) }
         self.drives = drives ?? [
             DriveInfo(driveId: "demo", name: "Demo Drive", mountState: .unmounted),
             DriveInfo(driveId: "work", name: "Work", mountState: .unmounted),
@@ -22,7 +28,8 @@ public actor MockDaemonClient: DaemonClient {
     }
 
     public func status() async throws -> DaemonStatus {
-        DaemonStatus(version: "mock", state: state, message: "Mock engine", pendingOps: activeTransfers.count)
+        let state = user == nil && self.state == .idle ? EngineState.signedOut : self.state
+        return DaemonStatus(version: "mock", state: state, message: "Mock engine", pendingOps: activeTransfers.count)
     }
 
     public func listDrives() async throws -> [DriveInfo] { drives }
@@ -46,7 +53,34 @@ public actor MockDaemonClient: DaemonClient {
 
     public func transfers() async throws -> [TransferInfo] { activeTransfers }
 
-    public func setConfig(_ config: DaemonConfig) async throws {}
+    public private(set) var lastConfig: DaemonConfig?
+    public func setConfig(_ config: DaemonConfig) async throws { lastConfig = config }
+
+    public func authSet(_ params: AuthSetParams) async throws -> AuthSetResult {
+        guard !params.accessToken.isEmpty, !params.refreshToken.isEmpty else {
+            throw DaemonClientError.remote(DaemonError(code: "bad_request", message: "empty token"))
+        }
+        let u = AuthUser(id: "u_mock", email: demoEmail)
+        user = u
+        apiEndpoint = params.apiEndpoint
+        state = .idle
+        emit(.state(StateEvent(state: .idle)))
+        return AuthSetResult(user: u)
+    }
+
+    public func authStatus() async throws -> AuthStatus {
+        AuthStatus(signedIn: user != nil, user: user, apiEndpoint: user == nil ? nil : apiEndpoint)
+    }
+
+    public func authSignOut() async throws {
+        user = nil
+        apiEndpoint = nil
+        for i in drives.indices { drives[i].mountState = .unmounted; drives[i].mountPath = nil }
+        state = .signedOut
+        emit(.state(StateEvent(state: .signedOut)))
+    }
+
+    public func pushChange(_ c: ChangeEvent) { emit(.change(c)) }
 
     public func setState(_ s: EngineState) {
         state = s
