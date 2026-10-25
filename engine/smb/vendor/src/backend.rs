@@ -156,7 +156,8 @@ impl FileInfo {
     /// SMB2 file attributes (MS-FSCC 2.6) for this file:
     /// `FILE_ATTRIBUTE_DIRECTORY` for directories and
     /// `FILE_ATTRIBUTE_READONLY` for read-only files.
-    /// `FILE_ATTRIBUTE_NORMAL` stands alone when neither applies.
+    /// `FILE_ATTRIBUTE_ARCHIVE` is set on every file (macOS smbfs needs it).
+    /// `FILE_ATTRIBUTE_NORMAL` stands alone when nothing else applies.
     pub fn attributes(&self) -> u32 {
         let mut attributes = 0;
         if self.is_directory {
@@ -164,6 +165,12 @@ impl FileInfo {
         }
         if self.read_only {
             attributes |= FILE_ATTRIBUTE_READONLY;
+        }
+        // Like Windows servers, report ARCHIVE on files. macOS smbfs maps a
+        // missing ARCHIVE bit to the superuser-only SF_ARCHIVED flag
+        // (smbfs_vnops.c), which makes unprivileged `cp -p`/`chflags` fail.
+        if !self.is_directory {
+            attributes |= FILE_ATTRIBUTE_ARCHIVE;
         }
         if attributes == 0 {
             FILE_ATTRIBUTE_NORMAL
@@ -319,7 +326,7 @@ pub trait Handle: Send + Sync {
     ///
     /// `LocalFsBackend` stores `READONLY` on files: on Unix as the absence
     /// of write permission bits, on Windows as the host attribute. It
-    /// accepts `ARCHIVE` without storing it and never reports it. Every
+    /// accepts `ARCHIVE` without storing it; reports it on every file. Every
     /// other flag, and `READONLY` on a directory, returns `NotSupported`.
     async fn set_attributes(&self, attributes: u32) -> SmbResult<()>;
 
@@ -505,5 +512,21 @@ impl Default for VolumeInfo {
             label: None,
             max_name_length: 255,
         }
+    }
+}
+
+#[cfg(test)]
+mod attribute_tests {
+    use super::*;
+
+    #[test]
+    fn files_report_archive_and_directories_do_not() {
+        let mut file = FileInfo::new("f");
+        assert_eq!(file.attributes(), FILE_ATTRIBUTE_ARCHIVE);
+        file.read_only = true;
+        assert_eq!(file.attributes(), FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_READONLY);
+        let mut dir = FileInfo::new("d");
+        dir.is_directory = true;
+        assert_eq!(dir.attributes(), FILE_ATTRIBUTE_DIRECTORY);
     }
 }

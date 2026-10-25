@@ -29,8 +29,8 @@ impl MountAdapter for Adapter {
     fn access(&self) -> NeedAccess { NeedAccess::Read }
     async fn mount(&self, req: MountRequest) -> Result<Arc<dyn MountHandle>, MountError> {
         *self.captured.vfs.lock().unwrap() = Some(req.vfs.clone());
-        *self.captured.nfs.lock().unwrap() = Some(Arc::new(UlsFs::new(req.client.clone(), req.drive_id.clone(), 501, 20).with_invalidations(&req.vfs)));
-        if self.native { ulsd::nfs_adapter::NfsAdapter.mount(req).await }
+        *self.captured.nfs.lock().unwrap() = Some(Arc::new(UlsFs::new(req.vfs.clone(), 501, 20, true)));
+        if self.native { ulsd::nfs_adapter::NfsAdapter { read_only: true }.mount(req).await }
         else { Ok(Arc::new(Handle)) }
     }
 }
@@ -166,4 +166,47 @@ async fn resync_invalidates_cached_tree_and_persists_event_cursor() {
     task.abort();
     let _ = task.await;
     vfs.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn vfs_conflict_is_broadcast_with_leading_slash_paths() {
+    let server = uls_mock::MockServer::start("local").await;
+    let client = Client::builder(server.url(), "local").build().unwrap();
+    client.create_drive("drive", None).await.unwrap();
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let file = dir.path().join("seed");
+    std::fs::write(&file, b"base").unwrap();
+    client.upload_file("drive", &file, "docs/a.txt", None).await.unwrap();
+    let captured = Arc::new(Captured::default());
+    let engine = Engine::new(config(dir.path(), server.url()), Arc::new(Adapter { captured: captured.clone(), native: false }));
+    ok(&engine, "config.set", json!({"token":"local"})).await;
+    assert!(call(&engine, "drive.mount", json!({"driveId":"drive"})).await.error.is_none());
+    let vfs = captured.vfs.lock().unwrap().clone().unwrap();
+    let mut events = engine.subscribe();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while server.stats.watch_connects.load(std::sync::atomic::Ordering::SeqCst) == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+
+    vfs.write("docs/a.txt", 0, b"ours").await.unwrap();
+    std::fs::write(&file, b"theirs").unwrap();
+    client.upload_file("drive", &file, "docs/a.txt", None).await.unwrap();
+    change(&mut events, "/docs/a.txt").await;
+    vfs.flush("docs/a.txt").await.unwrap();
+
+    let data = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let event: Value = serde_json::from_str(&events.recv().await.unwrap()).unwrap();
+            if event["event"] == "conflict" { break event["data"].clone(); }
+        }
+    }).await.expect("conflict event");
+    assert_eq!(data["driveId"], "drive");
+    assert_eq!(data["path"], "/docs/a.txt");
+    let copy = data["copy"].as_str().unwrap();
+    assert!(copy.starts_with("/docs/a (conflict, ") && copy.ends_with(").txt"), "{copy}");
+    assert_eq!(data.as_object().unwrap().len(), 3);
+    // The preserved local edit exists remotely under the announced name.
+    assert_eq!(client.read_range("drive", copy.trim_start_matches('/'), 0, 100).await.unwrap().as_ref(), b"ours");
+    engine.shutdown().await;
+    captured.vfs.lock().unwrap().take();
+    captured.nfs.lock().unwrap().take();
 }

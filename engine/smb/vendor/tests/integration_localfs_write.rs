@@ -856,7 +856,7 @@ async fn read_only_attribute_is_applied_and_others_are_rejected() {
         .query_file_info(file_id, FILE_BASIC_INFORMATION)
         .await
         .unwrap();
-    assert_eq!(attributes_of(&basic), FILE_ATTRIBUTE_READONLY);
+    assert_eq!(attributes_of(&basic), FILE_ATTRIBUTE_READONLY | 0x20);
     assert!(std::fs::metadata(&path).unwrap().permissions().readonly());
     c.close(file_id).await;
 
@@ -902,7 +902,7 @@ async fn read_only_attribute_is_applied_and_others_are_rejected() {
         .query_file_info(file_id, FILE_BASIC_INFORMATION)
         .await
         .unwrap();
-    assert_eq!(attributes_of(&basic), FILE_ATTRIBUTE_NORMAL);
+    assert_eq!(attributes_of(&basic), 0x20);
     assert_eq!(
         c.set_info(
             file_id,

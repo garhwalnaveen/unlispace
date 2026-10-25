@@ -517,6 +517,9 @@ impl Engine {
                     Ok(VfsEvent::Transfer { bytes, .. }) => {
                         me.emit(&Event::Transfer(upload_transfer(&id, bytes, TransferStatus::Done)));
                     }
+                    Ok(VfsEvent::Conflict { path, copy }) => {
+                        me.emit(&Event::Conflict(ConflictEvent { drive_id: id.clone(), path: slashed(&path), copy: slashed(&copy) }));
+                    }
                     Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
@@ -569,6 +572,11 @@ impl Engine {
         }
         Ok(())
     }
+}
+
+/// The Vfs uses paths without a leading slash; the protocol always has one.
+fn slashed(p: &str) -> String {
+    format!("/{}", p.trim_start_matches('/'))
 }
 
 // The VFS exposes a per-drive pending summary and completed batches, not per-file progress.

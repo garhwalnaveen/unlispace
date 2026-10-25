@@ -791,3 +791,29 @@ async fn signed_mac_style_stream_compounds_secure_negotiate_and_cancel() {
     drop(c);
     server.shutdown().await.unwrap();
 }
+
+/// macOS smbfs maps a missing ARCHIVE bit to the root-only SF_ARCHIVED flag,
+/// which broke unprivileged `cp -p`. Files must report ARCHIVE; directories not.
+#[tokio::test]
+async fn files_report_archive_attribute_and_directories_do_not() {
+    let b = Arc::new(MemBackend::new());
+    let server = uls_smb::serve(b.clone(), false).await.unwrap();
+    let mut c = Signed::connect(&server).await;
+    let file = c
+        .create(Create { name: "f", disposition: FILE_CREATE, access: FILE_ALL_ACCESS, ..Create::default() })
+        .await;
+    // FileBasicInformation (class 4): attributes at offset 32.
+    let r = c.request(Command::QueryInfo, &query(file, InfoType::File, 4)).await;
+    let info = QueryInfoResponse::parse(&r[64..]).unwrap().buffer;
+    assert_eq!(u32::from_le_bytes(info[32..36].try_into().unwrap()) & 0x20, 0x20);
+    c.close(file).await;
+    let root = c
+        .create(Create { options: FILE_DIRECTORY_FILE, access: FILE_GENERIC_READ, ..Create::default() })
+        .await;
+    let r = c.request(Command::QueryInfo, &query(root, InfoType::File, 4)).await;
+    let info = QueryInfoResponse::parse(&r[64..]).unwrap().buffer;
+    assert_eq!(u32::from_le_bytes(info[32..36].try_into().unwrap()) & 0x20, 0);
+    c.close(root).await;
+    drop(c);
+    server.shutdown().await.unwrap();
+}
