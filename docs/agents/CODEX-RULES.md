@@ -11,14 +11,14 @@ branch `m0-spike`. The coordinator (Claude) reviews, integrates and commits your
 - Never: `git commit`/`push`/`reset`/`checkout`, `sudo`, edit System Settings or `/etc`,
   `launchctl`, deploy (`wrangler deploy`), create remote Cloudflare/AWS resources, or call
   external services in tests.
-- Disk is tight (about 3 GB free). No `cargo build --release`. Reuse `engine/target`. Keep test
+- Disk: about 25 GB free. No `cargo build --release`. Reuse `engine/target`. Keep test
   data ≤ 64 MiB, in tempdirs under `/tmp`, and delete it afterwards. Don't install new toolchains.
 - Pin dependencies to exact versions. To add a Rust dependency, append one line to
   `[workspace.dependencies]` in `engine/Cargo.toml`. That's the only shared-file edit allowed.
   npm: exact versions.
 - No secrets in committed files. Never print tokens.
 - Specs are normative: `docs/design/product-design.md`, `docs/design/m0-contract.md` (with the
-  amended §3.5–3.6), `docs/design/m1-contract.md`, `mac/DAEMON-PROTOCOL.md`. If a spec is wrong or
+  amended §3.5–3.6), `docs/design/m1-contract.md`, `docs/design/m3-contract.md`, `mac/DAEMON-PROTOCOL.md`. If a spec is wrong or
   ambiguous, follow the most reasonable reading and record it in your report.
 - Finish with the build, lint and test commands your task lists, all green. Report honestly:
   paste the summary lines, and say what you did NOT verify.
