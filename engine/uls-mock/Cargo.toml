@@ -1,0 +1,18 @@
+[package]
+name = "uls-mock"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "In-memory implementation of the M0 contract, for tests and offline development"
+
+[lints]
+workspace = true
+
+[dependencies]
+uls-proto.workspace = true
+uls-chunk.workspace = true
+axum = { workspace = true, features = ["ws", "json", "query", "tokio", "http1"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytes.workspace = true

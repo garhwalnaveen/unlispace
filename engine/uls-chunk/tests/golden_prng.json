@@ -1,0 +1,70 @@
+{
+  "avg": 2097152,
+  "chunks": [
+    {
+      "h": "e4febd509868532137b24baa88fb65309e79460bfde14aa3f20a507e23168b3b",
+      "n": 2706085
+    },
+    {
+      "h": "9ad835570de3d8851e302ba7077c59fff8e60e013de705ce84466b97a0e43fdd",
+      "n": 1709758
+    },
+    {
+      "h": "9ca46ce42c150bad7cfd3f9dff6a1122844cea4a09848292d231e4669cacbe76",
+      "n": 515029
+    },
+    {
+      "h": "0d1cee0f9ee85d3c618c22d82a278e146afa1b4ec283a5aee287f7186526bc81",
+      "n": 2515723
+    },
+    {
+      "h": "48a74e3c33e2e77a084b5cff883f83ce0edc505816c596c4f2a0b0974afb8c39",
+      "n": 2420523
+    },
+    {
+      "h": "61af9e869e620483ea8beacb57a69c4cb6a69a11a719f05414fa4788f18632e8",
+      "n": 2231469
+    },
+    {
+      "h": "b695a586fed179c626e943f32616293124237282b744ffe98d739bb319f27af3",
+      "n": 3256721
+    },
+    {
+      "h": "6fb97efce6a33b14e5756e35f28bb2dd259228b98634f602a8da4ff197d93bf0",
+      "n": 2225565
+    },
+    {
+      "h": "8bf78db4a71cb050b0f4734705bbe572680bea9d838f04b6bd6e43839a1c3886",
+      "n": 2124252
+    },
+    {
+      "h": "77dc42cabc7a06e2ed5c6054a682217f560441cf953764cbdb1c66e58a19ea7a",
+      "n": 4125491
+    },
+    {
+      "h": "5b0c6acb5000897da42921e492e3d38f324319df8ac387253da72b2d6f56460b",
+      "n": 2234246
+    },
+    {
+      "h": "9a96b4768fddc3f183a6dce6081760dc35bc85cd5cd4f42160e31256313341ee",
+      "n": 2109834
+    },
+    {
+      "h": "478c47084528fc29be195ca08cbb11d1b3da07216f85b2e3477425b8f1665d16",
+      "n": 3396250
+    },
+    {
+      "h": "c9f2ebde37e2cad77baf4d65633784d3ec4507fd883770744107f803bf89a09a",
+      "n": 542302
+    },
+    {
+      "h": "6607863c5556df844f023106c922d275f58c86f1d7cf2e970a34f335ab77f244",
+      "n": 1441184
+    }
+  ],
+  "description": "supplementary: splitmix64 seed 0x756c73, little-endian u64 stream truncated to 33554432 bytes; fastcdc v3.2.1 v2020 normalization level 1",
+  "inputLength": 33554432,
+  "inputSha256": "b9e710b60d067e8e25cfb0356f9ade2c25746ac0ee4c2ab770f1e69d4f53ceef",
+  "max": 16777216,
+  "min": 262144
+}

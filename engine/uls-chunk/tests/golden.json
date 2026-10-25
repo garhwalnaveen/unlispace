@@ -1,0 +1,18 @@
+{
+  "avg": 2097152,
+  "chunks": [
+    {
+      "h": "136c0a30d6325e8cdc39f61eb6fbab76666eb254877878fe7cc35d9b6ec584a7",
+      "n": 16777216
+    },
+    {
+      "h": "136c0a30d6325e8cdc39f61eb6fbab76666eb254877878fe7cc35d9b6ec584a7",
+      "n": 16777216
+    }
+  ],
+  "description": "contract section 1: b[i] = ((i * 2654435761) >> 13) & 0xff, i in 0..33554432, u64 wrapping; fastcdc v3.2.1 v2020 normalization level 1",
+  "inputLength": 33554432,
+  "inputSha256": "401b36b9e4f91e967e815f96fd293cb384222d3e73e1b9fcf759d5ecfadfdbf8",
+  "max": 16777216,
+  "min": 262144
+}

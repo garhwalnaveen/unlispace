@@ -1,0 +1,28 @@
+[package]
+name = "uls-client"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+uls-proto.workspace = true
+uls-chunk.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+dirs.workspace = true
+mime_guess.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+uls-mock.workspace = true
+wiremock.workspace = true
+tempfile.workspace = true

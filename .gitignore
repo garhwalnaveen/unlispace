@@ -41,3 +41,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# unlispace cloud + engine
+cloud/**/node_modules
+cloud/**/.wrangler
+cloud/**/.dev.vars
+engine/target

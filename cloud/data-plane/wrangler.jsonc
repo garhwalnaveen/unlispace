@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unlispace-data-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "r2_buckets": [
+    { "binding": "SHARDS", "bucket_name": "unlispace-shards-dev" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DriveAuthority"] }
+  ],
+  // Set with `wrangler secret put ULS_DEV_TOKEN` when deploying; locally it comes from .dev.vars.
+  "secrets": { "required": ["ULS_DEV_TOKEN"] }
+}
