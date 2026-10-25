@@ -38,6 +38,14 @@ pub fn chunk_slice(data: &[u8]) -> Vec<Chunk> {
         .collect()
 }
 
+/// First complete chunk in a growing buffer, or `None` if more input is needed.
+/// Set `eof` only at the real end of the file: a short buffer's end is not a CDC boundary.
+pub fn first_chunk_length(data: &[u8], eof: bool) -> Option<usize> {
+    let chunk = FastCDC::new(data, MIN_SIZE, AVG_SIZE, MAX_SIZE).next()?;
+    (eof || chunk.length < data.len() || data.len() >= MAX_SIZE as usize)
+        .then_some(chunk.length)
+}
+
 /// Streaming chunker over any `Read`. Yields each chunk together with its bytes, so memory
 /// use is bounded by the maximum chunk size.
 pub fn chunk_reader<R: Read>(reader: R) -> impl Iterator<Item = io::Result<(Chunk, Vec<u8>)>> {

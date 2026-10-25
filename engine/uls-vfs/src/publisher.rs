@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use bytes::Bytes;
@@ -42,8 +42,10 @@ fn ready(n: &Node, opts: &VfsOptions, now: i64) -> bool {
 fn ready_count(c: &Core, opts: &VfsOptions, force: bool) -> usize {
     let now = now_ms(); let mut count = 0;
     for a in c.state.actions.iter().take(uls_proto::MAX_COMMIT_OPS) {
+        // A replaced or removed file can never be flushed again, so it must not hold up the queue.
         if let Action::File { id, .. } = a
-            && !force && c.state.node(*id).is_some_and(|n| !ready(n, opts, now)) { break; }
+            && !force && !c.state.retired.contains_key(id)
+            && c.state.node(*id).is_some_and(|n| !ready(n, opts, now)) { break; }
         count += 1;
     }
     // Neighbouring closes coalesce at their latest quiet deadline, bounded by dirty age.
@@ -63,6 +65,7 @@ fn next_delay(c: &Core, opts: &VfsOptions) -> Duration {
     for action in c.state.actions.iter().take(uls_proto::MAX_COMMIT_OPS) {
         if let Action::File { id, .. } = action && let Some(n) = c.state.node(*id) {
             found = true;
+            if c.state.retired.contains_key(id) { continue; }
             maximum = maximum.min(n.dirty_since.unwrap_or_else(now_ms).saturating_add(opts.max_dirty_age.as_millis() as i64));
             if !n.flushed { break; }
             quiet = quiet.max(n.modified_ms.saturating_add(opts.quiet_window.as_millis() as i64));
@@ -289,30 +292,78 @@ impl Inner {
         }
         Ok(())
     }
-    /// Fold to disk in bounded ranges, then stream FastCDC; retain hashes and offsets only.
+    /// Re-chunk the dirty window; old boundaries beyond it allow the untouched suffix to be reused.
     async fn fold(&self, dir: &Path, n: &Node) -> Result<Vec<ShardRef>, FsError> {
-        let scratch = dir.join(format!("fold-{}-{}.tmp", n.attr.id, n.revision));
-        let mut f = File::create(&scratch)?; let mut off = 0;
-        while off < n.attr.size {
-            let bytes = self.read_node(dir, n, off, (1 << 20).min(n.attr.size-off)).await?;
-            f.write_all(&bytes)?; off += bytes.len() as u64;
+        let base = n.base.as_ref().map_or(&[][..], |m| m.shards.as_slice());
+        let mut boundaries = BTreeMap::new();
+        let mut base_size = 0;
+        for (i, shard) in base.iter().enumerate() {
+            base_size += shard.n; boundaries.insert(base_size, i + 1);
         }
-        drop(f); let scan = scratch.clone();
-        let chunks = tokio::task::spawn_blocking(move || {
-            uls_chunk::chunk_reader(File::open(scan)?).map(|c| c.map(|(chunk,_)| chunk)).collect::<std::io::Result<Vec<_>>>()
-        }).await.map_err(|e| FsError::Io(e.to_string()))??;
+        let mut first = n.attr.size;
+        let mut last = 0;
+        for e in &n.extents {
+            if e.off < n.attr.size && e.len > 0 {
+                first = first.min(e.off); last = last.max((e.off + e.len).min(n.attr.size));
+            }
+        }
+        let unchanged = base_size.min(n.base_limit).min(n.attr.size);
+        if unchanged < base_size || unchanged < n.attr.size {
+            first = first.min(unchanged); last = n.attr.size;
+        }
+        // An EOF chunk can be shorter than a natural CDC chunk, so append must reopen it.
+        let mut shards = vec![];
+        let mut off = 0;
+        for shard in base {
+            let end = off + shard.n;
+            if end > first || (end == base_size && n.attr.size > base_size) { break; }
+            shards.push(shard.clone()); off = end;
+        }
+        let scratch = Scratch(dir.join(format!("fold-{}-{}.tmp", n.attr.id, n.revision)));
+        let mut f = File::create(&scratch.0)?;
         let mut locations = BTreeMap::new();
-        let shards = chunks.iter().map(|c| { locations.insert(c.hash.clone(),(c.offset,c.length));
-            ShardRef { h: c.hash.clone(), n: c.length as u64 } }).collect();
-        let hashes = locations.keys().cloned().collect::<Vec<_>>();
-        let missing = self.client.missing(&self.drive, &hashes).await?;
-        let mut f = File::open(&scratch)?;
-        for hash in missing {
-            let (off,len) = locations.get(&hash).ok_or_else(|| FsError::Io("unknown missing shard".into()))?;
-            let mut data = vec![0; *len]; f.seek(SeekFrom::Start(*off))?; f.read_exact(&mut data)?;
-            self.client.put_shard(&self.drive, &hash, Bytes::from(data)).await?;
+        let mut buffer = Vec::new();
+        let mut read_off = off;
+        let mut stored = 0;
+        while off < n.attr.size {
+            if let Some(len) = uls_chunk::first_chunk_length(&buffer, read_off == n.attr.size) {
+                let hash = uls_chunk::sha256_hex(&buffer[..len]);
+                f.write_all(&buffer[..len])?;
+                locations.insert(hash.clone(), (stored, len)); stored += len as u64;
+                shards.push(ShardRef { h: hash, n: len as u64 });
+                off += len as u64; buffer.drain(..len);
+                if off >= last && off < n.attr.size && off <= unchanged && let Some(&i) = boundaries.get(&off) {
+                    shards.extend_from_slice(&base[i..]); break;
+                }
+            } else {
+                // Two lookahead bytes distinguish a natural cut at an old boundary from EOF.
+                let next = boundaries.range((std::ops::Bound::Excluded(read_off), std::ops::Bound::Unbounded))
+                    .next().map_or(n.attr.size, |(&end, _)| end.saturating_add(2));
+                let end = next.min(n.attr.size).min(off.saturating_add(uls_chunk::MAX_SIZE as u64));
+                let bytes = self.read_node(dir, n, read_off, end - read_off).await?;
+                if bytes.is_empty() { return Err(FsError::Io("short fold read".into())); }
+                read_off += bytes.len() as u64; buffer.extend_from_slice(&bytes);
+            }
         }
-        drop(f); std::fs::remove_file(scratch)?; Ok(shards)
+        drop(f);
+        // Probe on every attempt, including after process restart or an upload with a lost ACK.
+        let hashes = shards.iter().map(|s| s.h.clone()).collect::<std::collections::BTreeSet<_>>()
+            .into_iter().collect::<Vec<_>>();
+        let missing = self.client.missing(&self.drive, &hashes).await?;
+        let mut f = File::open(&scratch.0)?;
+        for hash in missing {
+            let data = if let Some(&(off, len)) = locations.get(&hash) {
+                let mut data = vec![0; len]; f.seek(SeekFrom::Start(off))?; f.read_exact(&mut data)?;
+                Bytes::from(data)
+            } else {
+                // A reused shard may have been forgotten by the server since the base manifest.
+                // fetch_shard verifies it and can recover it from the client's local cache.
+                if !shards.iter().any(|s| s.h == hash) { return Err(FsError::Io("unknown missing shard".into())); }
+                self.client.fetch_shard(&self.drive, &hash).await?
+            };
+            self.client.put_shard(&self.drive, &hash, data).await?;
+        }
+        Ok(shards)
     }
     fn conflict_path(&self, path: &str, attempt: usize) -> String {
         let (dir,name) = path.rsplit_once('/').map_or(("",path), |(d,n)| (d,n));
@@ -322,6 +373,11 @@ impl Inner {
         let name = format!("{stem} (conflict, {hostname}{suffix}, {}){ext}", timestamp(now_ms()));
         if dir.is_empty() { name } else { format!("{dir}/{name}") }
     }
+}
+// Clean up on success, upload failure, or cancellation of the publisher future.
+struct Scratch(PathBuf);
+impl Drop for Scratch {
+    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
 }
 fn op_key(op: &Op) -> (&str, &str) {
     match op { Op::Put { path,.. } => (path,"put"), Op::Mkdir { path } => (path,"mkdir"),

@@ -10,5 +10,7 @@ pub mod nfs;
 pub mod nfs_adapter;
 pub mod protocol;
 pub mod server;
+#[cfg(feature = "smb")]
+pub mod smb_adapter;
 pub mod state;
 pub mod watch;

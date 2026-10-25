@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -14,7 +14,6 @@ use nfsserve::nfs::{
 use nfsserve::tcp::{NFSTcp, NFSTcpListener};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
 use uls_client::{Client, Error};
-use crate::mount::SharedClient;
 use uls_proto::{ListEntry, ManifestResponse, NodeType};
 
 const ROOT: fileid3 = 1;
@@ -38,11 +37,12 @@ struct Tables {
 }
 
 pub struct UlsFs {
-    client: SharedClient,
+    client: Client,
     drive: String,
     uid: u32,
     gid: u32,
-    t: Mutex<Tables>,
+    t: Arc<Mutex<Tables>>,
+    invalidations: Option<tokio::task::JoinHandle<()>>,
 }
 
 fn join(dir: &str, name: &str) -> String {
@@ -70,19 +70,35 @@ fn map_err(e: Error) -> nfsstat3 {
 
 impl UlsFs {
     pub fn new(client: Client, drive: String, uid: u32, gid: u32) -> UlsFs {
-        UlsFs::with_shared(SharedClient::new(client), drive, uid, gid)
-    }
-
-    /// Like `new`, but the client can be swapped underneath (drive tokens rotate every ~15 min).
-    pub fn with_shared(client: SharedClient, drive: String, uid: u32, gid: u32) -> UlsFs {
         let mut t = Tables::default();
         t.nodes.push(Node { path: String::new(), is_dir: true });
         t.by_path.insert(String::new(), ROOT);
-        UlsFs { client, drive, uid, gid, t: Mutex::new(t) }
+        UlsFs { client, drive, uid, gid, t: Arc::new(Mutex::new(t)), invalidations: None }
+    }
+
+    /// Invalidate mutable metadata when local writes or the remote watch change the VFS.
+    pub fn with_invalidations(mut self, vfs: &uls_vfs::Vfs) -> Self {
+        let mut events = vfs.subscribe();
+        let tables = Arc::downgrade(&self.t);
+        self.invalidations = Some(tokio::spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(uls_vfs::VfsEvent::Changed { .. }) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        let Some(tables) = tables.upgrade() else { return; };
+                        let mut tables = tables.lock().unwrap_or_else(|e| e.into_inner());
+                        tables.lists.clear();
+                        tables.attrs.clear();
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        }));
+        self
     }
 
     fn client(&self) -> Client {
-        self.client.get()
+        self.client.clone()
     }
 
     fn tables(&self) -> std::sync::MutexGuard<'_, Tables> {
@@ -159,6 +175,12 @@ impl UlsFs {
         }
         t.manifests.insert(vid, m.clone());
         Ok(m)
+    }
+}
+
+impl Drop for UlsFs {
+    fn drop(&mut self) {
+        if let Some(task) = &self.invalidations { task.abort(); }
     }
 }
 

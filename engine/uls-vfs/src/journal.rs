@@ -120,7 +120,14 @@ impl Journal {
         std::fs::create_dir_all(dir.join("blobs"))?;
         // File locks are released by the OS on process death, unlike lock-file sentinels.
         let lock = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(dir.join("lock"))?;
-        lock.try_lock().map_err(|_| FsError::Busy)?;
+        // A dropped Vfs in this process releases the lock when its publisher task exits, which can
+        // lag the drop slightly. Wait briefly before reporting another live owner.
+        let mut tries = 0;
+        while lock.try_lock().is_err() {
+            tries += 1;
+            if tries > 50 { return Err(FsError::Busy); }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         let db = Connection::open(dir.join("journal.db"))?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
             CREATE TABLE IF NOT EXISTS journal (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);")?;

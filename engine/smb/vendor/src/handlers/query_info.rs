@@ -19,6 +19,7 @@ const FILE_REMOTE_DEVICE: u32 = 0x0000_0010;
 const FILE_CASE_SENSITIVE_SEARCH: u32 = 0x0000_0001;
 const FILE_CASE_PRESERVED_NAMES: u32 = 0x0000_0002;
 const FILE_UNICODE_ON_DISK: u32 = 0x0000_0004;
+const FILE_NAMED_STREAMS: u32 = 0x0004_0000;
 
 // Access mask bits (MS-SMB2 2.2.13.1.1)
 const FILE_READ_EA: u32 = 0x0000_0008;
@@ -250,8 +251,12 @@ async fn query_filesystem(open: &Open, share: &ShareBindings, class: u8, cap: us
             } else {
                 0
             };
+            // Native EAs are unsupported; macOS xattrs use named $DATA streams.
+            let attributes = case_sensitive | FILE_CASE_PRESERVED_NAMES | FILE_UNICODE_ON_DISK
+                | if share.backend.capabilities().named_streams { FILE_NAMED_STREAMS } else { 0 };
+            tracing::debug!(attributes = format_args!("{attributes:#010x}"), "FileFsAttributeInformation");
             ic::encode_fs_attribute_information(
-                case_sensitive | FILE_CASE_PRESERVED_NAMES | FILE_UNICODE_ON_DISK | if share.backend.capabilities().named_streams { 0x0004_0000 } else { 0 },
+                attributes,
                 volume.max_name_length,
                 "NTFS",
             )

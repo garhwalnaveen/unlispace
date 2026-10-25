@@ -34,6 +34,7 @@ pub async fn handle(
         Ok(r) => r,
         Err(_) => return HandlerResponse::err(ntstatus::STATUS_INVALID_PARAMETER),
     };
+    tracing::debug!(file_id = ?req.file_id, locks = ?req.locks, "LOCK request");
     let tree_arc = match lookup_session_tree(conn, hdr).await {
         Ok(t) => t,
         Err(s) => return HandlerResponse::err(s),

@@ -120,7 +120,7 @@ async fn data_offset_past_0x100_is_refused() {
 }
 
 #[tokio::test]
-async fn append_only_open_only_appends() {
+async fn append_only_open_only_appends_and_write_data_can_extend() {
     let td = tempdir().unwrap();
     std::fs::write(td.path().join("f.txt"), b"data").unwrap();
     let server = Server::public(local(td.path())).await;
@@ -136,12 +136,10 @@ async fn append_only_open_only_appends() {
 
     let f = c.open("f.txt", FILE_WRITE_DATA, SHARE_ALL).await.unwrap();
     assert_eq!(c.write(f, 0, b"D").await, Ok(1));
-    assert_eq!(
-        c.write(f, 6, b"!").await,
-        Err(ntstatus::STATUS_ACCESS_DENIED)
-    );
+    assert_eq!(c.write(f, 6, b"!").await, Ok(1));
+    assert_eq!(c.write(f, 9, b"?").await, Ok(1));
     c.close(f).await;
-    assert_eq!(std::fs::read(td.path().join("f.txt")).unwrap(), b"Data++");
+    assert_eq!(std::fs::read(td.path().join("f.txt")).unwrap(), b"Data++!\0\0?");
 }
 
 #[tokio::test]

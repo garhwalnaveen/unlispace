@@ -38,14 +38,14 @@ impl MountAdapter for NfsAdapter {
             return Err(err("mountpoint is not a directory"));
         }
         // Fail early, and without leaking anything, if the drive or token is wrong.
-        req.client.get().drive_info(&req.drive_id).await.map_err(|e| match e {
+        req.client.drive_info(&req.drive_id).await.map_err(|e| match e {
             uls_client::Error::NotFound { .. } => MountError(ErrorBody::new(crate::protocol::code::NO_SUCH_DRIVE, "no such drive")),
-            uls_client::Error::Unauthorized => MountError(ErrorBody::new(crate::protocol::code::UNAUTHORIZED, "the data plane rejected the drive token")),
+            uls_client::Error::Unauthorized | uls_client::Error::Auth(_) => MountError(ErrorBody::new(crate::protocol::code::UNAUTHORIZED, "the data plane rejected the drive token")),
             uls_client::Error::Transport(_) => MountError(ErrorBody::new(crate::protocol::code::OFFLINE, "cannot reach the data plane")),
             _ => err("cannot open drive"),
         })?;
 
-        let fs = UlsFs::with_shared(req.client, req.drive_id, md.uid(), md.gid());
+        let fs = UlsFs::new(req.client, req.drive_id, md.uid(), md.gid()).with_invalidations(&req.vfs);
         let listener = NFSTcpListener::bind("127.0.0.1:0", fs).await.map_err(|_| err("cannot bind NFS server"))?;
         let port = listener.get_listen_port();
         let server = tokio::spawn(async move {
@@ -55,6 +55,7 @@ impl MountAdapter for NfsAdapter {
         let out = tokio::process::Command::new("/sbin/mount_nfs")
             .args(mount_args(port, &mountpoint))
             .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
             .output();
         let out = match tokio::time::timeout(std::time::Duration::from_secs(30), out).await {
             Ok(Ok(o)) => o,

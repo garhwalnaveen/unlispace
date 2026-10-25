@@ -42,8 +42,8 @@ localfs = ["dep:cap-std", "dep:cap-primitives", "dep:rustix", "dep:windows-sys"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-tracing-subscriber = "=0.3.20"
-tempfile = "=3.23.0"
+tracing-subscriber = "=0.3.23"
+tempfile = "=3.27.0"
 hex = "=0.4.3"
 
 [[test]]

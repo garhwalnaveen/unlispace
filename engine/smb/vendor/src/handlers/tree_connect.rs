@@ -133,7 +133,8 @@ pub async fn handle(
     };
     let mut buf = Vec::new();
     resp.write_to(&mut buf).expect("encode");
-    info!(tree_id, share = %share.name, ?granted, "tree connect");
+    info!(tree_id, share = %share.name, ?granted, capabilities = resp.capabilities,
+        share_flags = resp.share_flags, leases = share.leases, "tree connect");
     let mut hr = HandlerResponse::ok(buf);
     hr.override_tree_id = Some(tree_id);
     hr

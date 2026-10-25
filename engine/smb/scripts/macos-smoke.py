@@ -1,128 +1,196 @@
 #!/usr/bin/env python3
-"""Exercise the built demo on macOS. All scratch paths stay inside engine/smb/."""
+"""Strict native SMB checks; scratch lives under /tmp for NetFS."""
 import fcntl
 import os
 from pathlib import Path
-import queue
+import shutil
 import signal
 import subprocess
 import sys
-import threading
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRATCH = ROOT / ".tmp" / "macos-smoke"
-MOUNT = SCRATCH / "mount"
+LOG = ROOT / "verification/native-server.log"
 
 
 def run(*args):
-    result = subprocess.run([str(a) for a in args], check=True, capture_output=True,
-                            text=True, timeout=60)
-    print("PASS", args[0], result.stdout.strip(), flush=True)
-    return result.stdout
+    return subprocess.run([str(a) for a in args], check=True, capture_output=True,
+                          text=True, timeout=60).stdout
+
+
+def require(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+
+def lock_conflict(path, operation):
+    """Only EACCES/EAGAIN from a second process proves lock contention."""
+    lock = getattr(fcntl, operation)
+    args = (10, 0) if operation == "lockf" else ()
+    with path.open("r+b") as handle:
+        lock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB, *args)
+        probe = r'''
+import errno, fcntl, sys
+with open(sys.argv[1], 'r+b') as f:
+    args = (10, 0) if sys.argv[2] == 'lockf' else ()
+    try:
+        getattr(fcntl, sys.argv[2])(f, fcntl.LOCK_EX | fcntl.LOCK_NB, *args)
+    except OSError as e:
+        if e.errno in (errno.EACCES, errno.EAGAIN):
+            sys.exit(0)
+        raise
+    raise AssertionError('conflicting lock succeeded')
+'''
+        try:
+            run(sys.executable, "-I", "-c", probe, path, operation)
+        finally:
+            lock(handle, fcntl.LOCK_UN, *args)
+    run(sys.executable, "-I", "-c",
+        "import fcntl,sys; f=open(sys.argv[1],'r+b'); "
+        f"fcntl.{operation}(f,fcntl.LOCK_EX|fcntl.LOCK_NB"
+        + (",10,0)" if args else ")"), path)
 
 
 def main():
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    MOUNT.mkdir(exist_ok=True)
-    lines = queue.Queue()
-    log = []
-    env = dict(os.environ, RUST_LOG="smb_server=debug,uls_smb=debug")
-    process = subprocess.Popen([str(ROOT / "target/debug/smb-demo"), str(MOUNT),
-                                "--backend-event-after", "3"], cwd=ROOT,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               text=True, env=env)
-    def reader():
-        for line in process.stdout:
-            log.append(line)
-            lines.put((time.monotonic(), line))
-    thread = threading.Thread(target=reader, daemon=True)
-    thread.start()
-    mounted = False
+    scratch = Path(tempfile.mkdtemp(prefix="uls-smb-native-", dir="/tmp"))
+    mount = scratch / "mount"
+    mount.mkdir()
+    LOG.parent.mkdir(exist_ok=True)
+    ok = bad = 0
+
+    def check(name, operation):
+        nonlocal ok, bad
+        try:
+            operation()
+            ok += 1
+            print("PASS ", name, flush=True)
+        except (OSError, AssertionError, subprocess.SubprocessError) as error:
+            bad += 1
+            detail = getattr(error, "stderr", None) or str(error)
+            print(f"FAIL  {name}: {detail.strip()}", flush=True)
+
+    env = dict(os.environ)
+    env.setdefault("RUST_LOG", "smb_server=debug,uls_smb=debug")
+    process = None
     try:
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            try:
-                _, line = lines.get(timeout=.1)
-                if "Mounted at " in line:
-                    mounted = True
-                    break
-            except queue.Empty:
-                if process.poll() is not None:
-                    break
-        if not mounted or not os.path.ismount(MOUNT):
-            print("BLOCKED: macOS mount failed; no mounted filesystem operations ran.")
-            return 1
-        run("ls", "-la", MOUNT)
-        assert "Hello from Unlispace" in run("cat", MOUNT / "hello.txt")
-        event_time = None
-        deadline = time.monotonic() + 6
-        while time.monotonic() < deadline:
-            try:
-                at, line = lines.get(timeout=.1)
-                if "BACKEND_EVENT" in line:
-                    event_time = at
-                    break
-            except queue.Empty:
-                pass
-        assert event_time is not None, "no backend event"
-        deadline = event_time + 2
-        while not (MOUNT / "backend-arrival.txt").exists() and time.monotonic() < deadline:
-            run("ls", MOUNT)
-            time.sleep(.1)
-        assert (MOUNT / "backend-arrival.txt").exists(), "backend change invisible"
-        print("PASS backend change visible", flush=True)
-        source = SCRATCH / "input"
-        source.write_bytes(b"copy test\n")
-        run("cp", source, MOUNT / "f")
-        run("cp", MOUNT / "f", SCRATCH / "output")
-        assert source.read_bytes() == (SCRATCH / "output").read_bytes()
-        run("mv", MOUNT / "f", MOUNT / "moved")
-        run("mv", MOUNT / "moved", MOUNT / "f")
-        run("mkdir", "-p", MOUNT / "a/b/c")
-        run("xattr", "-w", "com.test", "x", MOUNT / "f")
-        assert run("xattr", "-p", "com.test", MOUNT / "f").strip() == "x"
-        run("dd", "if=/dev/urandom", f"of={source}", "bs=1m", "count=50")
-        run("cp", source, MOUNT / "large")
-        assert run("shasum", source).split()[0] == run("shasum", MOUNT / "large").split()[0]
-        for operation in ("flock", "lockf"):
-            with open(MOUNT / "f", "r+b") as handle:
-                lock = getattr(fcntl, operation)
-                lock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                code = ("import fcntl,sys; f=open(sys.argv[1], 'r+b'); "
-                        f"fcntl.{operation}(f, fcntl.LOCK_EX|fcntl.LOCK_NB)")
-                probe = subprocess.run([sys.executable, "-c", code, str(MOUNT / "f")],
-                                       capture_output=True, timeout=5)
-                assert probe.returncode != 0, f"{operation}: conflicting lock succeeded"
-                lock(handle, fcntl.LOCK_UN)
-            print("PASS", operation, flush=True)
-        run("rm", MOUNT / "f", MOUNT / "large")
-        process.send_signal(signal.SIGINT)
-        assert process.wait(timeout=15) == 0
-        assert not os.path.ismount(MOUNT), "still mounted"
-        mounted = False
-        print("PASS unmount", flush=True)
-        return 0
+        with LOG.open("w") as log:
+            process = subprocess.Popen(
+                [str(ROOT / "target/debug/smb-demo"), str(mount)], cwd=ROOT,
+                stdout=log, stderr=subprocess.STDOUT, env=env)
+            deadline = time.monotonic() + 20
+            while not os.path.ismount(mount) and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(.1)
+            check("native mount (no sudo, no prompt)",
+                  lambda: require(os.path.ismount(mount), "mount failed before filesystem checks"))
+            if not os.path.ismount(mount):
+                print(LOG.read_text(), end="", flush=True)
+                return 1
+
+            file = mount / "a.txt"
+            check("ls -la", lambda: run("ls", "-la", mount))
+
+            def write_read():
+                file.write_text("hello smb\n")
+                require(run("cat", file) == "hello smb\n", "contents differ")
+            check("write + cat", write_read)
+
+            def copy():
+                run("cp", file, mount / "b.txt")
+                require((mount / "b.txt").read_bytes() == file.read_bytes(), "copy differs")
+            check("cp in", copy)
+
+            def rename():
+                run("mv", mount / "b.txt", mount / "c.txt")
+                require((mount / "c.txt").is_file() and not (mount / "b.txt").exists(), "rename failed")
+            check("mv", rename)
+
+            def remove():
+                run("rm", mount / "c.txt")
+                require(not (mount / "c.txt").exists(), "file still present")
+            check("rm", remove)
+
+            def mkdir():
+                run("mkdir", "-p", mount / "x/y/z")
+                require((mount / "x/y/z").is_dir(), "directory missing")
+            check("mkdir -p", mkdir)
+
+            def xattr():
+                for value in ("hello", "x"):
+                    run("xattr", "-w", "com.test", value, file)
+                    require(run("xattr", "-p", "com.test", file).strip() == value, "xattr differs")
+            check("xattr write/read + shorter overwrite", xattr)
+
+            resource = b"Unlispace resource fork\x00\xff"
+
+            def resource_fork():
+                os.setxattr(file, "com.apple.ResourceFork", resource)
+                require(os.getxattr(file, "com.apple.ResourceFork") == resource, "resource fork differs")
+            check("com.apple.ResourceFork write/read", resource_fork)
+
+            # Local seeding keeps these checks independent of native setxattr.
+            source = scratch / "metadata-source"
+            source.write_bytes(b"copy with metadata\n")
+            os.setxattr(source, "com.test", b"copy attribute")
+            os.setxattr(source, "com.apple.ResourceFork", resource)
+
+            def preserve(command):
+                destination = mount / f"{command}-metadata"
+                output = scratch / f"{command}-output"
+                args = ("cp", "-p") if command == "cp" else ("ditto", "--rsrc", "--extattr")
+                run(*args, source, destination)
+                run(*args, destination, output)
+                for path in (destination, output):
+                    require(path.read_bytes() == source.read_bytes(), "data differs")
+                    for name in ("com.test", "com.apple.ResourceFork"):
+                        require(os.getxattr(path, name) == os.getxattr(source, name), f"{name} differs")
+            check("cp -p preserves xattrs + resource fork in/out", lambda: preserve("cp"))
+            check("ditto preserves xattrs + resource fork in/out", lambda: preserve("ditto"))
+
+            def large_io():
+                source = scratch / "large-source"
+                try:
+                    run("dd", "if=/dev/urandom", f"of={source}", "bs=1m", "count=50")
+                    run("dd", f"if={source}", f"of={mount / 'big.bin'}", "bs=1m")
+                    require(run("shasum", "-a", "256", source).split()[0]
+                            == run("shasum", "-a", "256", mount / "big.bin").split()[0], "SHA-256 differs")
+                finally:
+                    source.unlink(missing_ok=True)
+            check("50 MiB dd write + shasum read-back", large_io)
+            check("flock: second process conflict + release", lambda: lock_conflict(file, "flock"))
+            check("lockf byte range: second process conflict + release", lambda: lock_conflict(file, "lockf"))
+
+            def safe_save():
+                (mount / "save.txt").write_text("v1")
+                (mount / ".save.tmp").write_text("v2")
+                os.replace(mount / ".save.tmp", mount / "save.txt")
+                require((mount / "save.txt").read_text() == "v2", "replacement differs")
+            check("safe-save replace (rename over existing)", safe_save)
+
+            def unmount():
+                process.send_signal(signal.SIGINT)
+                require(process.wait(timeout=20) == 0, "demo exited with failure")
+                require(not os.path.ismount(mount), "still mounted")
+            check("unmount on Ctrl-C", unmount)
+        return int(bad != 0)
     finally:
-        if process.poll() is None:
+        if process is not None and process.poll() is None:
             process.send_signal(signal.SIGINT)
             try:
-                process.wait(timeout=15)
+                process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                if os.path.ismount(MOUNT):
-                    print("Unmount failed; preserving running server and mountpoint.")
+                if os.path.ismount(mount):
+                    print(f"NEEDS: release open files; preserving server PID {process.pid} and {scratch}")
                 else:
                     process.terminate()
                     process.wait(timeout=5)
-        thread.join(timeout=1)
-        (ROOT / ".tmp/macos-smoke.log").write_text("".join(log))
-        print("".join(log), end="")
-        for name in ("input", "output"):
-            (SCRATCH / name).unlink(missing_ok=True)
-        if not os.path.ismount(MOUNT) and MOUNT.exists():
-            MOUNT.rmdir()
-        if SCRATCH.exists() and not any(SCRATCH.iterdir()):
-            SCRATCH.rmdir()
+        if not os.path.ismount(mount):
+            shutil.rmtree(scratch)
+        print(f"RESULT: {ok} passed, {bad} failed", flush=True)
+        if LOG.exists():
+            warnings = sum("warn" in line.lower() or "error" in line.lower()
+                           for line in LOG.read_text().splitlines())
+            print(f"server log error/warn lines: {warnings}", flush=True)
 
 
 if __name__ == "__main__":

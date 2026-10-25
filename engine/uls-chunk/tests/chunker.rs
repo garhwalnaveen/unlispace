@@ -88,3 +88,32 @@ fn small_edit_changes_at_most_two_chunks() {
     assert!(changed >= 1, "edit must change something");
     assert!(changed <= 2, "4 KiB edit changed {changed} chunks");
 }
+
+#[test]
+fn incremental_boundaries_match_slice_with_short_and_odd_buffers() {
+    for data in [golden_input_prng(), golden_input(), vec![0; 4097]] {
+        let expected = chunk_slice(&data);
+        let mut off = 0;
+        let mut end = 0;
+        let mut lengths = vec![];
+        while off < data.len() {
+            if let Some(len) = uls_chunk::first_chunk_length(&data[off..end], end == data.len()) {
+                lengths.push(len); off += len;
+            } else {
+                end = (end + 131_071).min(data.len());
+            }
+        }
+        assert_eq!(lengths, expected.iter().map(|c| c.length).collect::<Vec<_>>());
+        assert_eq!(uls_chunk::first_chunk_length(&[], true), None);
+    }
+}
+
+#[test]
+fn old_chunk_end_is_not_assumed_to_be_a_natural_boundary() {
+    let data = golden_input_prng();
+    let first = chunk_slice(&data)[0].length;
+    assert_eq!(uls_chunk::first_chunk_length(&data[..first], false), None);
+    assert_eq!(uls_chunk::first_chunk_length(&data[..first + 2], false), Some(first));
+    assert_eq!(uls_chunk::first_chunk_length(&data[..4096], false), None);
+    assert_eq!(uls_chunk::first_chunk_length(&data[..4096], true), Some(4096));
+}

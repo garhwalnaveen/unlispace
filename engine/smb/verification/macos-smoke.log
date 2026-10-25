@@ -1,7 +1,9 @@
-BLOCKED: macOS mount failed; no mounted filesystem operations ran.
-SMB listening on 127.0.0.1:60859 (share ULS, signing required, encryption false)
-2026-10-25T09:14:41.623066Z  INFO smb_server{listen=Some(127.0.0.1:60859)}: smb_server::server: server starting
+FAIL  native mount (no sudo, no prompt): mount failed before filesystem checks
+SMB listening on 127.0.0.1:52753 (share ULS, signing required, encryption false)
+2026-10-25T10:44:57.674343Z  INFO smb_server{listen=Some(127.0.0.1:52753)}: smb_server::server: server starting
 Shimming not enabled - defaulting to legacy behavior.
-2026-10-25T09:14:41.626546Z  INFO smb_server{listen=Some(127.0.0.1:60859)}: smb_server::server: shutdown requested; stopping accept loop
-2026-10-25T09:14:41.626821Z  INFO smb_server{listen=Some(127.0.0.1:60859)}: smb_server::server: server stopped
+2026-10-25T10:44:57.690883Z  INFO smb_server{listen=Some(127.0.0.1:52753)}: smb_server::server: shutdown requested; stopping accept loop
+2026-10-25T10:44:57.691262Z  INFO smb_server{listen=Some(127.0.0.1:52753)}: smb_server::server: server stopped
 Error: "mount failed: SMBOpenServerEx: Device not configured (os error 6)"
+RESULT: 0 passed, 1 failed
+server log error/warn lines: 1

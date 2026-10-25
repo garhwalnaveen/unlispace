@@ -475,10 +475,23 @@ pub struct DriveTokenSource {
     pub access: Access,
 }
 
+impl DriveTokenSource {
+    /// Current credentials, including the endpoint assigned to this drive.
+    pub async fn credentials(&self) -> Result<DriveToken, AuthError> {
+        self.session.drive_token(&self.drive_id, self.access).await
+    }
+
+    /// Invalidate a server-rejected token before minting its replacement.
+    pub async fn refresh_credentials(&self) -> Result<DriveToken, AuthError> {
+        self.session.forget_drive_token(&self.drive_id);
+        self.credentials().await
+    }
+}
+
 #[async_trait]
 impl TokenProvider for DriveTokenSource {
     async fn token(&self) -> Result<String, AuthError> {
-        Ok(self.session.drive_token(&self.drive_id, self.access).await?.token)
+        Ok(self.credentials().await?.token)
     }
 }
 

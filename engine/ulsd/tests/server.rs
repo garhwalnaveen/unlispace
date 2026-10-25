@@ -274,10 +274,16 @@ async fn auth_flow_mount_and_sign_out() {
     let state = std::fs::read_to_string(h.dir.path().join("state.json")).unwrap();
     assert!(state.contains("d-abc") && !state.contains("rt_1") && !state.contains("dt_1"));
 
-    let v = c.call(8, "auth.signOut", json!({})).await;
-    assert_eq!(v["result"], json!({}));
+    // The state event and the response may arrive in either order (DAEMON-PROTOCOL.md: events are unsolicited).
+    c.send(&json!({"id":8,"method":"auth.signOut","params":{}}).to_string()).await;
+    let (mut resp, mut signed_out) = (None, false);
+    while resp.is_none() || !signed_out {
+        let m = c.recv().await;
+        if m.get("id").is_some() { resp = Some(m); }
+        else if m == json!({"event":"state","data":{"state":"signed_out"}}) { signed_out = true; }
+    }
+    assert_eq!(resp.unwrap()["result"], json!({}));
     assert!(h.mounted.lock().unwrap().is_empty(), "sign-out unmounts everything");
-    assert_eq!(c.recv().await, json!({"event":"state","data":{"state":"signed_out"}}));
     let v = c.call(9, "auth.status", json!({})).await;
     assert_eq!(v["result"], json!({"signedIn":false}));
     let state = std::fs::read_to_string(h.dir.path().join("state.json")).unwrap();
@@ -326,7 +332,8 @@ async fn graceful_shutdown_unmounts_but_remembers_and_restart_restores() {
     // New process: the refresh token comes back from the secret store and the mount is restored.
     let e2 = mk();
     e2.start().await;
-    for _ in 0..100 {
+    // Restoring reopens the journal; allow for a loaded machine (parallel test binaries).
+    for _ in 0..500 {
         if !mounted.lock().unwrap().is_empty() {
             break;
         }

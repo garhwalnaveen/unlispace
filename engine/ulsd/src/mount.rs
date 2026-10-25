@@ -1,33 +1,12 @@
-//! The seam between the protocol layer and whatever actually presents a drive as a folder.
-//! M1 ships the read-only NFS adapter; the SMB adapter (`engine/smb`, `SmbBackend`) and the
-//! writable VFS (`engine/uls-vfs`) implement [`MountAdapter`] later without touching the
-//! protocol or engine code.
+//! The seam between the daemon and the filesystem mount adapters.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use uls_client::Client;
 
 use crate::protocol::ErrorBody;
-
-/// A `uls_client::Client` that can be replaced underneath running filesystem code. Drive tokens
-/// last at most 15 minutes, and `Client` holds a static token (see NEEDS.md), so the daemon
-/// builds a fresh client on every rotation and swaps it in here.
-#[derive(Clone)]
-pub struct SharedClient(Arc<Mutex<Client>>);
-
-impl SharedClient {
-    pub fn new(c: Client) -> SharedClient {
-        SharedClient(Arc::new(Mutex::new(c)))
-    }
-    pub fn get(&self) -> Client {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-    pub fn set(&self, c: Client) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = c;
-    }
-}
 
 /// Which access level the adapter needs when it asks for a drive token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +20,8 @@ pub struct MountRequest {
     pub drive_name: String,
     /// Directory to mount on. Already created by the daemon.
     pub mountpoint: PathBuf,
-    pub client: SharedClient,
+    pub client: Client,
+    pub vfs: uls_vfs::Vfs,
 }
 
 #[derive(Debug)]

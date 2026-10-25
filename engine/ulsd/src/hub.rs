@@ -3,17 +3,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use uls_auth::{Access, AuthError, Org, SecretStore, Session};
+use async_trait::async_trait;
+use uls_auth::{Access, AuthError, DriveTokenSource, Org, SecretStore, Session};
+use uls_client::{ProviderToken, TokenProvider};
 
 use crate::mount::NeedAccess;
 use crate::protocol::{AuthSetParams, AuthStatus, ErrorBody, User, code};
-
-/// What a data-plane caller needs. Never logged, never `Debug`-printed.
-pub struct Creds {
-    pub endpoint: String,
-    pub token: String,
-    pub expires_at_ms: u64,
-}
 
 struct Dev {
     endpoint: String,
@@ -143,28 +138,47 @@ impl AuthHub {
         }
     }
 
-    pub async fn drive_creds(&self, drive: &str, access: NeedAccess) -> Result<Creds, ErrorBody> {
-        if let Some(s) = self.session().filter(|s| s.is_signed_in()) {
-            let a = match access {
-                NeedAccess::Read => Access::Read,
-                NeedAccess::Write => Access::Write,
-            };
-            let t = s.drive_token(drive, a).await.map_err(map_auth_err)?;
-            return Ok(Creds { endpoint: t.endpoint, token: t.token, expires_at_ms: t.expires_at });
-        }
-        match &*self.devl() {
-            Some(d) => Ok(Creds { endpoint: d.endpoint.clone(), token: d.token.clone(), expires_at_ms: u64::MAX }),
-            None => Err(ErrorBody::new(code::UNAUTHORIZED, "not signed in")),
-        }
-    }
-
-    pub fn forget(&self, drive: &str) {
-        if let Some(s) = self.session() {
-            s.forget_drive_token(drive);
-        }
+    pub fn token_provider(self: &Arc<Self>, drive: &str, access: NeedAccess) -> Arc<dyn TokenProvider> {
+        Arc::new(DriveProvider { hub: self.clone(), drive: drive.into(), access })
     }
 
     pub fn clear_dev(&self) {
         *self.devl() = None;
+    }
+}
+
+/// Resolve through the current session on every request, including after auth.set replaces it.
+struct DriveProvider {
+    hub: Arc<AuthHub>,
+    drive: String,
+    access: NeedAccess,
+}
+
+impl DriveProvider {
+    async fn credentials(&self, refresh: bool) -> Result<ProviderToken, AuthError> {
+        if let Some(session) = self.hub.session().filter(|s| s.is_signed_in()) {
+            let source = DriveTokenSource {
+                session,
+                drive_id: self.drive.clone(),
+                access: match self.access { NeedAccess::Read => Access::Read, NeedAccess::Write => Access::Write },
+            };
+            let token = if refresh { source.refresh_credentials().await? } else { source.credentials().await? };
+            return Ok(ProviderToken::with_endpoint(token.token, token.endpoint));
+        }
+        match &*self.hub.devl() {
+            Some(dev) => Ok(ProviderToken::with_endpoint(dev.token.clone(), dev.endpoint.clone())),
+            None => Err(AuthError::SignedOut),
+        }
+    }
+}
+
+#[async_trait]
+impl TokenProvider for DriveProvider {
+    async fn token(&self) -> uls_client::Result<ProviderToken> {
+        self.credentials(false).await.map_err(|e| uls_client::Error::Auth(e.to_string()))
+    }
+
+    async fn refresh(&self) -> uls_client::Result<ProviderToken> {
+        self.credentials(true).await.map_err(|e| uls_client::Error::Auth(e.to_string()))
     }
 }

@@ -20,12 +20,8 @@ struct Signed {
 impl Signed {
     async fn connect(server: &uls_smb::RunningServer) -> Self {
         let mut s = TcpStream::connect(server.addr).await.unwrap();
-        assert_eq!(
-            common::negotiate_dialects(&mut s, &[0x210])
-                .await
-                .security_mode,
-            3
-        );
+        let negotiated = common::negotiate_dialects(&mut s, &[0x210]).await;
+        assert_eq!(negotiated.security_mode, 3);
         let login = login_with(
             &mut s,
             1,
@@ -282,7 +278,8 @@ async fn signed_fifty_mib_round_trip_and_locks() {
     }
     assert_eq!(written.finalize(), read.finalize());
     assert_eq!(b.lookup("large").await.unwrap().size, 50 * 1024 * 1024);
-    let second = c
+    let mut other = Signed::connect(&server).await;
+    let second = other
         .create(Create {
             name: "large",
             ..Create::default()
@@ -307,11 +304,15 @@ async fn signed_fifty_mib_round_trip_and_locks() {
         b
     };
     c.request(Command::Lock, &lock(id, 2 | 0x10)).await;
-    let r = c.send(Command::Lock, &lock(second, 2 | 0x10)).await;
+    let r = other.send(Command::Lock, &lock(second, 2 | 0x10)).await;
     assert_eq!(status(&r), STATUS_LOCK_NOT_GRANTED);
+    let r = other.send(Command::Write, &encode_write(second, 0, b"denied")).await;
+    assert_eq!(status(&r), STATUS_FILE_LOCK_CONFLICT);
     c.request(Command::Lock, &lock(id, 4)).await;
-    c.request(Command::Lock, &lock(second, 2 | 0x10)).await;
-    c.close(second).await;
+    other.request(Command::Lock, &lock(second, 2 | 0x10)).await;
+    other.close(second).await;
+    c.request(Command::Lock, &lock(id, 2 | 0x10)).await;
+    drop(other);
     c.close(id).await;
     drop(c);
     server.shutdown().await.unwrap();
@@ -662,9 +663,11 @@ async fn signed_mac_style_stream_compounds_secure_negotiate_and_cancel() {
     .await;
     for value in [b"longer value".as_slice(), b"x".as_slice()] {
         let create = Create {
-            name: "f:com.test:$DATA",
+            name: "f:com.test",
             disposition: FILE_OVERWRITE_IF,
-            access: FILE_ALL_ACCESS,
+            access: FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES,
+            options: 0,
+            share: SHARE_READ | SHARE_DELETE,
             ..Create::default()
         }
         .body();
@@ -678,9 +681,12 @@ async fn signed_mac_style_stream_compounds_secure_negotiate_and_cancel() {
         .write_to(&mut close)
         .unwrap();
         let mut messages = Vec::new();
+        let mut basic = vec![0; 40];
+        basic[16..24].copy_from_slice(&132_000_000_000_000_000u64.to_le_bytes());
         for (index, (command, body)) in [
             (Command::Create, create),
             (Command::Write, encode_write(FileId::any(), 0, value)),
+            (Command::SetInfo, set_info(FileId::any(), 4, basic)),
             (Command::Close, close),
         ]
         .iter()
@@ -732,9 +738,20 @@ async fn signed_mac_style_stream_compounds_secure_negotiate_and_cancel() {
             }
             offset += len;
         }
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
         assert_eq!(&b.get_xattr("f", "com.test").await.unwrap()[..], value);
+        assert_eq!(b.lookup("f").await.unwrap().modified, 132_000_000_000_000_000);
     }
+    let resource = c.create(Create {
+        name: "f:AFP_Resource",
+        disposition: FILE_OPEN_IF,
+        access: FILE_WRITE_DATA,
+        share: SHARE_READ | SHARE_DELETE,
+        ..Create::default()
+    }).await;
+    c.request(Command::Write, &encode_write(resource, 0, b"resource fork")).await;
+    c.close(resource).await;
+    assert_eq!(&b.get_xattr("f", "com.apple.ResourceFork").await.unwrap()[..], b"resource fork");
     let root = c
         .create(Create {
             options: FILE_DIRECTORY_FILE,
@@ -742,6 +759,10 @@ async fn signed_mac_style_stream_compounds_secure_negotiate_and_cancel() {
             ..Create::default()
         })
         .await;
+    let fs = c.request(Command::QueryInfo, &query(root, InfoType::FileSystem, 5)).await;
+    let fs = QueryInfoResponse::parse(&fs[64..]).unwrap();
+    let attributes = u32::from_le_bytes(fs.buffer[..4].try_into().unwrap());
+    assert_eq!(attributes, 0x0004_0007, "named streams, no native EAs");
     let original = c.mid;
     let interim = c
         .send(

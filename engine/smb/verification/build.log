@@ -1,2 +1,10 @@
-   Compiling uls-smb v0.1.0 (/Users/naveen/unlispace/engine/smb)
-    Finished `dev` profile [unoptimized] target(s) in 2.55s
+error: failed to select a version for `tempfile`.
+    ... required by package `uls-vfs-backend v0.1.0 (/Users/naveen/unlispace/engine/smb/uls-vfs-backend)`
+versions that meet the requirements `=3.27.0` are: 3.27.0
+
+all possible versions conflict with previously selected packages
+
+  previously selected package `tempfile v3.23.0`
+    ... which satisfies dependency `tempfile = "=3.23.0"` of package `uls-smb v0.1.0 (/Users/naveen/unlispace/engine/smb)`
+
+failed to select a version for `tempfile` which could resolve this conflict

@@ -4,20 +4,20 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use uls_auth::{AuthEvent, DriveSummary, SecretStore, Session};
-use uls_client::{Client, ShardCache};
+use uls_client::{Client, ShardCache, WatchEvent};
+use uls_vfs::{Vfs, VfsEvent, VfsOptions};
 
-use crate::hub::{AuthHub, Creds};
-use crate::mount::{MountAdapter, MountHandle, MountRequest, SharedClient};
+use crate::hub::AuthHub;
+use crate::mount::{MountAdapter, MountHandle, MountRequest};
 use crate::protocol::*;
 use crate::state::{MountRecord, PersistedAuth, StateStore};
-use crate::watch::{self, Start, WatchCtx};
+use crate::watch::{self, WatchCtx};
 
 pub struct EngineConfig {
     pub version: String,
@@ -37,6 +37,7 @@ struct Entry {
     state: MountState,
     handle: Option<Arc<dyn MountHandle>>,
     tasks: Vec<JoinHandle<()>>,
+    vfs: Option<Vfs>,
 }
 
 pub struct Engine {
@@ -53,10 +54,6 @@ pub struct Engine {
 
 fn to_val<T: Serialize>(t: T) -> Result<Value, ErrorBody> {
     serde_json::to_value(t).map_err(|_| ErrorBody::internal("encode"))
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// A folder name safe to create under the mount root.
@@ -221,7 +218,7 @@ impl Engine {
         match req.method.as_str() {
             "status" => {
                 let (state, message) = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                to_val(Status { version: self.cfg.version.clone(), state, message, pending_ops: Some(0) })
+                to_val(Status { version: self.cfg.version.clone(), state, message, pending_ops: Some(self.pending_ops().await) })
             }
             "drives.list" => to_val(json!({ "drives": self.drives_list().await? })),
             "drive.mount" => {
@@ -234,9 +231,7 @@ impl Engine {
                 self.unmount_inner(&p.drive_id, true).await?;
                 Ok(json!({}))
             }
-            // Read-only NFS has no uploads, and downloads are served on demand by the kernel's
-            // read calls, so there is no queue to report yet. The writable VFS will fill this in.
-            "transfers" => Ok(json!({ "transfers": Vec::<Transfer>::new() })),
+            "transfers" => to_val(json!({ "transfers": self.transfers().await })),
             "config.set" => {
                 let p: ConfigParams = parse_params(req)?;
                 self.config_set(p)?;
@@ -396,7 +391,7 @@ impl Engine {
                 dir = format!("{dir} ({id})");
             }
             let path = self.cfg.mount_root.join(dir);
-            m.insert(id.to_string(), Entry { name: name.to_string(), path: path.clone(), state: MountState::Mounting, handle: None, tasks: Vec::new() });
+            m.insert(id.to_string(), Entry { name: name.to_string(), path: path.clone(), state: MountState::Mounting, handle: None, tasks: Vec::new(), vfs: None });
             path
         };
         match self.do_mount(id, name, &path).await {
@@ -415,16 +410,21 @@ impl Engine {
     }
 
     async fn do_mount(self: &Arc<Self>, id: &str, name: &str, path: &PathBuf) -> Result<(), ErrorBody> {
-        let creds = self.hub.drive_creds(id, self.adapter.access()).await?;
-        let shared = SharedClient::new(self.build_client(&creds)?);
+        let client = self.build_client(id)?;
+        let state_dir = self.cfg.state_path.parent().ok_or_else(|| ErrorBody::internal("state path has no parent"))?.join("drives").join(id);
+        let vfs = Vfs::open(client.clone(), id, &state_dir, VfsOptions::default()).await
+            .map_err(|_| ErrorBody::internal("cannot open drive journal"))?;
+        // Cached clean metadata may predate the persisted cursor after a restart.
+        vfs.apply_remote(WatchEvent::Resync { head_seq: 0, last_ev: 0 }).await;
+        let vfs_events = vfs.subscribe();
         std::fs::create_dir_all(path).map_err(|e| ErrorBody::internal(format!("cannot create {}: {}", path.display(), e.kind())))?;
         let handle = self
             .adapter
-            .mount(MountRequest { drive_id: id.to_string(), drive_name: name.to_string(), mountpoint: path.clone(), client: shared.clone() })
+            .mount(MountRequest { drive_id: id.to_string(), drive_name: name.to_string(), mountpoint: path.clone(), client: client.clone(), vfs: vfs.clone() })
             .await
             .map_err(|e| e.0)?;
 
-        let tasks = vec![self.spawn_rotation(id, shared.clone(), creds.expires_at_ms), self.spawn_watch(id, shared)];
+        let tasks = vec![self.spawn_watch(id, client, vfs.clone()), self.spawn_vfs_events(id, vfs.clone(), vfs_events)];
         {
             let mut m = self.mounts();
             match m.get_mut(id) {
@@ -432,6 +432,7 @@ impl Engine {
                     e.state = MountState::Mounted;
                     e.handle = Some(handle);
                     e.tasks = tasks;
+                    e.vfs = Some(vfs);
                 }
                 None => {
                     for t in tasks {
@@ -464,66 +465,68 @@ impl Engine {
             .clone()
     }
 
-    fn build_client(&self, c: &Creds) -> Result<Client, ErrorBody> {
-        let mut b = Client::builder(c.endpoint.clone(), c.token.clone()).whole_shard_on_partial(true);
+    fn build_client(&self, id: &str) -> Result<Client, ErrorBody> {
+        let mut b = Client::builder(self.cfg.default_endpoint.clone(), "")
+            .token_provider(self.hub.token_provider(id, self.adapter.access()))
+            .whole_shard_on_partial(true);
         if let Some(cache) = self.cache() {
             b = b.cache(cache);
         }
         b.build().map_err(|_| ErrorBody::internal("cannot build data-plane client"))
     }
 
-    /// `Client` holds a static token (NEEDS.md), so rebuild it whenever the drive token rotates.
-    fn spawn_rotation(self: &Arc<Self>, id: &str, shared: SharedClient, mut expires_at_ms: u64) -> JoinHandle<()> {
+    fn spawn_watch(self: &Arc<Self>, id: &str, client: Client, vfs: Vfs) -> JoinHandle<()> {
+        let ctx = WatchCtx {
+            drive_id: id.to_string(), client, vfs,
+            events: self.events.clone(), state: self.store.clone(),
+        };
+        tokio::spawn(watch::run(ctx))
+    }
+
+    fn mounted_vfs(&self) -> Vec<(String, Vfs)> {
+        self.mounts().iter().filter_map(|(id, entry)| entry.vfs.clone().map(|vfs| (id.clone(), vfs))).collect()
+    }
+
+    async fn pending_ops(&self) -> i64 {
+        let mut count = 0i64;
+        for (_, vfs) in self.mounted_vfs() {
+            let pending = vfs.pending().await;
+            count = count.saturating_add(i64::try_from(pending.files.saturating_add(pending.metadata_ops)).unwrap_or(i64::MAX));
+        }
+        count
+    }
+
+    async fn transfers(&self) -> Vec<Transfer> {
+        let mut transfers = Vec::new();
+        for (id, vfs) in self.mounted_vfs() {
+            let pending = vfs.pending().await;
+            if pending.files + pending.metadata_ops > 0 {
+                transfers.push(upload_transfer(&id, pending.bytes, TransferStatus::Queued));
+            }
+        }
+        transfers.sort_by(|a, b| a.drive_id.cmp(&b.drive_id));
+        transfers
+    }
+
+    fn spawn_vfs_events(self: &Arc<Self>, id: &str, vfs: Vfs, mut rx: broadcast::Receiver<VfsEvent>) -> JoinHandle<()> {
         let me = self.clone();
         let id = id.to_string();
         tokio::spawn(async move {
             loop {
-                let wait = if expires_at_ms == u64::MAX {
-                    Duration::from_secs(3600)
-                } else {
-                    // The session re-mints once less than 60 s remain.
-                    Duration::from_millis(expires_at_ms.saturating_sub(now_ms()).saturating_sub(59_000).max(5_000))
-                };
-                tokio::time::sleep(wait).await;
-                match me.hub.drive_creds(&id, me.adapter.access()).await {
-                    Ok(c) => {
-                        expires_at_ms = c.expires_at_ms;
-                        if let Ok(client) = me.build_client(&c) {
-                            shared.set(client);
-                        }
-                        me.note_ok();
+                match rx.recv().await {
+                    Ok(VfsEvent::Transfer { bytes, .. }) => {
+                        me.emit(&Event::Transfer(upload_transfer(&id, bytes, TransferStatus::Done)));
                     }
-                    Err(e) if e.code == code::UNAUTHORIZED => return,
-                    Err(e) => {
-                        me.note_err(&e);
-                        expires_at_ms = 0; // retry in 5 s
-                    }
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return,
                 }
+                let pending = vfs.pending().await;
+                if pending.files + pending.metadata_ops > 0 {
+                    me.emit(&Event::Transfer(upload_transfer(&id, pending.bytes, TransferStatus::Queued)));
+                }
+                let state = if me.pending_ops().await > 0 { State::Syncing } else { State::Idle };
+                me.set_state(if pending.state == uls_vfs::SyncState::Offline { State::Offline } else { state }, None);
             }
-        })
-    }
-
-    fn spawn_watch(self: &Arc<Self>, id: &str, shared: SharedClient) -> JoinHandle<()> {
-        let ctx = WatchCtx {
-            drive_id: id.to_string(),
-            auth: self.hub.clone(),
-            access: self.adapter.access(),
-            events: self.events.clone(),
-            state: self.store.clone(),
-        };
-        tokio::spawn(async move {
-            // Resume from the persisted `ev`; the first ever watch starts at the drive's head.
-            let start = match ctx.state.cursor(&ctx.drive_id) {
-                Some(ev) => Start::After(ev),
-                None => loop {
-                    match shared.get().drive_info(&ctx.drive_id).await {
-                        Ok(d) => break Start::Since(d.head_seq as i64),
-                        Err(uls_client::Error::NotFound { .. }) => return,
-                        Err(_) => tokio::time::sleep(Duration::from_secs(2)).await,
-                    }
-                },
-            };
-            watch::run(ctx, start).await;
         })
     }
 
@@ -551,6 +554,11 @@ impl Engine {
             for t in &e.tasks {
                 t.abort();
             }
+            if let Some(vfs) = e.vfs
+                && vfs.shutdown().await.is_err()
+            {
+                tracing::warn!(drive = %id, "drive journal retained with unpublished writes");
+            }
             let _ = std::fs::remove_dir(&e.path);
         }
         if forget {
@@ -560,5 +568,16 @@ impl Engine {
             });
         }
         Ok(())
+    }
+}
+
+// The VFS exposes a per-drive pending summary and completed batches, not per-file progress.
+fn upload_transfer(id: &str, bytes: u64, status: TransferStatus) -> Transfer {
+    let bytes = i64::try_from(bytes).unwrap_or(i64::MAX);
+    Transfer {
+        id: format!("{id}:upload"), drive_id: id.into(), path: "/".into(),
+        direction: Direction::Upload,
+        bytes_done: if status == TransferStatus::Done { bytes } else { 0 },
+        bytes_total: bytes, status,
     }
 }

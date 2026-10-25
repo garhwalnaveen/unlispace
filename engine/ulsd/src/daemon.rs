@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 
 use crate::engine::{Engine, EngineConfig};
 use crate::mount::MountAdapter;
-use crate::{nfs_adapter, server};
+use crate::server;
 
 pub fn support_dir() -> Result<PathBuf> {
     let base = dirs::data_dir().context("cannot find Application Support")?; // ~/Library/Application Support
@@ -42,7 +42,14 @@ pub fn default_config() -> Result<EngineConfig> {
 pub async fn run() -> Result<()> {
     let cfg = default_config()?;
     let sock = socket_path()?;
-    run_with(cfg, sock, Arc::new(nfs_adapter::NfsAdapter)).await
+    run_with(cfg, sock, default_adapter()).await
+}
+
+pub fn default_adapter() -> Arc<dyn MountAdapter> {
+    #[cfg(feature = "smb")]
+    { Arc::new(crate::smb_adapter::SmbAdapter) }
+    #[cfg(not(feature = "smb"))]
+    { Arc::new(crate::nfs_adapter::NfsAdapter) }
 }
 
 pub async fn run_with(cfg: EngineConfig, sock: PathBuf, adapter: Arc<dyn MountAdapter>) -> Result<()> {

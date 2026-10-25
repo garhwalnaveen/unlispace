@@ -335,7 +335,8 @@ pub async fn handle(
         }
         body_out.extend_from_slice(&contexts_bytes);
     }
-    info!(?dialect, "NEGOTIATE complete");
+    info!(?dialect, capabilities = resp.capabilities, security_mode = resp.security_mode,
+        "NEGOTIATE complete");
     let mut hr = HandlerResponse::ok(body_out);
     hr.skip_signing = true;
     hr

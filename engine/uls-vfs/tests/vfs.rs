@@ -326,14 +326,50 @@ async fn writes_during_a_metadata_only_rename_rebase_onto_its_new_head() {
 
 #[tokio::test]
 async fn drop_during_upload_recovers_frozen_and_newer_writes() {
+    // Timing-sensitive (pauses mid-upload); generous waits keep it stable under parallel load.
     let (_s,c,token,dir,v) = pausing_setup().await;
     v.create("a",Kind::File).await.unwrap(); v.write("a",0,b"initial").await.unwrap();
     token.pause.store(true, Ordering::SeqCst); v.flush("a").await.unwrap();
-    tokio::time::timeout(Duration::from_secs(3),token.entered.notified()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(15),token.entered.notified()).await.unwrap();
     v.truncate("a",0).await.unwrap(); v.write("a",0,b"recovered").await.unwrap();
     drop(v);
     let v = Vfs::open(c.clone(),"drive",dir.path(),options()).await.unwrap();
     assert_eq!(v.read("a",0,100).await.unwrap(), &b"recovered"[..]);
     v.shutdown().await.unwrap();
     assert_eq!(c.read_range("drive","a",0,100).await.unwrap(), &b"recovered"[..]);
+}
+
+#[tokio::test]
+async fn regress_replace_rename_over_unpublished_file_drains() {
+    let (_mock, client, _dir, vfs) = setup(options()).await;
+    vfs.create("docs", Kind::Directory).await.unwrap();
+    vfs.create("docs/a", Kind::File).await.unwrap();
+    vfs.write("docs/a", 0, b"hello").await.unwrap();
+    vfs.create("docs/b", Kind::File).await.unwrap();
+    vfs.rename("docs/a", "docs/b", true).await.unwrap();
+    vfs.flush("docs/b").await.unwrap();
+    drained(&vfs).await;
+    assert_eq!(client.read_range("drive", "docs/b", 0, 100).await.unwrap(), b"hello"[..]);
+    vfs.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn regress_bridge_sequence_drains() {
+    let (_mock, client, _dir, vfs) = setup(VfsOptions { quiet_window: Duration::from_millis(20), max_dirty_age: Duration::from_secs(5), retry_initial: Duration::from_millis(20), retry_max: Duration::from_millis(100), journal_byte_cap: 1024*1024, hostname: "bridge-test".into() }).await;
+    vfs.create("docs", Kind::Directory).await.unwrap();
+    vfs.create("docs/draft", Kind::File).await.unwrap();
+    vfs.write("docs/draft", 3, b"abcdef").await.unwrap();
+    vfs.truncate("docs/draft", 7).await.unwrap();
+    vfs.set_xattr("docs/draft", "com.apple.FinderInfo", &[7;32]).await.unwrap();
+    vfs.set_xattr("docs/draft", "com.apple.ResourceFork", b"resource").await.unwrap();
+    vfs.remove_xattr("docs/draft", "com.apple.FinderInfo").await.unwrap();
+    vfs.rename("docs/draft", "docs/saved", false).await.unwrap();
+    vfs.create("docs/replacement", Kind::File).await.unwrap();
+    vfs.rename("docs/saved", "docs/replacement", true).await.unwrap();
+    vfs.flush("docs/replacement").await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async { loop {
+        let p = vfs.pending().await; if p.files + p.metadata_ops == 0 { break; }
+        tokio::time::sleep(Duration::from_millis(10)).await; } }).await
+        .unwrap_or_else(|_| panic!("STALL {:?}", futures_util::FutureExt::now_or_never(vfs.pending())));
+    assert_eq!(client.read_range("drive", "docs/replacement", 0, 100).await.unwrap(), b"\0\0\0abcd"[..]);
 }

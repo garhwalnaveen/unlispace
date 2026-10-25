@@ -389,6 +389,14 @@ impl CreateArgs {
         // Decode path.
         let units = utf16le_to_units(&req.name).ok_or(ntstatus::STATUS_INVALID_PARAMETER)?;
         let path = SmbPath::from_utf16(&units).map_err(|_| ntstatus::STATUS_OBJECT_NAME_INVALID)?;
+        debug!(
+            path = %path,
+            desired_access = format_args!("{:#010x}", req.desired_access),
+            disposition = req.create_disposition,
+            options = format_args!("{:#010x}", req.create_options),
+            share_access = req.share_access,
+            "CREATE request"
+        );
 
         // Translate disposition.
         let intent = match req.create_disposition {
