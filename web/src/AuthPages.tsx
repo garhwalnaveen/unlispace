@@ -171,9 +171,9 @@ export function Callback() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    const handoff = new URLSearchParams(window.location.hash.slice(1)).get(
-      "handoff",
-    );
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const handoff = fragment.get("handoff");
+    const providerError = fragment.get("error");
     window.history.replaceState(
       null,
       "",
@@ -181,7 +181,9 @@ export function Callback() {
     );
     if (!handoff) {
       setError(
-        "The sign-in link is missing its handoff code. Please sign in again.",
+        providerError
+          ? `Google sign-in failed (${providerError}). Please try again.`
+          : "The sign-in link is missing its handoff code. Please sign in again.",
       );
       return;
     }

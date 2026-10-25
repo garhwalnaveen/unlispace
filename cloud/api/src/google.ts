@@ -125,7 +125,12 @@ export async function googleCallback(ctx: Ctx): Promise<Response> {
 				code_verifier: st.payload.verifier,
 			}),
 		});
-		if (!tokRes.ok) throw new GoogleFail("token_exchange_failed");
+		if (!tokRes.ok) {
+			// Log Google's error code only (never the code, verifier or secret) to diagnose misconfiguration.
+			const detail = await tokRes.json().catch(() => ({})) as { error?: string; error_description?: string };
+			console.error("google token exchange failed", tokRes.status, detail.error ?? "", detail.error_description ?? "");
+			throw new GoogleFail("token_exchange_failed");
+		}
 		const tok = (await tokRes.json()) as { id_token?: string };
 		if (!tok.id_token) throw new GoogleFail("token_exchange_failed");
 		const email = await verifyIdToken(ctx, tok.id_token, st.payload.nonce);
@@ -133,7 +138,7 @@ export async function googleCallback(ctx: Ctx): Promise<Response> {
 		const handoff = await putOneTime(ctx, "handoff", 60_000, user.id, { created });
 		return back(`handoff=${handoff}`);
 	} catch (e) {
-		if (e instanceof GoogleFail) return back(`error=${e.message}`);
+		if (e instanceof GoogleFail) { console.error("google callback rejected", e.message); return back(`error=${e.message}`); }
 		console.error("google callback failed", String((e as Error)?.message ?? e));
 		return back("error=server_error");
 	}
