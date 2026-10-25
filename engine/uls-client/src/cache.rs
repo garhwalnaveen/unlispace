@@ -5,6 +5,7 @@
 //! deleted and reported as a miss. Recency is the file mtime, which `get` bumps.
 
 use std::fs;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -22,7 +23,8 @@ static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug)]
 pub struct ShardCache {
     dir: PathBuf,
-    cap_bytes: u64,
+    cap_bytes: AtomicU64,
+    pins: Mutex<BTreeMap<String, BTreeSet<String>>>,
     /// Approximate bytes on disk; resynchronised on every eviction scan.
     used: AtomicU64,
     scan_lock: Mutex<()>,
@@ -41,7 +43,12 @@ impl ShardCache {
     pub fn open(dir: impl Into<PathBuf>, cap_bytes: u64) -> io::Result<ShardCache> {
         let dir = dir.into();
         fs::create_dir_all(&dir)?;
-        let cache = ShardCache { dir, cap_bytes, used: AtomicU64::new(0), scan_lock: Mutex::new(()) };
+        let pins = match fs::read(dir.join(".pins.json")) {
+            Ok(data) => serde_json::from_slice(&data).map_err(io::Error::other)?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e),
+        };
+        let cache = ShardCache { dir, cap_bytes: AtomicU64::new(cap_bytes), pins: Mutex::new(pins), used: AtomicU64::new(0), scan_lock: Mutex::new(()) };
         cache.rescan();
         Ok(cache)
     }
@@ -107,10 +114,33 @@ impl ShardCache {
             return result;
         }
         let used = self.used.fetch_add(data.len() as u64, Ordering::Relaxed) + data.len() as u64;
-        if used > self.cap_bytes {
+        if used > self.cap_bytes.load(Ordering::Relaxed) {
             self.evict();
         }
         Ok(())
+    }
+
+    /// Persist ownership before fetching: overlapping paths may pin the same shard.
+    pub fn set_pin(&self, owner: &str, hashes: BTreeSet<String>) -> io::Result<()> {
+        if hashes.iter().any(|h| !is_hash(h)) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "bad shard hash"));
+        }
+        let _scan = self.scan_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pins = self.pins.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = pins.clone();
+        if hashes.is_empty() { next.remove(owner); } else { next.insert(owner.into(), hashes); }
+        let tmp = self.dir.join(".pins.json.tmp");
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(&serde_json::to_vec(&next).map_err(io::Error::other)?)?;
+        f.sync_all()?;
+        fs::rename(tmp, self.dir.join(".pins.json"))?;
+        *pins = next;
+        Ok(())
+    }
+
+    pub fn set_cap_bytes(&self, cap: u64) {
+        self.cap_bytes.store(cap, Ordering::Relaxed);
+        self.evict();
     }
 
     pub fn used_bytes(&self) -> u64 {
@@ -148,13 +178,21 @@ impl ShardCache {
     /// Delete least-recently-used entries until usage is at or below the cap.
     pub fn evict(&self) {
         let _g = self.scan_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // Other CLI processes can have opened the cache before the daemon added a pin.
+        let pins: BTreeMap<String,BTreeSet<String>> = match fs::read(self.dir.join(".pins.json")) {
+            Ok(data) => match serde_json::from_slice(&data) { Ok(pins) => pins, Err(_) => return },
+            Err(e) if e.kind() == io::ErrorKind::NotFound => self.pins.lock().unwrap_or_else(|e|e.into_inner()).clone(),
+            Err(_) => return,
+        };
+        let pinned: BTreeSet<String> = pins.values().flatten().cloned().collect();
         let mut entries = self.entries();
         let mut total: u64 = entries.iter().map(|e| e.1).sum();
         entries.sort_by_key(|e| e.2);
         for (path, size, _) in entries {
-            if total <= self.cap_bytes {
+            if total <= self.cap_bytes.load(Ordering::Relaxed) {
                 break;
             }
+            if pinned.contains(path.file_name().and_then(|n| n.to_str()).unwrap_or("")) { continue; }
             if fs::remove_file(&path).is_ok() {
                 total -= size;
             }
@@ -172,6 +210,26 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let c = ShardCache::open(d.path().join("shards"), cap).unwrap();
         (d, c)
+    }
+
+    #[test]
+    fn pins_survive_reopen_and_overlapping_owners() {
+        let (d, c) = open(0);
+        let h = sha256_hex(b"offline");
+        let stale = ShardCache::open(d.path().join("shards"),0).unwrap();
+        c.set_pin("drive:a", BTreeSet::from([h.clone()])).unwrap();
+        c.set_pin("drive:b", BTreeSet::from([h.clone()])).unwrap();
+        c.put(&h, b"offline").unwrap();
+        stale.evict();
+        assert!(c.contains(&h));
+        c.set_pin("drive:a", BTreeSet::new()).unwrap();
+        drop(c);
+        let c = ShardCache::open(d.path().join("shards"), 0).unwrap();
+        c.evict();
+        assert!(c.get(&h).is_some());
+        c.set_pin("drive:b", BTreeSet::new()).unwrap();
+        c.evict();
+        assert!(!c.contains(&h));
     }
 
     #[test]

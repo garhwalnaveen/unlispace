@@ -46,6 +46,7 @@ struct Node {
 
 #[derive(Clone)]
 struct Version {
+    ts: i64,
     id: String,
     path: String,
     op: String,
@@ -480,6 +481,7 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                     ctype: content_type.clone(), mtime: *mtime_ms, seq,
                 });
                 new_versions.push(Version {
+                    ts,
                     id: vid.clone(), path: path.clone(), op: "put".into(), size: *size,
                     ctype: content_type.clone(), mtime: *mtime_ms, manifest: shards.clone(), seq,
                 });
@@ -497,6 +499,7 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                 nodes.entry(path.clone()).or_insert(Node { is_folder: true, seq, ..Default::default() });
                 let vid = next_version(s);
                 new_versions.push(Version {
+                    ts,
                     id: vid.clone(), path: path.clone(), op: "mkdir".into(), size: 0,
                     ctype: String::new(), mtime: ts, manifest: vec![], seq,
                 });
@@ -519,6 +522,7 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                 }
                 let vid = next_version(s);
                 new_versions.push(Version {
+                    ts,
                     id: vid.clone(), path: path.clone(), op: "delete".into(), size: 0,
                     ctype: String::new(), mtime: ts, manifest: vec![], seq,
                 });
@@ -549,10 +553,15 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                     }
                 }
                 let vid = next_version(s);
+                let manifest = node.head.as_ref().and_then(|head|new_versions.iter().chain(d.versions.iter()).find(|v|&v.id == head)).map(|v|v.manifest.clone()).unwrap_or_default();
+                if let Some(moved) = nodes.get_mut(to) { moved.head = Some(vid.clone()); moved.seq = seq; }
                 new_versions.push(Version {
+                    ts,
                     id: vid.clone(), path: to.clone(), op: "rename".into(), size: node.size,
-                    ctype: node.ctype.clone(), mtime: node.mtime, manifest: vec![], seq,
+                    ctype: node.ctype.clone(), mtime: node.mtime, manifest, seq,
                 });
+                new_versions.push(Version {ts,id:next_version(s),path:from.clone(),op:"delete".into(),size:0,ctype:String::new(),mtime:ts,manifest:vec![],seq});
+                logs.push((from.clone(), "delete".into(), None));
                 logs.push((to.clone(), "rename".into(), Some(vid.clone())));
                 results.push(CommitResult { path: to.clone(), version_id: vid, size: None });
             }
@@ -656,7 +665,7 @@ async fn manifest(State(s): State<Shared>, Path(id): Path<String>, Query(q): Que
 async fn versions(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<PathQ>) -> Resp {
     collapse(with_drive(&s, &id, |d| {
         let all: Vec<VersionEntry> = d.versions.iter().filter(|v| v.path == q.path).map(|v| VersionEntry {
-            version_id: v.id.clone(), op: v.op.clone(), size: Some(v.size), seq: v.seq, ts: 0, actor: Some("dev".into()),
+            version_id: v.id.clone(), op: v.op.clone(), size: Some(v.size), seq: v.seq, ts: v.ts, actor: Some("dev".into()),
         }).collect();
         // The cursor is opaque to clients; here it is the index of the next entry.
         let limit = q.limit.unwrap_or(1000).clamp(1, 1000);

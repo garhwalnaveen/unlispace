@@ -373,3 +373,22 @@ async fn regress_bridge_sequence_drains() {
         .unwrap_or_else(|_| panic!("STALL {:?}", futures_util::FutureExt::now_or_never(vfs.pending())));
     assert_eq!(client.read_range("drive", "docs/replacement", 0, 100).await.unwrap(), b"\0\0\0abcd"[..]);
 }
+
+#[tokio::test]
+async fn budget_is_shared_across_drives_and_releases_after_publication() {
+    let server = uls_mock::MockServer::start("local").await;
+    let client = Client::builder(server.url(),"local").build().unwrap();
+    client.create_drive("drive-a",None).await.unwrap(); client.create_drive("drive-b",None).await.unwrap();
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let budget = std::sync::Arc::new(uls_vfs::JournalBudget::new(5));
+    let a = Vfs::open_with_budget(client.clone(),"drive-a",&dir.path().join("drive-a"),slow(),budget.clone()).await.unwrap();
+    let b = Vfs::open_with_budget(client,"drive-b",&dir.path().join("drive-b"),slow(),budget.clone()).await.unwrap();
+    a.create("f",Kind::File).await.unwrap(); b.create("f",Kind::File).await.unwrap();
+    a.write("f",0,b"123").await.unwrap(); b.write("f",0,b"45").await.unwrap();
+    assert_eq!(b.write("f",2,b"6").await.unwrap_err(),FsError::NoSpace);
+    assert_eq!(budget.used(),5);
+    a.shutdown().await.unwrap();
+    assert_eq!(budget.used(),2);
+    b.write("f",2,b"6").await.unwrap();
+    b.shutdown().await.unwrap();assert_eq!(budget.used(),0);
+}

@@ -25,6 +25,8 @@ pub struct MountRecord {
     pub name: String,
     #[serde(default)]
     pub mount_path: Option<String>,
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +43,22 @@ pub struct Persisted {
     pub cursors: BTreeMap<String, i64>,
     #[serde(default)]
     pub cache_cap_bytes: Option<i64>,
+    #[serde(default)]
+    pub journal_cap_bytes: Option<u64>,
+    #[serde(default)]
+    pub pins: Vec<PinRecord>,
+    #[serde(default)]
+    pub workspace: Option<String>,
+    #[serde(default)]
+    pub upload_drives: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinRecord {
+    pub drive_id: String,
+    pub path: String,
+    pub shards: BTreeMap<String, u64>,
 }
 
 pub struct StateStore {
@@ -109,7 +127,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let path = d.path().join("state.json");
         let s = StateStore::load(path.clone());
-        s.update(|p| p.mounts.push(MountRecord { drive_id: "d-1".into(), name: "Space".into(), mount_path: None }));
+        s.update(|p| p.mounts.push(MountRecord { drive_id: "d-1".into(), name: "Space".into(), mount_path: None, read_only: false }));
         s.set_cursor("d-1", 42);
         let s2 = StateStore::load(path.clone());
         assert_eq!(s2.get().mounts.len(), 1);

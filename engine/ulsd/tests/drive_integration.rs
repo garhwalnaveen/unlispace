@@ -210,3 +210,29 @@ async fn vfs_conflict_is_broadcast_with_leading_slash_paths() {
     captured.vfs.lock().unwrap().take();
     captured.nfs.lock().unwrap().take();
 }
+
+#[tokio::test]
+async fn shared_journal_cap_emits_journal_full_and_can_be_raised() {
+    let server = uls_mock::MockServer::start("local").await;
+    let client = Client::builder(server.url(), "local").build().unwrap();
+    client.create_drive("drive", None).await.unwrap();
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let captured = Arc::new(Captured::default());
+    let engine = Engine::new(config(dir.path(),server.url()),Arc::new(Adapter {captured:captured.clone(),native:false}));
+    ok(&engine,"config.set",json!({"token":"local","journalCapBytes":3})).await;
+    ok(&engine,"drive.mount",json!({"driveId":"drive"})).await;
+    let vfs = captured.vfs.lock().unwrap().clone().unwrap();
+    vfs.create("cap",Kind::File).await.unwrap();vfs.write("cap",0,b"abc").await.unwrap();
+    let mut events = engine.subscribe();
+    assert_eq!(vfs.write("cap",0,b"d").await.unwrap_err(),uls_vfs::FsError::NoSpace);
+    tokio::time::timeout(Duration::from_secs(2),async {
+        loop { let ev:Value = serde_json::from_str(&events.recv().await.unwrap()).unwrap();
+            if ev["event"]=="state" && ev["data"]["message"]=="journal_full" { break; }
+        }
+    }).await.unwrap();
+    assert_eq!(vfs.read("cap",0,10).await.unwrap().as_ref(),b"abc");
+    ok(&engine,"config.set",json!({"journalCapBytes":4})).await;
+    assert_eq!(vfs.write("cap",0,b"d").await.unwrap(),1);
+    assert_eq!(ok(&engine,"uploads",json!({})).await["journalBytes"],4);
+    engine.shutdown().await;
+}

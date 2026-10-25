@@ -6,12 +6,26 @@ pub use types::*;
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 use journal::{Action, Extent, Journal, Node, State};
 use tokio::sync::{Mutex, Notify, broadcast};
 use uls_client::{Client, WatchEvent};
 use uls_proto::{NodeType, Op};
 use types::{attr, filetime, now_ms, parent, path, wire, within};
+
+/// A shared byte budget lets a daemon cap all drive journals together.
+pub struct JournalBudget { cap: AtomicU64, used: AtomicU64 }
+impl JournalBudget {
+    pub fn new(cap: u64) -> Self { Self {cap: AtomicU64::new(cap),used: AtomicU64::new(0)} }
+    pub fn set_cap(&self,cap:u64) {self.cap.store(cap,Ordering::SeqCst);}
+    pub fn used(&self)->u64 {self.used.load(Ordering::SeqCst)}
+    fn update(&self,old:u64,new:u64)->Result<(),FsError> {
+        if new <= old { self.used.fetch_sub(old-new,Ordering::SeqCst); return Ok(()); }
+        let extra = new-old;
+        self.used.try_update(Ordering::SeqCst,Ordering::SeqCst,|used|used.checked_add(extra).filter(|n|*n <= self.cap.load(Ordering::SeqCst))).map(|_|()).map_err(|_|FsError::NoSpace)
+    }
+}
 
 #[derive(Clone)]
 pub struct Vfs { inner: Arc<Inner>, _lease: Arc<Lease> }
@@ -24,11 +38,14 @@ impl Drop for Lease {
 }
 struct Inner {
     client: Client, drive: String, opts: VfsOptions,
+    budget: Arc<JournalBudget>,
     publish_lock: Mutex<()>,
     core: Mutex<Core>, events: broadcast::Sender<VfsEvent>, wake: Arc<Notify>,
     task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
-struct Core { journal: Journal, state: State, online: SyncState, closed: bool }
+struct Core { journal: Journal, state: State, online: SyncState, closed: bool,
+    budget: Arc<JournalBudget>, accounted:u64, events:broadcast::Sender<VfsEvent> }
+impl Drop for Core { fn drop(&mut self) { self.budget.used.fetch_sub(self.accounted,Ordering::SeqCst); } }
 impl Drop for Inner {
     fn drop(&mut self) {
         if let Some(t) = self.task.get_mut().unwrap_or_else(|e| e.into_inner()).take() { t.abort(); }
@@ -36,6 +53,10 @@ impl Drop for Inner {
 }
 impl Vfs {
     pub async fn open(client: Client, drive: &str, state_dir: &Path, opts: VfsOptions) -> Result<Self, FsError> {
+        let budget = Arc::new(JournalBudget::new(opts.journal_byte_cap));
+        Self::open_with_budget(client,drive,state_dir,opts,budget).await
+    }
+    pub async fn open_with_budget(client:Client,drive:&str,state_dir:&Path,opts:VfsOptions,budget:Arc<JournalBudget>)->Result<Self,FsError> {
         if drive.is_empty() || opts.quiet_window.is_zero() || opts.max_dirty_age.is_zero()
             || opts.quiet_window.as_millis() > i64::MAX as u128
             || opts.max_dirty_age.as_millis() > i64::MAX as u128
@@ -43,14 +64,23 @@ impl Vfs {
         // Give an aborted publisher a chance to release its SQLite connection on drop/reopen.
         tokio::task::yield_now().await;
         let (journal, state) = Journal::open(state_dir, drive)?;
-        let inner = Arc::new(Inner { client, drive: drive.into(), opts, publish_lock: Mutex::new(()),
-            core: Mutex::new(Core { journal, state, online: SyncState::Online, closed: false }),
-            events: broadcast::channel(256).0, wake: Arc::new(Notify::new()), task: std::sync::Mutex::new(None) });
+        let events = broadcast::channel(256).0;
+        let accounted = state.usage(); budget.used.fetch_add(accounted,Ordering::SeqCst);
+        let inner = Arc::new(Inner { client, drive: drive.into(), budget:budget.clone(), opts, publish_lock: Mutex::new(()),
+            core: Mutex::new(Core { journal, state, online: SyncState::Online, closed: false, budget, accounted, events:events.clone() }),
+            events, wake: Arc::new(Notify::new()), task: std::sync::Mutex::new(None) });
         let weak = Arc::downgrade(&inner);
         let task = tokio::spawn(publisher::run(weak, inner.wake.clone()));
         *inner.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
         let lease = Arc::new(Lease(Arc::downgrade(&inner)));
         Ok(Self { inner, _lease: lease })
+    }
+    pub fn set_journal_cap(&self, cap: u64) { self.inner.budget.set_cap(cap); }
+    pub async fn pending_paths(&self) -> Vec<(String, u64)> {
+        let c = self.inner.core.lock().await;
+        let mut paths: std::collections::BTreeMap<String,u64> = c.state.nodes.iter().filter(|(_, n)| n.dirty_since.is_some()).map(|(p,n)| (p.clone(), n.attr.size)).collect();
+        for action in &c.state.actions { if let Action::Meta(op) = action { let p = match op { Op::Mkdir {path} | Op::Delete {path,..} | Op::Put {path,..} => path, Op::Rename {to,..} => to }; paths.entry(p.clone()).or_insert(0); } }
+        paths.into_iter().collect()
     }
     pub fn subscribe(&self) -> broadcast::Receiver<VfsEvent> { self.inner.events.subscribe() }
     fn changed(&self, paths: Vec<String>) { let _ = self.inner.events.send(VfsEvent::Changed { paths }); }
@@ -108,7 +138,6 @@ impl Vfs {
         self.inner.load(&mut c.state, &p).await?;
         self.inner.base(&mut c.state, &p).await?;
         if data.is_empty() { return Ok(0); }
-        if c.state.usage().saturating_add(data.len() as u64) > self.inner.opts.journal_byte_cap { return Err(FsError::NoSpace); }
         let mut s = c.state.clone(); let blob = s.next_blob; s.next_blob += 1;
         // Reserve blob IDs durably before creation so even an interrupted write cannot reuse one.
         c.install(s.clone())?;
@@ -116,7 +145,8 @@ impl Vfs {
         let n = s.nodes.get_mut(&p).ok_or(FsError::NotFound)?;
         n.extents.push(Extent { off, len: data.len() as u64, stored_len: data.len() as u64, blob });
         n.attr.size = n.attr.size.max(end); n.touch(); s.queue_file(&p);
-        c.install(s)?; drop(c); self.changed(vec![p]); self.inner.wake.notify_one(); Ok(len)
+        if let Err(e) = c.install(s) { let _ = c.journal.collect(&c.state); return Err(e); }
+        drop(c); self.changed(vec![p]); self.inner.wake.notify_one(); Ok(len)
     }
     pub async fn truncate(&self, p: &str, size: u64) -> Result<(), FsError> {
         if size > i64::MAX as u64 { return Err(FsError::Invalid); }
@@ -205,7 +235,6 @@ impl Vfs {
         if let Some(v) = value { n.xattrs.insert(name.into(), v.into()); }
         else if n.xattrs.remove(name).is_none() { return Err(FsError::NotFound); }
         n.attr.changed = filetime(now_ms());
-        if s.usage() > self.inner.opts.journal_byte_cap { return Err(FsError::NoSpace); }
         c.install(s)?; drop(c); self.changed(vec![p]); Ok(())
     }
     pub async fn apply_remote(&self, ev: WatchEvent) {
@@ -237,7 +266,17 @@ impl Vfs {
 }
 impl Core {
     fn persist(&mut self) -> Result<(), FsError> { self.journal.save(&self.state) }
-    fn install(&mut self, s: State) -> Result<(), FsError> { self.journal.save(&s)?; self.state = s; Ok(()) }
+    fn install(&mut self, s: State) -> Result<(), FsError> {
+        let next = s.usage();
+        if let Err(e) = self.budget.update(self.accounted,next) { let _ = self.events.send(VfsEvent::JournalFull); return Err(e); }
+        if let Err(e) = self.journal.save(&s) {
+            // Roll back a reservation, even if the cap was lowered during the disk write.
+            if next > self.accounted { self.budget.used.fetch_sub(next-self.accounted,Ordering::SeqCst); }
+            else { self.budget.used.fetch_add(self.accounted-next,Ordering::SeqCst); }
+            return Err(e);
+        }
+        self.accounted = next; self.state = s; Ok(())
+    }
 }
 fn retire(s: &mut State, p: &str) {
     if let Some(n) = s.nodes.remove(p) { s.retired.insert(n.attr.id, n); }

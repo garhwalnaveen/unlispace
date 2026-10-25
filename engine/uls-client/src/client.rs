@@ -190,6 +190,21 @@ impl Client {
         ClientBuilder::new(endpoint, token)
     }
 
+    /// Control-plane request with this client's bearer, without data-plane path rewriting.
+    /// Mutations are never retried after an ambiguous transport failure.
+    pub async fn control_request(&self, method: &str, path: &str, body: Option<&serde_json::Value>) -> Result<serde_json::Value> {
+        if !path.starts_with('/') || path.starts_with("//") || path.contains("..") {
+            return Err(Error::InvalidPath("invalid control path".into()));
+        }
+        let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| Error::InvalidPath("invalid method".into()))?;
+        let (base,token) = self.creds().await?;
+        let mut request = self.http.request(method,format!("{base}{path}")).bearer_auth(token);
+        if let Some(body) = body { request = request.json(body); }
+        let response = Self::check(request.send().await?).await?;
+        if response.status() == StatusCode::NO_CONTENT { return Ok(serde_json::json!({})); }
+        Self::json(response).await
+    }
+
     pub fn cache(&self) -> Option<&Arc<ShardCache>> {
         self.cache.as_ref()
     }

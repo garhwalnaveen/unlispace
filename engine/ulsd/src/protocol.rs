@@ -93,6 +93,10 @@ pub struct ChangeEvent {
     pub paths: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinEvent { pub drive_id: String, pub path: String, pub cached_bytes: u64, pub bytes: u64 }
+
 /// A concurrent remote edit won; the local edit was preserved at `copy`. Both paths have a
 /// leading slash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +117,7 @@ pub struct StateEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data", rename_all = "lowercase")]
 pub enum Event {
+    Pin(PinEvent),
     Transfer(Transfer),
     Change(ChangeEvent),
     Conflict(ConflictEvent),
@@ -161,6 +166,7 @@ pub struct ConfigParams {
     pub endpoint: Option<String>,
     pub token: Option<String>,
     pub cache_cap_bytes: Option<i64>,
+    pub journal_cap_bytes: Option<u64>,
 }
 
 impl fmt::Debug for ConfigParams {

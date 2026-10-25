@@ -261,7 +261,7 @@ async fn auth_flow_mount_and_sign_out() {
 
     // The fake adapter does not need a reachable data plane.
     let v = c.call(5, "drive.mount", json!({"driveId":"d-abc"})).await;
-    assert_eq!(v["result"], json!({}), "{v}");
+    assert!(v["result"]["mountpoint"].as_str().is_some_and(|p|p.ends_with("/mnt/Space")), "{v}");
     assert_eq!(*h.mounted.lock().unwrap(), vec!["d-abc".to_string()]);
     let v = c.call(6, "drive.mount", json!({"driveId":"d-abc"})).await;
     assert_eq!(v["error"]["code"], "already_mounted");
@@ -322,7 +322,8 @@ async fn graceful_shutdown_unmounts_but_remembers_and_restart_restores() {
     let req = |id, m: &str, p: Value| ulsd::protocol::parse_request(&json!({"id":id,"method":m,"params":p}).to_string()).unwrap();
     let r = e1.handle(req(1, "auth.set", json!({"apiEndpoint":api.uri(),"accessToken":jwt(now_s()+900),"refreshToken":"rt_1"}))).await;
     assert!(r.error.is_none(), "{r:?}");
-    let r = e1.handle(req(2, "drive.mount", json!({"driveId":"d-abc"}))).await;
+    let custom = dir.path().join("custom");
+    let r = e1.handle(req(2, "drive.mount", json!({"driveId":"d-abc","mountpoint":custom,"readOnly":true}))).await;
     assert!(r.error.is_none(), "{r:?}");
     assert_eq!(mounted.lock().unwrap().len(), 1);
 
@@ -341,6 +342,9 @@ async fn graceful_shutdown_unmounts_but_remembers_and_restart_restores() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(*mounted.lock().unwrap(), vec!["d-abc".to_string()]);
+    let mounts = e2.handle(req(4,"mounts.list",json!({}))).await.result.unwrap();
+    assert_eq!(mounts["mounts"][0]["mountpoint"],json!(custom));
+    assert_eq!(mounts["mounts"][0]["readOnly"],true);
     assert_eq!(uls_auth::SecretStore::get(&*store, "u_1").unwrap().as_deref(), Some("rt_2"), "rotated token persisted after restart");
     let r = e2.handle(req(3, "auth.status", json!({}))).await;
     assert_eq!(r.result.unwrap()["signedIn"], true);

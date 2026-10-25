@@ -110,7 +110,7 @@ pub async fn run_with(cfg: EngineConfig, sock: PathBuf, adapter: Arc<dyn MountAd
     tracing::info!(socket = %sock.display(), "ulsd listening");
 
     let serving = tokio::spawn(server::serve(listener, uid, engine.clone()));
-    wait_for_signal().await;
+    tokio::select! { _ = wait_for_signal() => {}, _ = engine.stop.notified() => {} }
     tracing::info!("shutting down");
     serving.abort();
     engine.shutdown().await;

@@ -14,3 +14,6 @@ pub mod server;
 pub mod smb_adapter;
 pub mod state;
 pub mod watch;
+
+pub mod control;
+pub mod history;

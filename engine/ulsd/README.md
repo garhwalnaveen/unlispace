@@ -72,3 +72,53 @@ $ ulsd stat demo big.bin   -> not found: no_such_path (exit 2)
 
 Unmounted with Ctrl-C (`unmounted ...`); `mount` showed no leftover; the mock and temp data were
 removed.
+
+## M3 CLI and daemon
+
+```
+uls daemon start
+uls drives --json
+uls use "My workspace"
+uls mount Footage [mountpoint] [--read-only]
+uls mounts --json
+uls upload ./rushes ./audio drive-id:/incoming
+uls uploads --watch
+uls pin Footage /incoming
+uls unpin Footage /incoming
+uls history Footage cuts/a.mov --json
+uls show Footage cuts/a.mov --at 2026-09-13T09:00:00Z > before.mov
+uls restore Footage cuts/ --at 2026-09-13T09:00:00Z --dry-run
+uls fork Footage Experiment
+uls keys list --json
+uls keys create --name automation --org workspace-id --access write
+uls keys revoke ACCESS_KEY_ID
+uls unmount Footage
+uls daemon stop
+```
+
+Names, aliases, ids and workspace/name forms match case-insensitively. Ambiguous names list
+workspace-qualified choices; `use` remembers a workspace default. Signed-in data commands execute
+inside the daemon's session; the CLI never reads/rotates its refresh token. The M0 `ULS_DEV_TOKEN`
+commands remain available. `ULS_SOCKET` selects an isolated daemon socket for CLI commands.
+
+`mount` returns after the daemon owns the mount. Use `--foreground` for the standalone NFS
+process; existing `--state-dir`, `--no-mount` and nonzero `--port` also select that flow so old
+scripts keep working. `daemon start|stop|status` accepts the daemon's existing isolation options.
+
+Uploads copy into durable daemon journals before acknowledging the queue, use staging paths
+before replacing destinations, and publish independently of the terminal. File and directory
+imports (including empty directories) are supported; directory traversal does not follow symlinks.
+The shared journal cap is 10 GiB by default and can be changed with `config.set journalCapBytes`.
+A rejected filesystem write returns ENOSPC and emits `state` with message `journal_full`.
+
+Keep-offline pins persist independent shard ownership per drive/path, including overlapping
+paths, and protect pinned shards from LRU even in cache instances opened before the pin. Pin
+progress counts unique shard bytes. A failed prefetch keeps its pin and can be retried. Pins are
+snapshots of the path at prefetch time; re-pin to fetch a newer remote head.
+
+`show --at` and rollback choose by version timestamp, with sequence as the tie-breaker, rather
+than file mtime. Subtree rollback follows the complete change feed and commits one guarded plan;
+`--dry-run` prints that plan without mutating the drive. The data plane must expose moved
+subtree descendant history for rollback across directory renames; see `NEEDS.md`.
+
+Protocol handoff: `PROTOCOL-ADDITIONS.md`. Exact gate output summaries: `GATE-RESULTS.md`.

@@ -22,6 +22,7 @@ pub struct DirEntry { pub name: String, pub attr: Attr }
 pub enum SyncState { Online, Offline }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VfsEvent {
+    JournalFull,
     Changed { paths: Vec<String> },
     Transfer { paths: Vec<String>, bytes: u64 },
     Conflict { path: String, copy: String },
