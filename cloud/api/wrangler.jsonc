@@ -26,5 +26,29 @@
   // Cloudflare Email Service binding. Sending domain must be onboarded; see README.
   "send_email": [{ "name": "EMAIL" }],
   // Set with `wrangler secret put`; locally they come from .dev.vars (node ../scripts/dev-keys.mjs).
-  "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] }
+  "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] },
+  "env": {
+    "production": {
+      "name": "unlispace-api",
+      "workers_dev": true,
+      "preview_urls": false,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "unlispace-control",
+          "database_id": "5f259a26-5e36-4e7b-8134-52a3043e3fc1",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "services": [
+        { "binding": "DATA_PLANE", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
+      ],
+      "vars": {
+        "ULS_ISSUER": "https://unlispace-api.naveen-f3d.workers.dev",
+        "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.naveen-f3d.workers.dev",
+        "ULS_WEB_ORIGIN": "https://unlispace-web.naveen-f3d.workers.dev",
+        "DODO_PAYMENTS_ENVIRONMENT": "test_mode"
+      }
+    }
+  }
 }

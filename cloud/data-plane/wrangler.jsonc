@@ -25,5 +25,21 @@
   // Secrets are never in this file. Set with `wrangler secret put ULS_JWT_PUBLIC_JWKS` when deploying
   // ({"keys":[<Ed25519 public JWK with kid>, ...]}, same value as the api's); locally they come from .dev.vars.
   // ULS_DEV_TOKEN is only needed while ULS_ALLOW_DEV_TOKEN is "1".
-  "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS", "ULS_BLOCK_KEY"] }
+  "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS", "ULS_BLOCK_KEY"] },
+  "env": {
+    "production": {
+      "name": "unlispace-data-plane",
+      "workers_dev": true,
+      "preview_urls": false,
+      "r2_buckets": [{ "binding": "SHARDS", "bucket_name": "unlispace-shards" }],
+      "durable_objects": {
+        "bindings": [{ "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }]
+      },
+      "vars": {
+        "ULS_ISSUER": "https://unlispace-api.naveen-f3d.workers.dev",
+        "ULS_ALLOW_DEV_TOKEN": "0",
+        "ULS_GC_DELETE": "0"
+      }
+    }
+  }
 }
