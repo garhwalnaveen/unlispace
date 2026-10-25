@@ -53,6 +53,29 @@ uls mount my-drive ~/mnt/my-drive
 
 Exit code 2 means the server rejected the request (412 precondition, not found, drive exists); 1 is any other error.
 
+## Daemon (`ulsd daemon`)
+
+`ulsd daemon` is what the Mac app talks to. It is also the default when `ulsd` runs with no
+arguments, which is how a LaunchAgent starts it. Protocol: `../mac/DAEMON-PROTOCOL.md`.
+
+- Socket: `~/Library/Application Support/Unlispace/ulsd.sock` (directory 0700, socket 0600). A stale
+  socket is removed on start; a live one makes the new daemon exit. Connections from another uid
+  are dropped.
+- Sign-in: the app hands over its session with `auth.set`. The refresh token is kept in the macOS
+  Keychain (service `com.unlispace.ulsd`, account = user id) and rotated on refresh. Access tokens
+  stay in memory. Drive tokens come from `POST /drives/{id}/token`. Tokens are never logged.
+- `drive.mount` mounts at `~/Unlispace/<Drive name>` using the read-only NFS adapter behind the
+  `MountAdapter` trait (`ulsd/src/mount.rs`). Mounts are remembered in
+  `~/Library/Application Support/Unlispace/state.json` (also holds per-drive watch cursors as the
+  last `ev`; no tokens) and restored on start. SIGTERM unmounts everything and keeps the list.
+- Each mounted drive runs a change watch and emits `change` events.
+- `uls login [--api URL]` signs in from a terminal: prints the `/auth/desktop/start` PKCE URL, you
+  paste the `uls://auth/callback#...` URL back, and the session goes to the running daemon (or
+  straight to the Keychain).
+- `uls-auth` crate: `Session` (single-flight refresh, rotation, drive-token cache, `orgs()`,
+  `sign_out()`), `SecretStore` with `KeychainStore` (macOS) and `MemoryStore`.
+- Needed changes in other crates: `ulsd/NEEDS.md`.
+
 ## Run against `wrangler dev`
 
 ```sh

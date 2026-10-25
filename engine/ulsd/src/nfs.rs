@@ -14,6 +14,7 @@ use nfsserve::nfs::{
 use nfsserve::tcp::{NFSTcp, NFSTcpListener};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
 use uls_client::{Client, Error};
+use crate::mount::SharedClient;
 use uls_proto::{ListEntry, ManifestResponse, NodeType};
 
 const ROOT: fileid3 = 1;
@@ -37,7 +38,7 @@ struct Tables {
 }
 
 pub struct UlsFs {
-    client: Client,
+    client: SharedClient,
     drive: String,
     uid: u32,
     gid: u32,
@@ -69,10 +70,19 @@ fn map_err(e: Error) -> nfsstat3 {
 
 impl UlsFs {
     pub fn new(client: Client, drive: String, uid: u32, gid: u32) -> UlsFs {
+        UlsFs::with_shared(SharedClient::new(client), drive, uid, gid)
+    }
+
+    /// Like `new`, but the client can be swapped underneath (drive tokens rotate every ~15 min).
+    pub fn with_shared(client: SharedClient, drive: String, uid: u32, gid: u32) -> UlsFs {
         let mut t = Tables::default();
         t.nodes.push(Node { path: String::new(), is_dir: true });
         t.by_path.insert(String::new(), ROOT);
         UlsFs { client, drive, uid, gid, t: Mutex::new(t) }
+    }
+
+    fn client(&self) -> Client {
+        self.client.get()
     }
 
     fn tables(&self) -> std::sync::MutexGuard<'_, Tables> {
@@ -127,7 +137,7 @@ impl UlsFs {
         {
             return Ok(v.clone());
         }
-        let entries = self.client.list(&self.drive, dir_path).await.map_err(map_err)?;
+        let entries = self.client().list(&self.drive, dir_path).await.map_err(map_err)?;
         self.tables().lists.insert(dir_path.to_string(), (Instant::now(), entries.clone()));
         Ok(entries)
     }
@@ -137,12 +147,12 @@ impl UlsFs {
     }
 
     async fn manifest_for(&self, node: &Node) -> Result<ManifestResponse, nfsstat3> {
-        let st = self.client.stat(&self.drive, &node.path).await.map_err(map_err)?;
+        let st = self.client().stat(&self.drive, &node.path).await.map_err(map_err)?;
         let vid = st.version_id.ok_or(nfsstat3::NFS3ERR_IO)?;
         if let Some(m) = self.tables().manifests.get(&vid) {
             return Ok(m.clone());
         }
-        let m = self.client.manifest(&self.drive, &node.path, Some(&vid)).await.map_err(map_err)?;
+        let m = self.client().manifest(&self.drive, &node.path, Some(&vid)).await.map_err(map_err)?;
         let mut t = self.tables();
         if t.manifests.len() > 256 {
             t.manifests.clear();
@@ -188,7 +198,7 @@ impl NFSFileSystem for UlsFs {
         let attr = if node.path.is_empty() {
             self.attr(id, true, 0, 0)
         } else {
-            let st = self.client.stat(&self.drive, &node.path).await.map_err(map_err)?;
+            let st = self.client().stat(&self.drive, &node.path).await.map_err(map_err)?;
             let is_dir = st.node_type == NodeType::Folder;
             if is_dir != node.is_dir {
                 // Changed type since we last listed it; the old id no longer names this object.
@@ -215,7 +225,7 @@ impl NFSFileSystem for UlsFs {
         }
         let len = u64::from(count).min(m.size - offset);
         let data = self
-            .client
+            .client()
             .read_manifest_range(&self.drive, &m.shards, offset, len)
             .await
             .map_err(map_err)?;
@@ -345,7 +355,7 @@ pub async fn mount(client: Client, drive: String, mountpoint: PathBuf, no_mount:
     unmount(&mountpoint).await
 }
 
-async fn unmount(mountpoint: &Path) -> Result<()> {
+pub async fn unmount(mountpoint: &Path) -> Result<()> {
     let out = tokio::process::Command::new("/sbin/umount").arg(mountpoint).output().await.context("run umount")?;
     if out.status.success() {
         eprintln!("unmounted {}", mountpoint.display());

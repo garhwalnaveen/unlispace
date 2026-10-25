@@ -2154,6 +2154,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
+name = "uls-auth"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "reqwest",
+ "security-framework",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
 name = "uls-chunk"
 version = "0.0.1"
 dependencies = [
@@ -2208,21 +2225,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "uls-vfs"
+version = "0.0.1"
+
+[[package]]
 name = "ulsd"
 version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "clap",
+ "dirs",
  "futures-util",
  "nfsserve",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
+ "tokio-tungstenite 0.30.0",
  "tracing",
  "tracing-subscriber",
+ "uls-auth",
  "uls-client",
  "uls-mock",
  "uls-proto",
+ "wiremock",
 ]
 
 [[package]]

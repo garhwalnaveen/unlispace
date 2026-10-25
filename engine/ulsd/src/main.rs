@@ -1,12 +1,10 @@
 //! `ulsd` / `uls` multicall binary. Invoked as `uls` (or with a CLI subcommand) it is the CLI.
 
-mod cli;
-mod nfs;
-
 use std::ffi::OsStr;
 use std::path::Path;
 
 use clap::Parser;
+use ulsd::cli;
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {

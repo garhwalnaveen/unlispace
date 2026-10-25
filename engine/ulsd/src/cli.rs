@@ -13,11 +13,20 @@ const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8787";
 #[command(version, about = "Unlispace engine and CLI (M0)", long_about = "Unlispace engine and CLI (M0).\n\nEnvironment:\n  ULS_ENDPOINT   Worker URL (default http://127.0.0.1:8787)\n  ULS_DEV_TOKEN  static bearer token (never printed)")]
 pub struct Cli {
     #[command(subcommand)]
-    pub cmd: Cmd,
+    /// Defaults to `daemon` when omitted (how the LaunchAgent runs it).
+    pub cmd: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
 pub enum Cmd {
+    /// Run the background daemon the Mac app talks to
+    Daemon,
+    /// Sign in from a terminal (desktop PKCE flow)
+    Login {
+        /// Control-plane API (default $ULS_API or http://127.0.0.1:8788)
+        #[arg(long)]
+        api: Option<String>,
+    },
     /// Upload a local file
     Put {
         drive: String,
@@ -124,7 +133,9 @@ fn human(n: u64) -> String {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
-    match cli.cmd {
+    match cli.cmd.unwrap_or(Cmd::Daemon) {
+        Cmd::Daemon => return crate::daemon::run().await,
+        Cmd::Login { api } => return crate::login::login(api).await,
         Cmd::Put { drive, local, path, if_version } => {
             let c = client(false, false)?;
             let started = std::time::Instant::now();

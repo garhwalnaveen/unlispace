@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["uls-chunk", "uls-proto", "uls-client", "ulsd", "uls-mock"]
+members = ["uls-chunk", "uls-proto", "uls-client", "ulsd", "uls-mock", "uls-vfs", "uls-auth"]
+exclude = ["smb"]
 
 [workspace.package]
 version = "0.0.1"
@@ -16,6 +17,8 @@ uls-chunk = { path = "uls-chunk" }
 uls-proto = { path = "uls-proto" }
 uls-client = { path = "uls-client" }
 uls-mock = { path = "uls-mock" }
+uls-vfs = { path = "uls-vfs" }
+uls-auth = { path = "uls-auth" }
 
 fastcdc = "=3.2.1"
 sha2 = "=0.11.1"
@@ -39,6 +42,8 @@ tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 tempfile = "=3.27.0"
 wiremock = "=0.6.5"
 axum = "=0.8.9"
+base64 = "=0.22.1"
+security-framework = "=3.7.0"
 
 [profile.release]
 lto = "thin"
