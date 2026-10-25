@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use futures_util::StreamExt;
-use uls_client::{Client, Error, ShardCache};
+use uls_client::{Client, Error, ShardCache, WatchEvent};
 use uls_mock::MockServer;
 
 const TOKEN: &str = "test-token";
@@ -239,16 +239,24 @@ async fn watch_replays_then_streams_and_resumes() {
     c.upload_file("demo", &f, "before.txt", None).await.unwrap(); // seq 1
 
     let mut w = c.watch("demo", 0);
-    let ch = tokio::time::timeout(std::time::Duration::from_secs(5), w.next()).await.unwrap().unwrap().unwrap();
-    assert_eq!((ch.seq, ch.path.as_str()), (1, "before.txt"));
+    let ch = next_change(&mut w).await;
+    assert_eq!((ch.ev, ch.seq, ch.path.as_str()), (1, 1, "before.txt"));
 
     c.upload_file("demo", &f, "after.txt", None).await.unwrap(); // seq 2
-    let ch = tokio::time::timeout(std::time::Duration::from_secs(5), w.next()).await.unwrap().unwrap().unwrap();
+    let ch = next_change(&mut w).await;
     assert_eq!((ch.seq, ch.op.as_str(), ch.path.as_str()), (2, "put", "after.txt"));
+    assert_eq!(w.last_ev(), ch.ev);
     drop(w);
 
     // A fresh watch resuming from seq 1 only sees what came after.
     let mut w = c.watch("demo", 1);
-    let ch = tokio::time::timeout(std::time::Duration::from_secs(5), w.next()).await.unwrap().unwrap().unwrap();
+    let ch = next_change(&mut w).await;
     assert_eq!(ch.seq, 2);
+}
+
+async fn next_change(w: &mut uls_client::WatchStream) -> uls_proto::Change {
+    match tokio::time::timeout(std::time::Duration::from_secs(5), w.next()).await.unwrap().unwrap().unwrap() {
+        WatchEvent::Change(c) => c,
+        other => panic!("expected a change, got {other:?}"),
+    }
 }

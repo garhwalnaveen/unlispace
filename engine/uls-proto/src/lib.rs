@@ -193,6 +193,9 @@ pub struct VersionEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionsResponse {
     pub versions: Vec<VersionEntry>,
+    /// Opaque cursor for the next page (contract 3.6); `null` or absent when exhausted.
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,6 +212,8 @@ pub struct RestoreRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Change {
+    /// Event id: unique and strictly increasing per drive. One commit (`seq`) can yield many.
+    pub ev: i64,
     pub seq: u64,
     pub path: String,
     pub op: String,
@@ -221,6 +226,8 @@ pub struct Change {
 pub struct ChangesResponse {
     pub changes: Vec<Change>,
     pub head_seq: u64,
+    /// Event id of the newest event in the drive's log (not of this page).
+    pub last_ev: i64,
     pub more: bool,
 }
 
@@ -230,11 +237,18 @@ pub struct ChangesResponse {
 pub enum WatchMessage {
     #[serde(rename_all = "camelCase")]
     Change {
+        ev: i64,
         seq: u64,
         path: String,
         op: String,
         #[serde(default)]
         version_id: Option<String>,
+    },
+    /// Backlog too large to replay: re-list from scratch, then resume from `last_ev`.
+    #[serde(rename_all = "camelCase")]
+    Resync {
+        head_seq: u64,
+        last_ev: i64,
     },
     Ping,
     Pong,
@@ -357,20 +371,27 @@ mod tests {
             "path":"a","versionId":"v_1","size":4,"contentType":"x/y","mtimeMs":1,
             "shards":[{"h":"ab","n":4}]}));
         let _: VersionsResponse = roundtrip(json!({"versions":[
-            {"versionId":"v_1","op":"put","size":4,"seq":1,"ts":9,"actor":"dev"}]}));
+            {"versionId":"v_1","op":"put","size":4,"seq":1,"ts":9,"actor":"dev"}],
+            "cursor":"MQ"}));
+        // A page without a cursor field (older servers) still parses.
+        let v: VersionsResponse = serde_json::from_value(json!({"versions":[]})).unwrap();
+        assert_eq!(v.cursor, None);
         let _: RestoreRequest = roundtrip(json!({"path":"a","versionId":"v_1","ifVersion":"v_2"}));
     }
 
     #[test]
     fn changes_and_watch_examples() {
         let c: ChangesResponse = roundtrip(json!({
-            "changes":[{"seq":1,"path":"a","op":"put","versionId":"v_1"},
-                       {"seq":2,"path":"b","op":"delete","versionId":null}],
-            "headSeq":2,"more":false}));
+            "changes":[{"ev":1,"seq":1,"path":"a","op":"put","versionId":"v_1"},
+                       {"ev":2,"seq":2,"path":"b","op":"delete","versionId":null}],
+            "headSeq":2,"lastEv":2,"more":false}));
+        assert_eq!(c.last_ev, 2);
         assert_eq!(c.changes[1].version_id, None);
         let m: WatchMessage = roundtrip(json!({
-            "type":"change","seq":7,"path":"a","op":"put","versionId":"v_1"}));
-        assert!(matches!(m, WatchMessage::Change { seq: 7, .. }));
+            "type":"change","ev":11,"seq":7,"path":"a","op":"put","versionId":"v_1"}));
+        assert!(matches!(m, WatchMessage::Change { ev: 11, seq: 7, .. }));
+        let m: WatchMessage = roundtrip(json!({"type":"resync","headSeq":9,"lastEv":123456}));
+        assert_eq!(m, WatchMessage::Resync { head_seq: 9, last_ev: 123456 });
         let _: WatchMessage = roundtrip(json!({"type":"ping"}));
         let _: WatchMessage = roundtrip(json!({"type":"pong"}));
     }

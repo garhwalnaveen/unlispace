@@ -17,6 +17,7 @@ use uls_proto::{
     validate_path,
 };
 
+use crate::auth::{Auth, TokenProvider};
 use crate::cache::ShardCache;
 use crate::error::{Error, Result};
 use crate::range::{ShardSlice, map_range};
@@ -56,6 +57,7 @@ impl RetryPolicy {
 pub struct ClientBuilder {
     endpoint: String,
     token: String,
+    provider: Option<Arc<dyn TokenProvider>>,
     parallelism: usize,
     retry: RetryPolicy,
     cache: Option<Arc<ShardCache>>,
@@ -67,11 +69,19 @@ impl ClientBuilder {
         ClientBuilder {
             endpoint: endpoint.into(),
             token: token.into(),
+            provider: None,
             parallelism: 8,
             retry: RetryPolicy::default(),
             cache: None,
             whole_shard_on_partial: false,
         }
+    }
+    /// Resolve the bearer token (and optionally the endpoint) per request instead of using the
+    /// static token. On a 401 the provider's `refresh()` is consulted once and the request is
+    /// retried once; watch reconnects also take a fresh token from it.
+    pub fn token_provider(mut self, p: Arc<dyn TokenProvider>) -> Self {
+        self.provider = Some(p);
+        self
     }
     /// Concurrent shard transfers (default 8).
     pub fn parallelism(mut self, n: usize) -> Self {
@@ -101,7 +111,10 @@ impl ClientBuilder {
         Ok(Client {
             http,
             base: self.endpoint.trim_end_matches('/').to_string(),
-            token: self.token,
+            auth: match self.provider {
+                Some(p) => Auth::Provider(p),
+                None => Auth::Static(self.token),
+            },
             parallelism: self.parallelism,
             retry: self.retry,
             cache: self.cache,
@@ -115,7 +128,7 @@ impl ClientBuilder {
 pub struct Client {
     http: reqwest::Client,
     base: String,
-    token: String,
+    auth: Auth,
     parallelism: usize,
     retry: RetryPolicy,
     cache: Option<Arc<ShardCache>>,
@@ -181,27 +194,56 @@ impl Client {
         self.cache.as_ref()
     }
 
-    pub(crate) fn ws_url(&self, drive: &str, since: u64) -> String {
-        let base = if let Some(r) = self.base.strip_prefix("https://") {
+    pub(crate) fn ws_url(base: &str, drive: &str, after_ev: i64) -> String {
+        let base = if let Some(r) = base.strip_prefix("https://") {
             format!("wss://{r}")
-        } else if let Some(r) = self.base.strip_prefix("http://") {
+        } else if let Some(r) = base.strip_prefix("http://") {
             format!("ws://{r}")
         } else {
-            self.base.clone()
+            base.to_string()
         };
-        format!("{base}/v0/drives/{drive}/watch?since={since}")
+        format!("{base}/v0/drives/{drive}/watch?after={after_ev}")
     }
 
-    pub(crate) fn token(&self) -> &str {
-        &self.token
+    fn resolve(&self, t: crate::auth::ProviderToken) -> (String, String) {
+        let base = t.endpoint.map_or_else(|| self.base.clone(), |e| e.trim_end_matches('/').to_string());
+        (base, t.token)
     }
 
-    fn url(&self, drive: &str, rest: &str) -> String {
-        format!("{}/v0/drives/{drive}{rest}", self.base)
+    /// `(endpoint, bearer token)` to use right now.
+    pub(crate) async fn creds(&self) -> Result<(String, String)> {
+        match &self.auth {
+            Auth::Static(t) => Ok((self.base.clone(), t.clone())),
+            Auth::Provider(p) => Ok(self.resolve(p.token().await?)),
+        }
     }
 
-    fn req(&self, m: reqwest::Method, url: String) -> RequestBuilder {
-        self.http.request(m, url).bearer_auth(&self.token)
+    /// Like `creds`, after the server rejected the previous token.
+    pub(crate) async fn refreshed_creds(&self) -> Result<(String, String)> {
+        match &self.auth {
+            Auth::Static(t) => Ok((self.base.clone(), t.clone())),
+            Auth::Provider(p) => Ok(self.resolve(p.refresh().await?)),
+        }
+    }
+
+    /// Send a request to `/v0/drives/{drive}{rest}`. With a token provider, a 401 triggers one
+    /// refresh and one retry (a 401 means the request was not processed, so this is safe even
+    /// for commits). `f` adds query, headers and body, and may run twice.
+    async fn send(
+        &self,
+        m: reqwest::Method,
+        drive: &str,
+        rest: &str,
+        f: impl Fn(RequestBuilder) -> RequestBuilder,
+    ) -> Result<Response> {
+        let build = |base: &str, tok: &str| f(self.http.request(m.clone(), format!("{base}/v0/drives/{drive}{rest}")).bearer_auth(tok));
+        let (base, tok) = self.creds().await?;
+        let resp = build(&base, &tok).send().await?;
+        if resp.status() == StatusCode::UNAUTHORIZED && matches!(self.auth, Auth::Provider(_)) {
+            let (base, tok) = self.refreshed_creds().await?;
+            return Ok(build(&base, &tok).send().await?);
+        }
+        Ok(resp)
     }
 
     async fn check(resp: Response) -> Result<Response> {
@@ -240,7 +282,7 @@ impl Client {
 
     async fn get_json<T: DeserializeOwned>(&self, drive: &str, rest: &str, q: &[(&str, String)]) -> Result<T> {
         self.retrying(|| async {
-            let r = self.req(reqwest::Method::GET, self.url(drive, rest)).query(q).send().await?;
+            let r = self.send(reqwest::Method::GET, drive, rest, |b| b.query(q)).await?;
             Self::json(r).await
         })
         .await
@@ -250,11 +292,7 @@ impl Client {
 
     pub async fn create_drive(&self, drive: &str, placement: Option<&str>) -> Result<DriveCreated> {
         let body = CreateDriveRequest { placement: placement.map(str::to_string) };
-        let r = self
-            .req(reqwest::Method::PUT, format!("{}/v0/drives/{drive}", self.base))
-            .json(&body)
-            .send()
-            .await?;
+        let r = self.send(reqwest::Method::PUT, drive, "", |b| b.json(&body)).await?;
         Self::json(r).await
     }
 
@@ -271,11 +309,7 @@ impl Client {
             let body = MissingRequest { hashes: batch.to_vec() };
             let resp: MissingResponse = self
                 .retrying(|| async {
-                    let r = self
-                        .req(reqwest::Method::POST, self.url(drive, "/shards/missing"))
-                        .json(&body)
-                        .send()
-                        .await?;
+                    let r = self.send(reqwest::Method::POST, drive, "/shards/missing", |b| b.json(&body)).await?;
                     Self::json(r).await
                 })
                 .await?;
@@ -288,10 +322,9 @@ impl Client {
         check_hash(hash)?;
         self.retrying(|| async {
             let r = self
-                .req(reqwest::Method::PUT, self.url(drive, &format!("/shards/{hash}")))
-                .header(header::CONTENT_TYPE, "application/octet-stream")
-                .body(data.clone())
-                .send()
+                .send(reqwest::Method::PUT, drive, &format!("/shards/{hash}"), |b| {
+                    b.header(header::CONTENT_TYPE, "application/octet-stream").body(data.clone())
+                })
                 .await?;
             Self::json(r).await
         })
@@ -302,11 +335,13 @@ impl Client {
     async fn get_shard_raw(&self, drive: &str, hash: &str, range: Option<(u64, u64)>) -> Result<(StatusCode, Bytes)> {
         check_hash(hash)?;
         self.retrying(|| async {
-            let mut rb = self.req(reqwest::Method::GET, self.url(drive, &format!("/shards/{hash}")));
-            if let Some((a, b)) = range {
-                rb = rb.header(header::RANGE, format!("bytes={a}-{b}"));
-            }
-            let r = Self::check(rb.send().await?).await?;
+            let r = self
+                .send(reqwest::Method::GET, drive, &format!("/shards/{hash}"), |rb| match range {
+                    Some((a, b)) => rb.header(header::RANGE, format!("bytes={a}-{b}")),
+                    None => rb,
+                })
+                .await?;
+            let r = Self::check(r).await?;
             let status = r.status();
             Ok((status, r.bytes().await?))
         })
@@ -361,11 +396,8 @@ impl Client {
 
     /// Not retried automatically: a retry after an ambiguous failure could double-apply.
     pub async fn commit(&self, drive: &str, ops: Vec<Op>) -> Result<CommitResponse> {
-        let r = self
-            .req(reqwest::Method::POST, self.url(drive, "/commit"))
-            .json(&CommitRequest { ops })
-            .send()
-            .await?;
+        let body = CommitRequest { ops };
+        let r = self.send(reqwest::Method::POST, drive, "/commit", |b| b.json(&body)).await?;
         Self::json(r).await
     }
 
@@ -432,28 +464,48 @@ impl Client {
         self.get_json(drive, "/manifest", &q).await
     }
 
+    /// Full history of `path`, oldest first. Follows the server's cursor until it is exhausted.
     pub async fn versions(&self, drive: &str, path: &str) -> Result<Vec<VersionEntry>> {
         let p = path.trim_start_matches('/').to_string();
         validate_path(&p).map_err(Error::InvalidPath)?;
-        let r: VersionsResponse = self.get_json(drive, "/versions", &[("path", p)]).await?;
-        Ok(r.versions)
+        let mut out = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let mut q = vec![("path", p.clone()), ("limit", "1000".to_string())];
+            if let Some(c) = &cursor {
+                q.push(("cursor", c.clone()));
+            }
+            let r: VersionsResponse = self.get_json(drive, "/versions", &q).await?;
+            out.extend(r.versions);
+            match r.cursor {
+                None => return Ok(out),
+                Some(c) if cursor.as_deref() == Some(c.as_str()) => {
+                    return Err(Error::InvalidResponse("versions cursor did not advance".into()));
+                }
+                Some(c) => cursor = Some(c),
+            }
+        }
     }
 
     pub async fn restore(&self, drive: &str, path: &str, version_id: &str, if_version: Option<&str>) -> Result<CommitResponse> {
         let path = norm_file_path(path)?;
         let body = RestoreRequest { path, version_id: version_id.to_string(), if_version: if_version.map(str::to_string) };
-        let r = self.req(reqwest::Method::POST, self.url(drive, "/restore")).json(&body).send().await?;
+        let r = self.send(reqwest::Method::POST, drive, "/restore", |b| b.json(&body)).await?;
         Self::json(r).await
     }
 
-    pub async fn changes(&self, drive: &str, since: u64, limit: usize) -> Result<ChangesResponse> {
-        self.get_json(drive, "/changes", &[("since", since.to_string()), ("limit", limit.clamp(1, 1000).to_string())])
+    /// One page of the change log: events with `ev > after_ev`. Pages are cut by `ev`, so
+    /// continue from the last returned `ev` while `more` is set.
+    pub async fn changes(&self, drive: &str, after_ev: i64, limit: usize) -> Result<ChangesResponse> {
+        self.get_json(drive, "/changes", &[("after", after_ev.max(0).to_string()), ("limit", limit.clamp(1, 1000).to_string())])
             .await
     }
 
-    /// Live change feed. Reconnects with backoff and resumes after the last seq seen.
-    pub fn watch(&self, drive: &str, since: u64) -> WatchStream {
-        WatchStream::spawn(self.clone(), drive.to_string(), since)
+    /// Live change feed. Connects with `?after=<after_ev>`, delivers each event once (dedup on
+    /// `ev`), and reconnects with backoff, taking a fresh token from the provider each time.
+    /// See [`WatchStream`] for close-code and resync handling.
+    pub fn watch(&self, drive: &str, after_ev: i64) -> WatchStream {
+        WatchStream::spawn(self.clone(), drive.to_string(), after_ev.max(0))
     }
 
     // ---- upload -----------------------------------------------------------------------------

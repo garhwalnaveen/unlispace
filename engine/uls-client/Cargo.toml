@@ -21,6 +21,7 @@ thiserror.workspace = true
 dirs.workspace = true
 mime_guess.workspace = true
 tracing.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 uls-mock.workspace = true

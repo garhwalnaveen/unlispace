@@ -202,11 +202,12 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Watch { drive, since } => {
             let c = client(false, false)?;
-            let mut w = c.watch(&drive, since);
+            let mut w = c.watch(&drive, since as i64);
             loop {
                 tokio::select! {
                     ch = w.next() => match ch {
-                        Some(Ok(ch)) => println!("{}  {:<8} {}  {}", ch.seq, ch.op, ch.path, ch.version_id.unwrap_or_default()),
+                        Some(Ok(uls_client::WatchEvent::Change(ch))) => println!("{}  {:<8} {}  {}", ch.seq, ch.op, ch.path, ch.version_id.unwrap_or_default()),
+                        Some(Ok(uls_client::WatchEvent::Resync { head_seq, last_ev })) => println!("resync  headSeq {head_seq}  lastEv {last_ev}"),
                         Some(Err(e)) => bail!(e),
                         None => return Ok(()),
                     },

@@ -4,15 +4,15 @@
 //! implementation: it favours simplicity over fidelity (no R2, no hibernation, no limits
 //! beyond those the contract states).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{DefaultBodyLimit, Extension, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -67,6 +67,13 @@ struct Drive {
     tx: broadcast::Sender<Change>,
 }
 
+impl Drive {
+    /// Event id of the last event of commit `seq` (0 when there is none).
+    fn ev_after_seq(&self, seq: u64) -> i64 {
+        self.log.iter().rev().find(|c| c.seq <= seq).map_or(0, |c| c.ev)
+    }
+}
+
 /// Counters and fault-injection switches that tests can poke at.
 #[derive(Default)]
 pub struct Stats {
@@ -82,10 +89,35 @@ pub struct Stats {
     pub fail_puts: AtomicU64,
     /// Next commit that references shards reports the first one as missing (and forgets it).
     pub report_missing_once: std::sync::atomic::AtomicBool,
+    /// A `/watch` whose cursor is more than this many events behind gets `resync` and a close,
+    /// like the real server's 100,000-event limit. 0 disables it.
+    pub resync_backlog: AtomicU64,
+    /// Close every watch socket (code 1012) after it has sent this many change frames. 0 disables.
+    /// Lets tests exercise reconnects in the middle of a replay.
+    pub watch_cut_after: AtomicU64,
+    /// WebSocket upgrades accepted on `/watch`.
+    pub watch_connects: AtomicU64,
+    /// Requests rejected with 401.
+    pub unauthorized: AtomicU64,
 }
 
+/// Out-of-band events pushed to open watch sockets.
+#[derive(Clone, Debug)]
+enum Ctl {
+    /// This bearer token expired: close its sockets with 4401.
+    Expire(String),
+    /// This drive was deleted: close its sockets with 4404.
+    Deleted(String),
+}
+
+/// The bearer token a request was authenticated with.
+#[derive(Clone)]
+struct Tok(String);
+
 struct Inner {
-    token: String,
+    /// Bearer tokens currently accepted.
+    tokens: Mutex<HashSet<String>>,
+    ctl: broadcast::Sender<Ctl>,
     drives: Mutex<HashMap<String, Drive>>,
     counter: AtomicU64,
     stats: Arc<Stats>,
@@ -96,6 +128,7 @@ type Shared = Arc<Inner>;
 pub struct MockServer {
     addr: SocketAddr,
     pub stats: Arc<Stats>,
+    inner: Shared,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -107,22 +140,52 @@ impl MockServer {
     pub async fn start_on(addr: &str, token: &str) -> std::io::Result<MockServer> {
         let stats = Arc::new(Stats::default());
         let inner = Arc::new(Inner {
-            token: token.to_string(),
+            tokens: Mutex::new(HashSet::from([token.to_string()])),
+            ctl: broadcast::channel(64).0,
             drives: Mutex::new(HashMap::new()),
             counter: AtomicU64::new(0),
             stats: stats.clone(),
         });
         let listener = tokio::net::TcpListener::bind(addr).await?;
         let addr = listener.local_addr()?;
-        let app = router(inner);
+        let app = router(inner.clone());
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        Ok(MockServer { addr, stats, task })
+        Ok(MockServer { addr, stats, inner, task })
     }
 
     pub fn url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+
+    /// Accept `token` as well (simulates minting a new drive token).
+    pub fn add_token(&self, token: &str) {
+        self.inner.tokens.lock().unwrap().insert(token.to_string());
+    }
+
+    /// Token expiry: `token` is rejected from now on (401), and open watch sockets that used it
+    /// are closed with code 4401.
+    pub fn expire_token(&self, token: &str) {
+        self.inner.tokens.lock().unwrap().remove(token);
+        let _ = self.inner.ctl.send(Ctl::Expire(token.to_string()));
+    }
+
+    /// Delete a drive: later requests get 404 `no_such_drive`, and open watch sockets are closed
+    /// with code 4404.
+    pub fn delete_drive(&self, id: &str) {
+        self.inner.drives.lock().unwrap().remove(id);
+        let _ = self.inner.ctl.send(Ctl::Deleted(id.to_string()));
+    }
+
+    /// See [`Stats::resync_backlog`].
+    pub fn set_resync_backlog(&self, events: u64) {
+        self.stats.resync_backlog.store(events, Ordering::SeqCst);
+    }
+
+    /// See [`Stats::watch_cut_after`].
+    pub fn set_watch_cut_after(&self, frames: u64) {
+        self.stats.watch_cut_after.store(frames, Ordering::SeqCst);
     }
 }
 
@@ -151,7 +214,7 @@ fn router(inner: Shared) -> Router {
         .with_state(inner)
 }
 
-async fn auth(State(s): State<Shared>, req: Request, next: Next) -> Resp {
+async fn auth(State(s): State<Shared>, mut req: Request, next: Next) -> Resp {
     if req.uri().path() == "/healthz" {
         return next.run(req).await;
     }
@@ -166,10 +229,13 @@ async fn auth(State(s): State<Shared>, req: Request, next: Next) -> Resp {
             .find_map(|kv| kv.strip_prefix("token=").map(str::to_string))
     });
     let is_watch = req.uri().path().ends_with("/watch");
-    let ok = hdr.as_deref() == Some(&s.token) || (is_watch && query_tok.as_deref() == Some(&s.token));
-    if ok {
+    let presented = hdr.or(if is_watch { query_tok } else { None });
+    let ok = presented.as_ref().is_some_and(|t| s.tokens.lock().unwrap().contains(t));
+    if let (true, Some(t)) = (ok, presented) {
+        req.extensions_mut().insert(Tok(t));
         next.run(req).await
     } else {
+        s.stats.unauthorized.fetch_add(1, Ordering::SeqCst);
         err(StatusCode::UNAUTHORIZED, "unauthorized")
     }
 }
@@ -324,7 +390,8 @@ async fn get_shard(State(s): State<Shared>, Path((id, hash)): Path<(String, Stri
 }
 
 fn push_log(d: &mut Drive, seq: u64, path: &str, op: &str, version: Option<&str>) {
-    let ch = Change { seq, path: path.to_string(), op: op.to_string(), version_id: version.map(str::to_string) };
+    let ev = d.log.len() as i64 + 1;
+    let ch = Change { ev, seq, path: path.to_string(), op: op.to_string(), version_id: version.map(str::to_string) };
     d.log.push(ch.clone());
     let _ = d.tx.send(ch);
 }
@@ -588,10 +655,22 @@ async fn manifest(State(s): State<Shared>, Path(id): Path<String>, Query(q): Que
 
 async fn versions(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<PathQ>) -> Resp {
     collapse(with_drive(&s, &id, |d| {
-        let list: Vec<VersionEntry> = d.versions.iter().filter(|v| v.path == q.path).map(|v| VersionEntry {
+        let all: Vec<VersionEntry> = d.versions.iter().filter(|v| v.path == q.path).map(|v| VersionEntry {
             version_id: v.id.clone(), op: v.op.clone(), size: Some(v.size), seq: v.seq, ts: 0, actor: Some("dev".into()),
         }).collect();
-        Ok(jerr(StatusCode::OK, json!({"versions": list})))
+        // The cursor is opaque to clients; here it is the index of the next entry.
+        let limit = q.limit.unwrap_or(1000).clamp(1, 1000);
+        let start = match q.cursor.as_deref() {
+            None => 0,
+            Some(c) => match c.parse::<usize>() {
+                Ok(n) => n,
+                Err(_) => return Ok(jerr(StatusCode::BAD_REQUEST, json!({"error":"bad_request","message":"invalid cursor"}))),
+            },
+        };
+        let end = start.saturating_add(limit).min(all.len());
+        let cursor = (end < all.len()).then(|| end.to_string());
+        let page = all[start.min(end)..end].to_vec();
+        Ok(jerr(StatusCode::OK, json!({"versions": page, "cursor": cursor})))
     }))
 }
 
@@ -609,45 +688,103 @@ async fn restore(State(s): State<Shared>, Path(id): Path<String>, axum::Json(req
 }
 
 #[derive(Deserialize)]
-struct SinceQ {
-    #[serde(default)]
-    since: u64,
+struct FeedQ {
+    after: Option<i64>,
+    since: Option<u64>,
     limit: Option<usize>,
 }
 
-async fn changes(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<SinceQ>) -> Resp {
+/// Cursor of a feed request as an event id (`after` wins over `since`); `None` when neither is given.
+fn feed_after(d: &Drive, q: &FeedQ) -> Option<i64> {
+    q.after.map(|a| a.max(0)).or(q.since.map(|sn| d.ev_after_seq(sn)))
+}
+
+async fn changes(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<FeedQ>) -> Resp {
     collapse(with_drive(&s, &id, |d| {
         let limit = q.limit.unwrap_or(1000).clamp(1, 1000);
-        let all: Vec<&Change> = d.log.iter().filter(|c| c.seq > q.since).collect();
+        let after = feed_after(d, &q).unwrap_or(0);
+        let all: Vec<&Change> = d.log.iter().filter(|c| c.ev > after).collect();
         let more = all.len() > limit;
         let page: Vec<&Change> = all.into_iter().take(limit).collect();
-        Ok(jerr(StatusCode::OK, json!({"changes": page, "headSeq": d.seq, "more": more})))
+        Ok(jerr(StatusCode::OK, json!({
+            "changes": page, "headSeq": d.seq, "lastEv": d.log.len() as i64, "more": more,
+        })))
     }))
 }
 
-async fn watch(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<SinceQ>, ws: WebSocketUpgrade) -> Resp {
+enum Plan {
+    Replay(Vec<Change>),
+    Resync { head_seq: u64, last_ev: i64 },
+}
+
+async fn watch(
+    State(s): State<Shared>,
+    Path(id): Path<String>,
+    Extension(Tok(tok)): Extension<Tok>,
+    Query(q): Query<FeedQ>,
+    ws: WebSocketUpgrade,
+) -> Resp {
     let sub = with_drive(&s, &id, |d| {
-        let rx = d.tx.subscribe();
-        let replay: Vec<Change> = d.log.iter().filter(|c| c.seq > q.since).cloned().collect();
-        Ok((rx, replay))
+        let last = d.log.len() as i64;
+        let after = feed_after(d, &q).unwrap_or(last).min(last);
+        let backlog = s.stats.resync_backlog.load(Ordering::SeqCst);
+        let plan = if backlog > 0 && (last - after) as u64 > backlog {
+            Plan::Resync { head_seq: d.seq, last_ev: last }
+        } else {
+            Plan::Replay(d.log[after as usize..].to_vec())
+        };
+        // Subscribe under the same lock as the replay snapshot so nothing falls in between.
+        Ok((d.tx.subscribe(), plan))
     });
     match sub {
         Err(r) => r,
-        Ok((rx, replay)) => ws.on_upgrade(move |sock| watch_loop(sock, rx, replay)),
+        Ok((rx, plan)) => {
+            s.stats.watch_connects.fetch_add(1, Ordering::SeqCst);
+            let ctl = s.ctl.subscribe();
+            let cut = s.stats.watch_cut_after.load(Ordering::SeqCst);
+            ws.on_upgrade(move |sock| watch_loop(sock, rx, plan, ctl, tok, id, cut))
+        }
     }
 }
 
-async fn watch_loop(mut sock: WebSocket, mut rx: broadcast::Receiver<Change>, replay: Vec<Change>) {
-    let mut last = 0;
+async fn close_with(sock: &mut WebSocket, code: u16, reason: &'static str) {
+    let _ = sock.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
+}
+
+async fn watch_loop(
+    mut sock: WebSocket,
+    mut rx: broadcast::Receiver<Change>,
+    plan: Plan,
+    mut ctl: broadcast::Receiver<Ctl>,
+    tok: String,
+    drive: String,
+    cut_after: u64,
+) {
     let frame = |c: &Change| {
         Message::Text(
-            json!({"type":"change","seq":c.seq,"path":c.path,"op":c.op,"versionId":c.version_id})
+            json!({"type":"change","ev":c.ev,"seq":c.seq,"path":c.path,"op":c.op,"versionId":c.version_id})
                 .to_string()
                 .into(),
         )
     };
+    let replay = match plan {
+        Plan::Resync { head_seq, last_ev } => {
+            let m = json!({"type":"resync","headSeq":head_seq,"lastEv":last_ev}).to_string();
+            let _ = sock.send(Message::Text(m.into())).await;
+            close_with(&mut sock, 1000, "resync").await;
+            return;
+        }
+        Plan::Replay(r) => r,
+    };
+    let mut last = 0i64;
+    let mut sent = 0u64;
     for c in &replay {
-        last = last.max(c.seq);
+        if cut_after > 0 && sent >= cut_after {
+            close_with(&mut sock, 1012, "cut").await;
+            return;
+        }
+        last = last.max(c.ev);
+        sent += 1;
         if sock.send(frame(c)).await.is_err() {
             return;
         }
@@ -655,11 +792,22 @@ async fn watch_loop(mut sock: WebSocket, mut rx: broadcast::Receiver<Change>, re
     loop {
         tokio::select! {
             r = rx.recv() => match r {
-                Ok(c) if c.seq >= last => {
-                    last = c.seq;
+                Ok(c) if c.ev > last => {
+                    if cut_after > 0 && sent >= cut_after {
+                        close_with(&mut sock, 1012, "cut").await;
+                        return;
+                    }
+                    last = c.ev;
+                    sent += 1;
                     if sock.send(frame(&c)).await.is_err() { return; }
                 }
                 Ok(_) => {}
+                Err(_) => return,
+            },
+            c = ctl.recv() => match c {
+                Ok(Ctl::Expire(t)) if t == tok => { close_with(&mut sock, 4401, "token expired").await; return; }
+                Ok(Ctl::Deleted(d)) if d == drive => { close_with(&mut sock, 4404, "drive deleted").await; return; }
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(_) => return,
             },
             m = sock.recv() => match m {

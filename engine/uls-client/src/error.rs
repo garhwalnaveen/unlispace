@@ -39,6 +39,9 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("websocket error: {0}")]
     Ws(String),
+    /// The token provider could not supply a token.
+    #[error("token provider failed: {0}")]
+    Auth(String),
 }
 
 impl Error {
