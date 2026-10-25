@@ -6,7 +6,7 @@ import { editManifest, parsePatch } from "./edits";
 import { integer, S3Error, tag, xml } from "./errors";
 import type { StateStore, VersionAnnotation } from "./state";
 
-export interface ObjectContext { request: Request; url: URL; auth: Auth; dp: DataPlane; state: StateStore; key: string; now: () => number }
+export interface ObjectContext { request: Request; url: URL; auth: Auth; dp: DataPlane; state: StateStore; key: string; now: () => number; resolveSource?: (bucket: string) => Promise<DataPlane> }
 export const notFound = (e: unknown, code = "NoSuchKey"): boolean => e instanceof S3Error && e.code === code;
 export async function optionalHead(dp: DataPlane, key: string): Promise<Manifest | null> {
   try { return await head(dp, key); }
@@ -114,8 +114,8 @@ export async function putObject(c: ObjectContext): Promise<Response> {
   const conditions = await preconditions(c.request, current);
   const source = verifiedBody(c.request, c.auth, PUT_LIMIT);
   if (c.key.endsWith("/")) {
-    const body = await collectBody(source, 0);
-    if (body.length) throw new S3Error(400, "InvalidArgument");
+    try { await collectBody(source, 0); }
+    catch (error) { if (error instanceof S3Error && error.code === "EntityTooLarge") throw new S3Error(400, "InvalidArgument", "Folder bodies must be empty"); throw error; }
     if (conditions.ifAbsent && current) throw new S3Error(412, "PreconditionFailed");
     const result = await c.dp.commit([{ op: "mkdir", path: c.key, ...conditions }]);
     const manifest = await annotate(c, result, { path: c.key, size: 0, shards: [], contentType: "application/x-directory", mtimeMs: c.now() }, "put");
@@ -135,9 +135,10 @@ export async function copyObject(c: ObjectContext): Promise<Response> {
   const slash = source.indexOf("/");
   if (slash < 0) throw new S3Error(400, "InvalidArgument", "Invalid copy source");
   const drive = source.slice(0, slash), key = source.slice(slash + 1);
-  if (drive !== c.dp.drive) throw new S3Error(501, "NotImplemented", "Cross-drive copy is not supported");
+  const sourcePlane = c.resolveSource ? await c.resolveSource(drive) : c.dp;
+  if (!c.resolveSource && drive !== c.dp.drive) throw new S3Error(501, "NotImplemented");
   const version = split < 0 ? undefined : new URLSearchParams(rawSource.slice(split + 1)).get("versionId") ?? undefined;
-  const base = await c.dp.manifest(key, version);
+  const base = await sourcePlane.manifest(key, version);
   const h = new Headers();
   for (const name of ["if-match", "if-none-match", "if-modified-since", "if-unmodified-since"]) {
     const value = c.request.headers.get(`x-amz-copy-source-${name}`); if (value) h.set(name, value);
@@ -147,7 +148,8 @@ export async function copyObject(c: ObjectContext): Promise<Response> {
   const conditions = await preconditions(c.request, current);
   const directive = c.request.headers.get("x-amz-metadata-directive") ?? "COPY";
   if (directive !== "COPY" && directive !== "REPLACE") throw new S3Error(400, "InvalidArgument");
-  const manifest = await commitManifest(c, { ...base, path: c.key, contentType: directive === "REPLACE" ? c.request.headers.get("content-type") ?? "application/octet-stream" : base.contentType, mtimeMs: c.now() }, conditions, "copy");
+  const shards = sourcePlane.drive === c.dp.drive ? base.shards : await chunkManifest(sourcePlane.bytes(base), (shard, bytes) => c.dp.putShard(shard, bytes));
+  const manifest = await commitManifest(c, { ...base, shards, path: c.key, contentType: directive === "REPLACE" ? c.request.headers.get("content-type") ?? "application/octet-stream" : base.contentType, mtimeMs: c.now() }, conditions, "copy");
   return xml("CopyObjectResult", tag("ETag", await etag(manifest)) + tag("LastModified", new Date(manifest.mtimeMs!).toISOString()), 200, await mutationHeaders(manifest));
 }
 export async function deleteKey(c: ObjectContext, key: string, request: Request): Promise<void> {
@@ -165,13 +167,14 @@ export async function deleteObject(c: ObjectContext): Promise<Response> {
 }
 export async function editObject(c: ObjectContext, extension: string): Promise<Response> {
   if (c.key.endsWith("/")) throw new S3Error(400, "InvalidArgument");
+  if (extension !== "patch" && !c.request.headers.has("content-length")) throw new S3Error(400, "InvalidArgument", "Content-Length is required");
   const body = await collectBody(verifiedBody(c.request, c.auth, EDIT_LIMIT), EDIT_LIMIT);
   const base = await optionalHead(c.dp, c.key);
   if (extension === "splice" && !base) throw new S3Error(404, "NoSuchKey");
   const conditions = await preconditions(c.request, base);
   // Partial mutations always compare-and-swap, including create, to prevent concurrent lost edits.
   const cas = base ? { ...conditions, ifVersion: base.versionId } : { ...conditions, ifAbsent: true };
-  const offset = extension === "patch" ? 0 : integer(c.request.headers.get("x-uls-offset"), 0);
+  const offset = extension === "patch" ? 0 : integer(c.request.headers.get("x-uls-offset"));
   const sizeHeader = c.request.headers.get("x-uls-size");
   const size = sizeHeader === null ? undefined : integer(sizeHeader);
   if (extension === "splice" && size !== undefined) throw new S3Error(400, "InvalidArgument");
@@ -188,10 +191,23 @@ export async function renameObject(c: ObjectContext): Promise<Response> {
   let from: string;
   try { from = decodeURIComponent(c.request.headers.get("x-uls-source") ?? ""); }
   catch { throw new S3Error(400, "InvalidArgument"); }
-  if (!from || from === c.key || from.endsWith("/") !== c.key.endsWith("/")) throw new S3Error(400, "InvalidArgument");
+  if (!from || from.startsWith("/") || new TextEncoder().encode(from).length > 1024 || (from.endsWith("/") && c.key.startsWith(from)) || from === c.key || from.endsWith("/") !== c.key.endsWith("/")) throw new S3Error(400, "InvalidArgument");
   const original = await head(c.dp, from);
   const conditions = await preconditions(c.request, original);
+  const paths = [from];
+  if (from.endsWith("/")) for await (const entry of c.dp.walk(from)) if (entry.type === "file") paths.push(entry.path);
+  const history = [];
+  for (const path of paths.filter(p => !p.endsWith("/"))) {
+    const dest = c.key + path.slice(from.length);
+    const versions = (await c.dp.versions(path)).filter(v => !["rename", "delete", "mkdir"].includes(v.op));
+    const manifests = await Promise.all(versions.map(async v => ({...await c.dp.manifest(path, v.versionId), path:dest})));
+    history.push({dest, versions, manifests});
+  }
   const result = await c.dp.commit([{ op: "rename", from, to: c.key, ifVersion: conditions.ifVersion ?? original.versionId }]);
+  for (const {dest, versions, manifests} of history) {
+    await c.state.put(`history:${c.dp.drive}:${dest}`, versions);
+    for (const manifest of manifests) await c.state.put(`archive:${c.dp.drive}:${dest}:${manifest.versionId}`, manifest);
+  }
   const manifest = await annotate(c, result, { ...original, path: c.key }, "rename");
   return new Response(null, { headers: await mutationHeaders(manifest) });
 }
@@ -202,7 +218,11 @@ export async function restoreObject(c: ObjectContext): Promise<Response> {
   const current = await optionalHead(c.dp, c.key);
   const conditions = await preconditions(c.request, current);
   const base = await c.dp.manifest(c.key, versionId);
-  const result = await c.dp.restore(c.key, versionId, conditions.ifVersion);
+  // Archived content may retain its old data-plane path after a rename.
+  const archived = await c.state.get<Manifest>(`archive:${c.dp.drive}:${c.key}:${versionId}`);
+  const result = archived
+    ? await c.dp.commit([{op:"put", path:c.key, size:base.size, contentType:base.contentType ?? "application/octet-stream", mtimeMs:c.now(), shards:base.shards, ...conditions}])
+    : await c.dp.restore(c.key, versionId, conditions.ifVersion);
   const manifest = await annotate(c, result, { ...base, mtimeMs: c.now() }, "restore", versionId);
   return new Response(null, { headers: { ...await mutationHeaders(manifest), "x-uls-restored-from": versionId } });
 }

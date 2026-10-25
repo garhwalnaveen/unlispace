@@ -3,9 +3,11 @@ import type { HttpHandlerOptions, HttpRequest, HttpResponse } from "@smithy/type
 import { S3Client } from "@aws-sdk/client-s3";
 import { createHash, createHmac } from "node:crypto";
 import { MemoryKeyResolver, type KeyRecord } from "../src/auth";
-import { Ed25519TokenMinter, type DriveAdmin } from "../src/data-plane";
+import { Ed25519TokenMinter } from "../src/data-plane";
 import { handle, type Deps } from "../src/index";
 import { BoundState } from "../src/state";
+import { FakeControlPlane } from "./fake-control-plane";
+import { ControlPlaneKeyResolver } from "../src/control-plane";
 import { FakeDataPlane } from "./fake-data-plane";
 
 /** Minimal SHA-256 / HMAC-SHA-256 for @smithy/signature-v4 (avoids a direct @aws-crypto dependency). */
@@ -48,19 +50,13 @@ export async function harness(): Promise<Harness> {
 	const jwk = { ...(await crypto.subtle.exportKey("jwk", pair.privateKey)), kid: "test-kid" } as JsonWebKey & { kid: string };
 	const dp = new FakeDataPlane();
 	const now = { value: Date.now() };
-	const admin: DriveAdmin = {
-		async createDrive(drive) {
-			if (dp.drives.has(drive)) throw Object.assign(new Error(`drive_exists: ${drive}`), { name: "DriveExistsError" });
-			dp.createDrive(drive);
-			return { driveId: drive, placement: "", createdAt: 0 };
-		},
-		async deleteDrive(drive) { dp.drives.delete(drive); return { ok: true }; },
-	};
+	const cp = new FakeControlPlane(dp, resolver);
 	const deps: Deps = {
-		resolver,
+		resolver: new ControlPlaneKeyResolver(cp),
+		controlPlane: cp,
+		sessionAPI: {fetch: async () => Response.json({keys:[]})},
 		tokens: new Ed25519TokenMinter(jwk, "http://issuer.test"),
 		dataPlane: dp,
-		admin,
 		state: new BoundState(env.S3_STATE.get(env.S3_STATE.idFromName("test"))),
 		host: "s3.test",
 		now: () => now.value,
@@ -116,7 +112,7 @@ export const readAll = async (body: { transformToByteArray(): Promise<Uint8Array
 export const readText = async (body: { transformToString(): Promise<string> } | undefined): Promise<string> => body!.transformToString();
 
 /** Creates a bucket directly in the fake (the CreateBucket route has its own test). */
-export function makeBucket(h: Harness, name = bucketName()): string { h.dp.createDrive(name); return name; }
+export function makeBucket(h: Harness, name = bucketName()): string { h.dp.createDrive(name); (h.deps.controlPlane as FakeControlPlane).register(name); return name; }
 
 export function randomBytes(n: number, seed = 1): Uint8Array {
 	const out = new Uint8Array(n);
@@ -133,7 +129,8 @@ export async function rawSigned(h: Harness, method: string, pathAndQuery: string
 	const u = new URL(`https://s3.test${pathAndQuery}`);
 	const query: Record<string, string> = {};
 	u.searchParams.forEach((v, k) => { query[k] = v; });
-	const headers: Record<string, string> = { host: "s3.test", "x-amz-content-sha256": opts.payloadHash ?? "UNSIGNED-PAYLOAD", ...opts.headers };
+	const length = typeof opts.body === "string" ? new TextEncoder().encode(opts.body).length : opts.body instanceof Uint8Array ? opts.body.length : opts.body == null ? 0 : undefined;
+  const headers: Record<string, string> = { ...(length !== undefined && method !== "GET" && method !== "HEAD" ? {"content-length": String(length)} : {}), host: "s3.test", "x-amz-content-sha256": opts.payloadHash ?? "UNSIGNED-PAYLOAD", ...opts.headers };
 	const signed = await signer.sign({ method, protocol: "https:", hostname: "s3.test", path: u.pathname, query, headers }, { signingDate: new Date(h.now.value) });
 	const { host: _host, ...rest } = signed.headers as Record<string, string>;
 	return new Request(u, { method, headers: rest, body: opts.body ?? null });

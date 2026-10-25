@@ -15,7 +15,7 @@ export interface KeyResolver {
   recordUse?(keyId: string): Promise<void>;
 }
 
-/** Development-only records. Production lookup/revocation belongs to the API (M3). */
+/** Test-only deterministic records. Production uses ControlPlaneKeyResolver. */
 export class MemoryKeyResolver implements KeyResolver {
   /** `masters` maps the key-version character (4th id char) to a base64 master; a bare string is used for every version. */
   constructor(private readonly masters: Record<string, string> | string, private readonly records: readonly KeyRecord[]) {}
@@ -109,7 +109,6 @@ export async function authenticate(request: Request, resolver: KeyResolver, now 
   const signingKey = await hmac(await hmac(await hmac(await hmac(`AWS4${key.secretAccessKey}`, date!), region), "s3"), "aws4_request");
   const toSign = `AWS4-HMAC-SHA256\n${timestamp}\n${credentialScope}\n${await digest(utf8.encode(canonical))}`;
   if (!await verifyHmac(signingKey, toSign, signature)) throw new S3Error(403, "SignatureDoesNotMatch");
-  await resolver.recordUse?.(keyId!);
   return { key, payloadHash, signingKey, signature, timestamp, credentialScope };
 }
 

@@ -6,32 +6,32 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "services": [
-    { "binding": "DATA_PLANE", "service": "unlispace-data-plane" },
-    { "binding": "DATA_PLANE_ADMIN", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
+    { "binding": "CONTROL_PLANE", "service": "unlispace-api", "entrypoint": "ControlPlane" },
+    { "binding": "API", "service": "unlispace-api" },
+    { "binding": "DATA_PLANE", "service": "unlispace-data-plane" }
   ],
   "durable_objects": { "bindings": [{ "name": "S3_STATE", "class_name": "S3State" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["S3State"] }],
   "vars": {
     "ULS_ISSUER": "http://127.0.0.1:8788",
-    "ULS_S3_HOST": "s3.unlispace.com",
-    "ULS_S3_DEV_KEYS": "[]"
+    "ULS_S3_HOST": "s3.unlispace.com"
   },
-  "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_S3_MASTER_KEY"] },
+  "secrets": { "required": ["ULS_JWT_PRIVATE_JWK"] },
   "env": {
     "production": {
       "name": "unlispace-s3",
       "workers_dev": true,
       "preview_urls": false,
       "services": [
-        { "binding": "DATA_PLANE", "service": "unlispace-data-plane" },
-        { "binding": "DATA_PLANE_ADMIN", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
+        { "binding": "CONTROL_PLANE", "service": "unlispace-api", "entrypoint": "ControlPlane" },
+        { "binding": "API", "service": "unlispace-api" },
+        { "binding": "DATA_PLANE", "service": "unlispace-data-plane" }
       ],
       "durable_objects": { "bindings": [{ "name": "S3_STATE", "class_name": "S3State" }] },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["S3State"] }],
       "vars": {
-        "ULS_ISSUER": "https://unlispace-api.naveen-f3d.workers.dev",
-        "ULS_S3_HOST": "unlispace-s3.naveen-f3d.workers.dev",
-        "ULS_S3_DEV_KEYS": "[]"
+        "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
+        "ULS_S3_HOST": "unlispace-s3.__WORKERS_DOMAIN__"
       }
     }
   }

@@ -1,13 +1,13 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
-// The real data plane is never started here. wrangler.jsonc binds DATA_PLANE / DATA_PLANE_ADMIN to a service
+// The real data plane is never started here. wrangler.jsonc binds DATA_PLANE to a service
 // named unlispace-data-plane, so an inert auxiliary worker satisfies the binding. Behavioural tests inject
 // test/fake-data-plane.ts through Deps instead (see test/helpers.ts).
 const stubDataPlane = `
 import { WorkerEntrypoint } from "cloudflare:workers";
 export default { fetch: () => Response.json({ error: "stub" }, { status: 503 }) };
-export class DataPlaneAdmin extends WorkerEntrypoint {}
+export class ControlPlane extends WorkerEntrypoint { resolveKey() { return null; } }
 `;
 
 export default defineConfig({
@@ -60,10 +60,9 @@ export const getAwsChunkedEncodingStream = (readableStream, options) => {
 		cloudflareTest({
 			wrangler: { configPath: "./wrangler.jsonc" },
 			miniflare: {
-				workers: [{ name: "unlispace-data-plane", modules: true, compatibilityDate: "2026-10-01", script: stubDataPlane }],
+				workers: [{name: "unlispace-api", modules:true, compatibilityDate:"2026-10-01", script:stubDataPlane}, { name: "unlispace-data-plane", modules: true, compatibilityDate: "2026-10-01", script: stubDataPlane }],
 				bindings: {
 					ULS_JWT_PRIVATE_JWK: "{}",
-					ULS_S3_MASTER_KEY: "",
 				},
 			},
 		}),

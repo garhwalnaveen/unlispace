@@ -1,3 +1,4 @@
+import type { StateStore } from "./state";
 import type { Access, KeyRecord } from "./auth";
 import type { Shard } from "./chunker";
 import { base64url, digest, utf8 } from "./crypto";
@@ -24,7 +25,7 @@ export interface Manifest {
   path: string; versionId: string; size: number; contentType: string | null; mtimeMs: number | null; shards: Shard[];
 }
 export interface Stat { path: string; type: "file" | "folder"; versionId: string; size: number; contentType: string | null; mtimeMs: number; seq: number }
-export interface Version { versionId: string; op: string; size: number | null; seq: number; ts: number; actor: string }
+export interface Version { versionId: string; op: string; size: number | null; seq: number; ts: number; actor: string; operation?: string; restoredFrom?: string | null }
 export interface DriveInfo { driveId: string; placement: string | null; createdAt: number; headSeq: number; fileCount: number; bytes: number }
 export interface Entry { name: string; type: "file" | "folder"; versionId: string; size: number; mtimeMs: number }
 export interface CommitResult { seq: number; results: { path: string; versionId: string; size: number }[] }
@@ -35,7 +36,7 @@ export type CommitOp =
 
 export class DataPlane {
   private readonly tokenCache = new Map<Access, string>();
-  constructor(private readonly binding: FetchBinding, private readonly tokens: InternalTokenMinter, private readonly principal: KeyRecord, readonly drive: string) {}
+  constructor(private readonly binding: FetchBinding, private readonly tokens: InternalTokenMinter, private readonly principal: KeyRecord, readonly drive: string, private readonly state?: StateStore) {}
   private async token(access: Access): Promise<string> {
     let token = this.tokenCache.get(access);
     if (!token) { token = await this.tokens.mint(this.principal, this.drive, access); this.tokenCache.set(access, token); }
@@ -61,7 +62,15 @@ export class DataPlane {
   }
   describe(): Promise<DriveInfo> { return this.json(""); }
   stat(path: string): Promise<Stat> { return this.json("stat", { path }); }
-  manifest(path: string, versionId?: string): Promise<Manifest> { return this.json("manifest", { path, ...(versionId ? { versionId } : {}) }); }
+  async manifest(path: string, versionId?: string): Promise<Manifest> {
+    try { return await this.json("manifest", {path, ...(versionId ? {versionId} : {})}); }
+    catch (e) {
+      if (!(e instanceof S3Error) || e.code !== "NoSuchVersion" || !versionId) throw e;
+      const archived = await this.state?.get<Manifest>(`archive:${this.drive}:${path}:${versionId}`);
+      if (!archived) throw e;
+      return archived;
+    }
+  }
   async versions(path: string): Promise<Version[]> {
     const versions: Version[] = [];
     let cursor: string | null = null;
@@ -69,7 +78,8 @@ export class DataPlane {
       const page: { versions: Version[]; cursor: string | null } = await this.json("versions", { path, limit: "1000", ...(cursor ? { cursor } : {}) });
       versions.push(...page.versions); cursor = page.cursor;
     } while (cursor);
-    return versions;
+    const archived = await this.state?.get<Version[]>(`history:${this.drive}:${path}`) ?? [];
+    return [...new Map([...archived, ...versions].map(v => [v.versionId, v])).values()].sort((a,b) => a.ts-b.ts || a.seq-b.seq);
   }
   async *children(path: string): AsyncGenerator<Entry> {
     let cursor: string | null = null;
@@ -133,7 +143,7 @@ export class DataPlane {
   }
 }
 
-/** Listings carry only version ids, so the ETag is derived from the version id to stay identical across LIST, HEAD and GET. */
-export async function etag(manifest: Pick<Manifest, "versionId">): Promise<string> {
-  return `"${(await digest(utf8.encode(manifest.versionId))).slice(0, 32)}"`;
+/** A manifest-derived validator survives metadata-only renames and forks. */
+export async function etag(manifest: Pick<Manifest, "versionId"> & Partial<Pick<Manifest, "shards">>): Promise<string> {
+  return `"${(await digest(utf8.encode(manifest.shards ? JSON.stringify(manifest.shards) : manifest.versionId))).slice(0, 32)}"`;
 }

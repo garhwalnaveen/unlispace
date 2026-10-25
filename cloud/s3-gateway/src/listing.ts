@@ -86,7 +86,7 @@ export async function listObjects(c: ObjectContext, bucket: string): Promise<Res
       if (item.prefix) common.push(`<CommonPrefixes>${tag("Prefix", k(item.key))}</CommonPrefixes>`);
       else {
         const e = item.entry!;
-        contents.push(`<Contents>${tag("Key", k(item.key))}${tag("LastModified", iso(e.mtimeMs))}${tag("ETag", await etag(e))}${tag("Size", e.type === "folder" ? 0 : e.size)}${tag("StorageClass", "STANDARD")}</Contents>`);
+        contents.push(`<Contents>${tag("Key", k(item.key))}${tag("LastModified", iso(e.mtimeMs))}${tag("ETag", await etag(e.type === "folder" ? {...e, shards:[]} : await c.dp.manifest(item.key)))}${tag("Size", e.type === "folder" ? 0 : e.size)}${tag("StorageClass", "STANDARD")}</Contents>`);
       }
     }
   }
@@ -145,7 +145,7 @@ export async function listVersions(c: ObjectContext, bucket: string): Promise<Re
       const common = tag("Key", k(key)) + tag("VersionId", v.versionId) + tag("IsLatest", i === 0) + tag("LastModified", iso(v.ts));
       out.push(v.op === "delete"
         ? `<DeleteMarker>${common}</DeleteMarker>`
-        : `<Version>${common}${tag("ETag", await etag(v))}${tag("Size", v.size ?? 0)}${tag("StorageClass", "STANDARD")}</Version>`);
+        : `<Version>${common}${tag("ETag", await etag(await c.dp.manifest(key, v.versionId)))}${tag("Size", v.size ?? 0)}${tag("StorageClass", "STANDARD")}</Version>`);
     }
   }
   let body = tag("Name", bucket) + tag("Prefix", k(prefix)) + tag("KeyMarker", k(keyMarker)) + tag("VersionIdMarker", versionMarker);

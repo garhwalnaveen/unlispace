@@ -3,7 +3,6 @@ import type { Manifest } from "./data-plane";
 import type { Shard } from "./chunker";
 import { S3Error } from "./errors";
 
-export interface BucketRecord { driveId: string; alias: string; displayName: string; createdAt: number; orgId?: string; placement?: string; forkOf?: { driveId: string; forkPoint: string } }
 export interface Upload { id: string; drive: string; key: string; contentType: string; createdAt: number; status: "open" | "completing" | "complete"; versionId?: string; etag?: string; size?: number }
 export interface Part { number: number; etag: string; size: number; shards: Shard[]; modified: number }
 export interface VersionAnnotation { operation: string; restoredFrom?: string; manifest: Manifest }

@@ -130,7 +130,7 @@ describe("objects", () => {
 		const missing = await s3.send(new CopyObjectCommand({ Bucket: b, Key: "x", CopySource: `${b}/absent` })).catch((e) => e);
 		expect(code(missing)).toBe("NoSuchKey");
 		const cross = await s3.send(new CopyObjectCommand({ Bucket: b, Key: "x", CopySource: `other-drive/src` })).catch((e) => e);
-		expect(status(cross)).toBe(501);
+		expect(status(cross)).toBe(404);
 	});
 
 	it("deletes objects (idempotent) and many at once, reporting per-key results", async () => {

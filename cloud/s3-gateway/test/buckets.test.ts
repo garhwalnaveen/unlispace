@@ -9,7 +9,7 @@ describe("buckets (bucket = drive)", () => {
 		const s3 = await client(h.deps);
 		const name = bucketName();
 		await s3.send(new CreateBucketCommand({ Bucket: name }));
-		expect(h.dp.drives.has(name)).toBe(true);
+		expect((await h.deps.controlPlane.resolveBucket("ULS1ABCDEFGHJKLMNPQR", name)).driveId).toMatch(/^d-/);
 
 		await s3.send(new HeadBucketCommand({ Bucket: name }));
 		const list = await s3.send(new ListBucketsCommand({}));
@@ -23,16 +23,14 @@ describe("buckets (bucket = drive)", () => {
 		expect((await s3.send(new ListBucketsCommand({}))).Buckets).toEqual([]);
 	});
 
-	it("reports BucketAlreadyOwnedByYou on re-create and BucketNotEmpty on non-empty delete", async () => {
+	it("reports BucketAlreadyOwnedByYou on re-create and soft-deletes non-empty drives", async () => {
 		const h = await harness();
 		const s3 = await client(h.deps);
 		const name = bucketName();
 		await s3.send(new CreateBucketCommand({ Bucket: name }));
 		expect((await s3.send(new CreateBucketCommand({ Bucket: name })).catch((e) => e)).name).toBe("BucketAlreadyOwnedByYou");
 		await s3.send(new PutObjectCommand({ Bucket: name, Key: "x", Body: "1" }));
-		const err = await s3.send(new DeleteBucketCommand({ Bucket: name })).catch((e) => e);
-		expect(err.name).toBe("BucketNotEmpty");
-		expect(err.$metadata.httpStatusCode).toBe(409);
+		expect((await s3.send(new DeleteBucketCommand({ Bucket: name }))).$metadata.httpStatusCode).toBe(204);
 	});
 
 	it("rejects invalid bucket names and non-admin bucket creation", async () => {

@@ -94,17 +94,17 @@ describe("Drive extensions", () => {
 		const h = await harness();
 		const b = makeBucket(h), s3 = await client(h.deps);
 		await s3.send(new PutObjectCommand({ Bucket: b, Key: "p.txt", Body: "aaaaaaaaaa" }));
-		const res = await ext(h, "PUT", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/vnd.s3sdk.patch" }, body: patch([{ offset: 0, data: "XX" }, { offset: 4, data: "YY" }, { offset: 12, data: "ZZ" }]) });
+		const res = await ext(h, "POST", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/vnd.s3sdk.patch" }, body: patch([{ offset: 0, data: "XX" }, { offset: 4, data: "YY" }, { offset: 12, data: "ZZ" }]) });
 		expect(res.status).toBe(200);
 		expect(await content(h, b, "p.txt")).toBe("XXaaYYaaaa\0\0ZZ");
 
 		// invalid bodies are rejected and change nothing
-		const garbage = await ext(h, "PUT", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/vnd.s3sdk.patch" }, body: "not a patch at all" });
+		const garbage = await ext(h, "POST", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/vnd.s3sdk.patch" }, body: "not a patch at all" });
 		expect(garbage.status).toBe(400);
 		expect(await body(garbage)).toContain("InvalidPatch");
 		const truncated = patch([{ offset: 0, data: "abcdef" }]).slice(0, -2);
-		expect((await ext(h, "PUT", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/vnd.s3sdk.patch" }, body: truncated })).status).toBe(400);
-		const wrongType = await ext(h, "PUT", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/octet-stream" }, body: patch([{ offset: 0, data: "a" }]) });
+		expect((await ext(h, "POST", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/vnd.s3sdk.patch" }, body: truncated })).status).toBe(400);
+		const wrongType = await ext(h, "POST", b, "p.txt", "x-uls-patch", { headers: { "content-type": "application/octet-stream" }, body: patch([{ offset: 0, data: "a" }]) });
 		expect(wrongType.status).toBe(400);
 		expect(await content(h, b, "p.txt")).toBe("XXaaYYaaaa\0\0ZZ");
 	});
@@ -154,7 +154,7 @@ describe("Drive extensions", () => {
 		expect((await ext(h, "PUT", b, "dir/", "x-uls-rename", { headers: { "x-uls-source": "renamed.txt" } })).status).toBe(400);
 	});
 
-	it("?x-uls-versions lists history newest first, and x-uls-as-of reads a past state", async () => {
+	it("?x-uls-versions lists history oldest first, and x-uls-as-of reads a past state", async () => {
 		const h = await harness();
 		const b = makeBucket(h), s3 = await client(h.deps);
 		const v1 = await s3.send(new PutObjectCommand({ Bucket: b, Key: "h.txt", Body: "one" }));
@@ -163,7 +163,7 @@ describe("Drive extensions", () => {
 		const res = await ext(h, "GET", b, "h.txt", "x-uls-versions");
 		expect(res.status).toBe(200);
 		const doc = await res.json() as { key: string; versions: { versionId: string; op: string; size: number }[] };
-		expect(doc.versions.map((v) => v.versionId)).toEqual([v2.VersionId, v1.VersionId]);
+		expect(doc.versions.map((v) => v.versionId)).toEqual([v1.VersionId, v2.VersionId]);
 		expect(doc.versions.map((v) => v.size)).toEqual([3, 3]);
 		expect((await ext(h, "GET", b, "nothing", "x-uls-versions")).status).toBe(404);
 
@@ -191,8 +191,8 @@ describe("Drive extensions", () => {
 		expect(await content(h, b, "r.txt")).toBe("original");
 		expect(await content(h, b, "r.txt", v1.VersionId)).toBe("original");
 		// history keeps everything, restore included
-		const versions = (await (await ext(h, "GET", b, "r.txt", "x-uls-versions")).json() as { versions: { op: string }[] }).versions;
-		expect(versions.map((v) => v.op)).toEqual(["restore", "put", "put"]);
+		const versions = (await (await ext(h, "GET", b, "r.txt", "x-uls-versions")).json() as { versions: { operation: string }[] }).versions;
+		expect(versions.map((v) => v.operation)).toEqual(["put", "put", "restore"]);
 
 		expect((await ext(h, "POST", b, "r.txt", "x-uls-restore")).status).toBe(400);
 		expect((await ext(h, "POST", b, "r.txt", "x-uls-restore&versionId=v_00000000000000000000000000")).status).toBe(404);
