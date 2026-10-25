@@ -45,6 +45,17 @@ export function AccessKeys() {
       setCopied(true);
     } catch { setError(new Error("Could not copy. Select the credentials below and copy them manually.")); }
   }
+  const allKeys = keys.data?.keys || [];
+  function renderKeys(parent: string | null, ancestors: string[] = []) {
+    const children = allKeys.filter((key) => !ancestors.includes(key.accessKeyId) && (parent === null ? !key.parent || !allKeys.some((item) => item.accessKeyId === key.parent) : key.parent === parent));
+    return <ul className="key-list">{children.map((key) => <li key={key.accessKeyId}>
+      <h3>{key.label || "Untitled key"}</h3><code>{key.accessKeyId}</code>
+      {key.parent && <p className="muted small">Child of <code>{key.parent}</code></p>}
+      <p className="muted small">{key.access} · {key.drives === null ? "All accessible drives" : `${key.drives.length} selected drive(s)`}<br />Last used: {key.lastUsedAt === null ? "Never" : formatDate(key.lastUsedAt)}</p>
+      {key.revokedAt ? <p>Revoked {formatDate(key.revokedAt)}</p> : revoke === key.accessKeyId ? <div><p>Revoke this key and all its descendants (child keys and their children)? Tools using them will lose access.</p><div className="actions"><button className="danger" disabled={busy} onClick={() => void remove(key.accessKeyId)}>Confirm revoke</button><button disabled={busy} onClick={() => setRevoke(null)}>Cancel</button></div></div> : <button disabled={busy} onClick={() => setRevoke(key.accessKeyId)}>Revoke {key.label || key.accessKeyId}</button>}
+      {allKeys.some((child) => child.parent === key.accessKeyId && ![...ancestors, key.accessKeyId].includes(child.accessKeyId)) && renderKeys(key.accessKeyId, [...ancestors, key.accessKeyId])}
+    </li>)}</ul>;
+  }
   return <>
     <header className="page-heading"><div><Link to="/settings">Account</Link><h1>Access keys</h1><p className="muted">Connect S3 tools to the drives you choose.</p></div></header>
     <ErrorNotice error={error || keys.error || orgs.error} />
@@ -75,11 +86,7 @@ export function AccessKeys() {
       </section>
       <section aria-labelledby="existing-keys-title"><h2 id="existing-keys-title">Your keys</h2>{keys.loading && <Loading />}
         {!keys.loading && keys.data?.keys.length === 0 && <p className="muted">No access keys yet.</p>}
-        <ul className="key-list">{keys.data?.keys.map((key) => <li key={key.accessKeyId}>
-          <h3>{key.label || "Untitled key"}</h3><code>{key.accessKeyId}</code>
-          <p className="muted small">{key.access} · {key.drives === null ? "All accessible drives" : `${key.drives.length} selected drive(s)`}<br />Last used: {key.lastUsedAt === null ? "Never" : formatDate(key.lastUsedAt)}</p>
-          {key.revokedAt ? <p>Revoked {formatDate(key.revokedAt)}</p> : revoke === key.accessKeyId ? <div><p>Revoke this key and all its child keys? Tools using them will lose access.</p><div className="actions"><button className="danger" disabled={busy} onClick={() => void remove(key.accessKeyId)}>Confirm revoke</button><button disabled={busy} onClick={() => setRevoke(null)}>Cancel</button></div></div> : <button disabled={busy} onClick={() => setRevoke(key.accessKeyId)}>Revoke {key.label || key.accessKeyId}</button>}
-        </li>)}</ul>
+        {renderKeys(null)}
       </section>
     </div>
   </>;

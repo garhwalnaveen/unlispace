@@ -4,6 +4,8 @@ import { useAuth } from "./context";
 import { billingCatalog, externalUrl, m2, type Checkout } from "./m2";
 import { ErrorNotice, formatBytes, formatDate, Loading, useLoad } from "./ui";
 
+import { UsageMeter } from "./Usage";
+
 export function Billing() {
   const { id = "" } = useParams();
   const { auth } = useAuth();
@@ -41,6 +43,7 @@ export function Billing() {
     {billing && <section className="panel billing-summary" aria-labelledby="plan-title"><h2 id="plan-title">{billing.plan === "teams" ? "Teams" : "Individual"} plan</h2>
       <p>{billing.status}{days !== null && billing.state !== "paid" ? ` · ${days > 0 ? `${days} trial day${days === 1 ? "" : "s"} remaining` : "Trial ended"}` : ""}</p>
       <dl><dt>Seats</dt><dd>{billing.seats}</dd><dt>Storage</dt><dd>{formatBytes(billing.usedBytes)} of {formatBytes(billing.quotaBytes)}</dd></dl>
+      <UsageMeter {...billing} />
       {days === 0 && !billing.writable && <p className="notice">Your trial has ended. Choose a plan to keep uploading. Your existing files remain readable.</p>}
       {canManage && <button disabled={busy} onClick={() => void redirect(false)}>Manage subscription</button>}
     </section>}

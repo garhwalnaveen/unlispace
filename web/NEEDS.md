@@ -12,3 +12,14 @@
 - **Coordinator:** run live browser upload/conflict and Dodo sandbox checkout/portal smoke checks once
   backend CORS and payment configuration are available. The browser tool in this session required
   unavailable approval, so no visual browser verification was performed.
+
+# 18-web-m3 integration notes
+
+- **Coordinator:** run a real-browser smoke check with the integrated API/data plane: create a
+  fork, inspect its fork point/lineage, collide and edit aliases, reject hard delete with live forks,
+  verify metered quota banners, restore an as-of version, and revoke an ancestor key. All new web
+  tests use fetch stubs; no external services were called.
+- **Interpretation:** the existing web UI exposed history downloads but no restore flow. M3 adds
+  one confirmed, `ifVersion`-guarded data-plane `/restore` flow, shared by history rows and as-of
+  selection. As-of selection requires loading every history page before selecting by timestamp
+  (sequence breaks equal-timestamp ties); a deletion head shows the file as deleted.

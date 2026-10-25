@@ -835,3 +835,10 @@ legend { font-size: 0.8rem; padding: 0 6px; }
 .upload-progress { margin: 16px 0 24px; }
 @media (max-width: 800px) { .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
 @media (max-width: 600px) { .upload-toolbar { align-items: flex-start; flex-direction: column; } }
+
+.drive-tools { margin: 18px 0; overflow-wrap: anywhere; }
+.drive-tools summary { cursor: pointer; margin: 12px 0; }
+.drive-tools .actions { flex-wrap: wrap; }
+.key-list .key-list { margin-left: 20px; border-left: 2px solid var(--line); padding-left: 16px; }
+.usage-meter { margin: 16px 0 24px; }
+.usage-meter meter { width: 100%; max-width: 620px; height: 18px; accent-color: var(--accent); }

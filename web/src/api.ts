@@ -19,6 +19,10 @@ export interface Profile extends User {
 export interface Drive {
   id: string;
   orgId: string;
+  alias?: string | null;
+  forkOf?: { driveId: string; forkPoint: number } | null;
+  forks?: string[];
+  usageBytes?: number;
   name: string;
   placement: string | null;
   status: "ready" | "provisioning_failed" | "deleted";
@@ -122,13 +126,15 @@ export class Api {
       `/orgs/${encodeURIComponent(orgId)}/drives`,
       this.json("POST", { name }),
     );
-  renameDrive = (id: string, name: string) =>
+  renameDrive = (id: string, name: string, alias?: string) =>
     this.request<Drive>(
       `/drives/${encodeURIComponent(id)}`,
-      this.json("PATCH", { name }),
+      this.json("PATCH", { name, ...(alias === undefined ? {} : { alias }) }),
     );
-  deleteDrive = (id: string) =>
-    this.request<{ ok: true }>(`/drives/${encodeURIComponent(id)}`, {
+  forkDrive = (id: string, name: string, alias: string) =>
+    this.request<Drive>(`/drives/${encodeURIComponent(id)}/fork`, this.json("POST", { name, alias }));
+  deleteDrive = (id: string, hard = false) =>
+    this.request<{ ok: true }>(`/drives/${encodeURIComponent(id)}${hard ? "?hard=1" : ""}`, {
       method: "DELETE",
     });
   driveToken = (id: string, access: "read" | "write" = "read") =>
@@ -215,6 +221,9 @@ export class DriveApi {
   putShard = (hash: string, body: Uint8Array<ArrayBuffer>) => this.send(`shards/${hash}`, {
     method: "PUT", body, headers: { "Content-Type": "application/octet-stream" },
   });
+  restore = (path: string, versionId: string, ifVersion: string) => this.send<{ seq: number }>("restore", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, versionId, ifVersion }),
+  });
   commit = (op: PutOperation) => this.send<{ seq: number }>("commit", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ops: [op] }),
   });
@@ -229,6 +238,12 @@ export class DriveApi {
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     const messages: Record<string, string> = {
+      alias_taken: "That alias is already in use. Choose another alias.",
+      invalid_alias: "Use 3–63 lowercase letters, numbers or hyphens, starting and ending with a letter or number. Drive IDs are reserved.",
+      drive_has_forks: "This drive has live forks. Delete its forks before permanently deleting this drive.",
+      fork_depth_exceeded: "This drive has reached the maximum fork depth of 8.",
+      slow_down: "The drive is busy. Please try forking again shortly.",
+      over_quota: "Your organization is over its storage quota. Writes are paused; existing files remain readable. Delete data or add storage in Billing.",
       plan_limit:
         "Your Individual plan includes one drive. Additional drives require a Teams plan.",
       invalid_code:
@@ -238,7 +253,7 @@ export function errorMessage(error: unknown): string {
       invalid_refresh: "Your session has expired. Please sign in again.",
       not_configured:
         "Google sign-in is not configured on this server. Please use email.",
-      precondition_failed: "This file changed while you were uploading. Your upload was not committed. Refresh the folder and try again.",
+      precondition_failed: "This file changed while you were uploading or restoring. Your change was not committed. Refresh and try again.",
       quota_exceeded: "This organization has reached its storage quota. Open Billing to add storage.",
       forbidden: "You do not have permission to perform this action.",
       keys_not_configured: "Access keys are not configured on this server yet.",

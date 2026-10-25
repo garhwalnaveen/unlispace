@@ -71,6 +71,7 @@ export function Modal({
     const previous = document.activeElement;
     const dialog = ref.current;
     dialog?.showModal();
+    dialog?.querySelector<HTMLElement>("input, select, textarea")?.focus();
     return () => {
       dialog?.close();
       if (previous instanceof HTMLElement) previous.focus();

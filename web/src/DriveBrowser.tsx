@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { DriveApi, type Drive, type FileStat } from "./api";
+import { DriveApi, type Drive, type FileStat, type Version } from "./api";
 import { useAuth } from "./context";
 import { downloadFile, MAX_WEB_DOWNLOAD } from "./download";
 import { driveLink, finderLink } from "./links";
@@ -11,7 +11,9 @@ import {
   formatDate,
   Loading,
   useLoad,
+  Modal,
 } from "./ui";
+import { DriveTools, ForkNotice } from "./DriveTools";
 import { Upload } from "./FileUpload";
 import { useListing, useVersions } from "./usePagination";
 
@@ -120,20 +122,64 @@ function Versions({
   path,
   onDownload,
   downloading,
+  writeApi,
+  headVersion,
+  onRestored,
 }: {
   api: DriveApi;
   path: string;
   onDownload: (version: string) => void;
   downloading: boolean;
+  writeApi: DriveApi | null;
+  headVersion: string;
+  onRestored: () => void;
 }) {
   const { versions, cursor, loading, error, reload, loadMore } = useVersions(
     api,
     path,
   );
+  const [asOf, setAsOf] = useState("");
+  const [selected, setSelected] = useState<Version | null>(null);
+  const [selectionError, setSelectionError] = useState("");
+  const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [restoreError, setRestoreError] = useState<unknown>();
+  const [restored, setRestored] = useState(false);
+  async function restore() {
+    if (!writeApi || !restoreVersion) return;
+    setBusy(true); setRestoreError(undefined);
+    try {
+      await writeApi.restore(path, restoreVersion.versionId, headVersion);
+      setRestoreVersion(null); setRestored(true); setSelected(null); reload(); onRestored();
+    } catch (reason) { setRestoreError(reason); }
+    finally { setBusy(false); }
+  }
   return (
     <section className="versions" aria-labelledby="versions-title">
       <h2 id="versions-title">Version history</h2>
       <p className="muted small">Every save, from oldest to newest.</p>
+      <form className="stack" onSubmit={(event) => {
+        event.preventDefault();
+        const instant = new Date(asOf).getTime();
+        const head = versions.filter((version) => version.ts <= instant).sort((a, b) => b.ts - a.ts || b.seq - a.seq)[0];
+        setSelected(head || null);
+        setSelectionError(head ? "" : "This file did not exist at that time.");
+      }}>
+        <label htmlFor="history-as-of">View as of…</label>
+        <input id="history-as-of" type="datetime-local" step="1" required value={asOf} onChange={(event) => { setAsOf(event.target.value); setSelected(null); setSelectionError(""); }} />
+        <button disabled={loading || Boolean(cursor) || Boolean(error) || !asOf}>View as of</button>
+        {cursor && <p className="muted small">Load all versions before choosing a time.</p>}
+      </form>
+      {selectionError && <p role="status">{selectionError}</p>}
+      {selected && <section className="panel" aria-label="Version as of selected time">
+        <h3>Head at {formatDate(new Date(asOf).getTime())}</h3>
+        {selected.op === "delete" ? <p>This file was deleted at that time.</p> : <>
+          <p><code>{selected.versionId}</code> · {formatDate(selected.ts)} · {formatBytes(selected.size)}</p>
+          {selected.size <= MAX_WEB_DOWNLOAD ? <button disabled={downloading} onClick={() => onDownload(selected.versionId)}>Download selected version</button> : <p>Use the desktop app for versions above 512 MiB.</p>}
+          {writeApi && <button disabled={busy} onClick={() => { setRestoreError(undefined); setRestoreVersion(selected); }}>Restore selected version</button>}
+        </>}
+      </section>}
+      {restored && <p role="status">Version restored as the new head.</p>}
       <ErrorNotice error={error} />
       {Boolean(error) && <button onClick={reload}>Try again</button>}
       {loading && <Loading>Reading versions…</Loading>}
@@ -152,6 +198,7 @@ function Versions({
             </p>
             <code>{version.versionId}</code>
             <p className="small muted">By {version.actor || "Unknown actor"}</p>
+            {writeApi && version.op !== "delete" && version.op !== "rename" && <button disabled={busy} aria-label={`Restore version ${version.versionId}`} onClick={() => { setRestoreError(undefined); setRestoreVersion(version); }}>Restore this version</button>}
             {version.op !== "delete" &&
               version.op !== "rename" &&
               (version.size > MAX_WEB_DOWNLOAD ? (
@@ -174,6 +221,11 @@ function Versions({
           {loading ? "Loading…" : "Load more versions"}
         </button>
       )}
+      {restoreVersion && <Modal title="Restore version" onClose={() => { if (!busy) setRestoreVersion(null); }}>
+        <p>Restore {restoreVersion.versionId} as the current version of {path}? Existing history is kept.</p>
+        <ErrorNotice error={restoreError} />
+        <div className="actions"><button disabled={busy} onClick={() => setRestoreVersion(null)}>Cancel</button><button className="primary" disabled={busy} onClick={() => void restore()}>{busy ? "Restoring…" : "Confirm restore"}</button></div>
+      </Modal>}
     </section>
   );
 }
@@ -181,10 +233,14 @@ function FileDetails({
   api,
   file,
   path,
+  writeApi,
+  onRestored,
 }: {
   api: DriveApi;
   file: FileStat;
   path: string;
+  writeApi: DriveApi | null;
+  onRestored: () => void;
 }) {
   const [params, setParams] = useSearchParams();
   const showVersions = params.get("panel") === "versions";
@@ -285,6 +341,9 @@ function FileDetails({
             path={path}
             onDownload={(version) => void download(version)}
             downloading={downloading}
+            writeApi={writeApi}
+            headVersion={file.versionId}
+            onRestored={onRestored}
           />
         </aside>
       )}
@@ -295,10 +354,12 @@ function DriveContents({
   drive,
   api,
   path,
+  onDriveChanged,
 }: {
   drive: Drive;
   api: DriveApi;
   path: string;
+  onDriveChanged: (created?: Drive) => void;
 }) {
   const { auth } = useAuth();
   const writeApi = useMemo(() => drive.access === "read" ? null : new DriveApi(auth.api, drive.id, "write"), [auth, drive.id, drive.access]);
@@ -308,6 +369,7 @@ function DriveContents({
     [api, path],
   );
   const { data: file, loading, error, reload } = useLoad(load);
+  const [restoredFile, setRestoredFile] = useState<FileStat | null>(null);
   const title = path.split("/").filter(Boolean).pop() || drive.name;
   return (
     <>
@@ -323,12 +385,13 @@ function DriveContents({
       </header>
       <ErrorNotice error={error} />
       {Boolean(error) && <button onClick={reload}>Try again</button>}
-      {loading ? (
+      {!path && <DriveTools drive={drive} canManage={drive.access === "admin"} onDone={onDriveChanged} />}
+      {loading && !file ? (
         <Loading>Opening drive…</Loading>
       ) : (
         !error &&
         (file?.type === "file" ? (
-          <FileDetails key={path} api={api} file={file} path={path} />
+          <FileDetails key={path} api={api} file={restoredFile || file} path={path} writeApi={writeApi} onRestored={() => { void api.stat(path).then(setRestoredFile).catch(() => reload()); }} />
         ) : (
           <Folder
             api={api}
@@ -346,10 +409,12 @@ export function DriveBrowser() {
   const api = useMemo(() => new DriveApi(auth.api, id), [auth, id]);
   const load = useCallback(() => auth.api.drive(id), [auth, id]);
   const { data: drive, loading, error, reload } = useLoad(load);
+  const [fork, setFork] = useState<Drive | null>(null);
   return (
     <>
       <ErrorNotice error={error} />
       {Boolean(error) && <button onClick={reload}>Try again</button>}
+      {fork && <ForkNotice drive={fork} />}
       {loading && <Loading>Finding your drive…</Loading>}
       {drive &&
         (drive.status === "ready" ? (
@@ -358,6 +423,7 @@ export function DriveBrowser() {
             drive={drive}
             api={api}
             path={path}
+            onDriveChanged={(created) => { setFork(created || null); reload(); }}
           />
         ) : (
           <div className="empty">
