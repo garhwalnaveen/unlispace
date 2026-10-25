@@ -1,0 +1,55 @@
+PASS  setup local Workers + D1: Wrangler 4.152.0; api :8788, data :8787, inspector :9230; D1 migrated
+PASS  cloud 01 otp start
+PASS  cloud 02 dev OTP logged
+PASS  cloud 03 wrong code -> 400
+PASS  cloud 04 verify -> session, accountCreated
+PASS  cloud 05 My Space + ready drive via service binding
+PASS  cloud 06 write drive token minted
+PASS  cloud 07 data plane accepts API-signed token
+PASS  cloud 08 shard PUT with drive token
+PASS  cloud 09 commit
+PASS  cloud 10 version actor = token user id
+PASS  cloud 11 drive A token on B -> 404
+PASS  cloud 12 read token cannot commit -> 404
+PASS  cloud 13 API access token on data plane -> 401
+PASS  cloud 14 refresh rotates
+PASS  cloud 15 reused old refresh token -> 401
+PASS  cloud 16 reuse revokes whole refresh family
+PASS  engine CLI put/get byte-identical: 3 unique shards uploaded; 8388608 bytes compared
+PASS  engine dedup re-upload sends zero shards: 0 of 3 shards uploaded
+PASS  engine 4 KiB edit uploads exactly one shard: 4096 bytes edited; 1 of 3 shards uploaded; bytes verified
+PASS  engine CLI versions + historical get: three ordered versions; first version bytes verified
+PASS  engine CLI restore creates new head: new version; original bytes restored
+PASS  engine concurrent ifVersion has exactly one winner: exit codes 0,2; one new version; winner bytes verified
+PASS  engine second CLI client watches change in < 1 s: 42.9 ms from writer invocation to exact version observed
+PASS  engine native read-only NFS mount + byte-identical read: 8 MiB compared through kernel NFS; write rejected
+PASS  cleanup: owned processes stopped; no NFS mount remains; shell trap removes temporary data
+STATUS | CHECK | DETAIL
+-------|-------|-------
+PASS | setup local Workers + D1 | Wrangler 4.152.0; api :8788, data :8787, inspector :9230; D1 migrated
+PASS | cloud 01 otp start | 
+PASS | cloud 02 dev OTP logged | 
+PASS | cloud 03 wrong code -> 400 | 
+PASS | cloud 04 verify -> session, accountCreated | 
+PASS | cloud 05 My Space + ready drive via service binding | 
+PASS | cloud 06 write drive token minted | 
+PASS | cloud 07 data plane accepts API-signed token | 
+PASS | cloud 08 shard PUT with drive token | 
+PASS | cloud 09 commit | 
+PASS | cloud 10 version actor = token user id | 
+PASS | cloud 11 drive A token on B -> 404 | 
+PASS | cloud 12 read token cannot commit -> 404 | 
+PASS | cloud 13 API access token on data plane -> 401 | 
+PASS | cloud 14 refresh rotates | 
+PASS | cloud 15 reused old refresh token -> 401 | 
+PASS | cloud 16 reuse revokes whole refresh family | 
+PASS | engine CLI put/get byte-identical | 3 unique shards uploaded; 8388608 bytes compared
+PASS | engine dedup re-upload sends zero shards | 0 of 3 shards uploaded
+PASS | engine 4 KiB edit uploads exactly one shard | 4096 bytes edited; 1 of 3 shards uploaded; bytes verified
+PASS | engine CLI versions + historical get | three ordered versions; first version bytes verified
+PASS | engine CLI restore creates new head | new version; original bytes restored
+PASS | engine concurrent ifVersion has exactly one winner | exit codes 0,2; one new version; winner bytes verified
+PASS | engine second CLI client watches change in < 1 s | 42.9 ms from writer invocation to exact version observed
+PASS | engine native read-only NFS mount + byte-identical read | 8 MiB compared through kernel NFS; write rejected
+PASS | cleanup | owned processes stopped; no NFS mount remains; shell trap removes temporary data
+RESULT: 26 passed, 0 failed
