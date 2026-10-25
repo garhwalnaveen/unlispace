@@ -25,5 +25,5 @@
   // Secrets are never in this file. Set with `wrangler secret put ULS_JWT_PUBLIC_JWKS` when deploying
   // ({"keys":[<Ed25519 public JWK with kid>, ...]}, same value as the api's); locally they come from .dev.vars.
   // ULS_DEV_TOKEN is only needed while ULS_ALLOW_DEV_TOKEN is "1".
-  "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS"] }
+  "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS", "ULS_BLOCK_KEY"] }
 }

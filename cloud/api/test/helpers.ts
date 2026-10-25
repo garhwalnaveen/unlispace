@@ -4,6 +4,7 @@ import type { AppEnv, DataPlaneAdmin } from "../src/env";
 import type { EmailSender } from "../src/email";
 import type { Jwk } from "../src/jwt";
 import { b64urlEncode } from "../src/jwt";
+import type { DodoPayments } from "../src/dodo";
 
 export const ORIGIN = "http://127.0.0.1:5173";
 const BASE = "http://127.0.0.1:8788";
@@ -19,6 +20,8 @@ export class FakeDataPlane implements DataPlaneAdmin {
 	created: string[] = [];
 	deleted: string[] = [];
 	failCreate = false;
+	stats = new Map<string, number>();
+	failStats = false;
 	async createDrive(driveId: string) {
 		if (this.failCreate) throw new Error("data plane down");
 		this.created.push(driveId);
@@ -28,8 +31,9 @@ export class FakeDataPlane implements DataPlaneAdmin {
 		this.deleted.push(driveId);
 		return { ok: true as const };
 	}
-	async driveStats() {
-		return null;
+	async driveStats(driveId: string) {
+		if (this.failStats) throw new Error("data plane down");
+		return { headSeq: 0, fileCount: 0, bytes: this.stats.get(driveId) ?? 0 };
 	}
 }
 
@@ -51,6 +55,7 @@ export interface World {
 	keys: { priv: Jwk; pub: Jwk };
 	clock: { t: number };
 	fetchImpl: { fn: typeof fetch };
+	dodoImpl: { client?: DodoPayments };
 	call(path: string, init?: RequestInit & { json?: unknown; token?: string | null; ip?: string; origin?: string }): Promise<Response>;
 }
 
@@ -60,6 +65,7 @@ export async function makeWorld(extra: Partial<AppEnv> = {}): Promise<World> {
 	const mail = new MemSender();
 	const clock = { t: Date.now() };
 	const fetchImpl = { fn: (async () => new Response("no fetch stub", { status: 500 })) as typeof fetch };
+	const dodoImpl: { client?: DodoPayments } = {};
 	const base = rawEnv as unknown as AppEnv;
 	const env: AppEnv = {
 		...base,
@@ -79,6 +85,7 @@ export async function makeWorld(extra: Partial<AppEnv> = {}): Promise<World> {
 		keys,
 		clock,
 		fetchImpl,
+		dodoImpl,
 		call(path, init = {}) {
 			const { json, token, ip, origin, ...rest } = init;
 			const headers = new Headers(rest.headers);
@@ -94,6 +101,7 @@ export async function makeWorld(extra: Partial<AppEnv> = {}): Promise<World> {
 				now: () => clock.t,
 				email: mail,
 				fetch: ((...a: Parameters<typeof fetch>) => fetchImpl.fn(...a)) as typeof fetch,
+				dodo: dodoImpl.client,
 			});
 		},
 	};

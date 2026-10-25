@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { createUlid } from "./ulid";
+import { LIVE_TREE, migrateNodes, NodeTree, type NodeRow } from "./nodes";
 import {
 	fail,
 	ok,
@@ -11,18 +12,10 @@ import {
 	type Result,
 } from "./types";
 import { extPath } from "./validate";
+import { loadManifest, storeManifest } from "./manifests";
+import { GC_SCHEMA, GC_INTERVAL_MS, LineageGC } from "./gc";
 
 type Row = Record<string, SqlStorageValue>;
-interface NodeRow extends Row {
-	path: string;
-	type: string;
-	head: string | null;
-	size: number | null;
-	ctype: string | null;
-	mtime: number | null;
-	seq: number | null;
-	parent: string;
-}
 interface VersionRow extends Row {
 	id: string;
 	path: string;
@@ -56,7 +49,6 @@ export const MAX_SUBTREE_NODES = 100_000;
 export const MAX_BACKLOG_EVENTS = 100_000;
 const REPLAY_BATCH = 500;
 const REPLAY_TICK_MS = 5;
-const NODE_PAGE = 500;
 const MAX_PATH_BYTES = 1024;
 interface EventRow extends Row {
 	ev: number;
@@ -79,18 +71,8 @@ interface CommitCtx {
 	events: ChangeEntry[];
 }
 
-const parentOf = (key: string): string => {
-	const i = key.lastIndexOf("/");
-	return i < 0 ? "" : key.slice(0, i);
-};
-/** Subtree range for folder `key`: every descendant path p satisfies lo <= p < hi ('/' + 1 == '0'). */
-const subtree = (key: string): [string, string] => [key + "/", key + "0"];
-
 const SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)`,
-	// parent is an M0 addition to the reference schema: it makes paginated listing an index range scan.
-	`CREATE TABLE IF NOT EXISTS nodes(path TEXT PRIMARY KEY, type TEXT NOT NULL, head TEXT, size INTEGER, ctype TEXT, mtime INTEGER, seq INTEGER, parent TEXT NOT NULL)`,
-	`CREATE INDEX IF NOT EXISTS nodes_parent ON nodes(parent, path)`,
 	// ctype/mtime are M0 additions so that historical versions can serve /manifest?versionId=.
 	`CREATE TABLE IF NOT EXISTS versions(id TEXT PRIMARY KEY, path TEXT NOT NULL, op TEXT NOT NULL, size INTEGER, manifest TEXT, seq INTEGER NOT NULL, ts INTEGER NOT NULL, actor TEXT, ctype TEXT, mtime INTEGER)`,
 	`CREATE INDEX IF NOT EXISTS versions_path ON versions(path, seq)`,
@@ -108,11 +90,28 @@ export interface DriveInfo {
 export class DriveAuthority extends DurableObject<Env> {
 	private ulid = createUlid();
 	private sql: SqlStorage;
+	private tree: NodeTree;
+	private pendingIO: Promise<unknown> = Promise.resolve();
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
 		this.sql = ctx.storage.sql;
-		for (const stmt of SCHEMA) this.sql.exec(stmt);
+		this.ctx.storage.transactionSync(() => {
+			for (const stmt of [...SCHEMA, ...GC_SCHEMA]) this.sql.exec(stmt);
+			migrateNodes(this.sql);
+		});
+		this.tree = new NodeTree(this.sql);
+		if (this.getMeta("created_at") !== null) {
+			if (this.getMeta("gc_next_at") === null) this.setMeta("gc_next_at", String(Date.now() + GC_INTERVAL_MS));
+			this.ctx.waitUntil(this.scheduleAlarm(Number(this.getMeta("gc_next_at")), null));
+		}
+	}
+
+	/** Serialize R2-dependent metadata mutations without blocking reads or WebSocket alarm ticks. */
+	private withIO<T>(fn: () => Promise<T>): Promise<T> {
+		const task = this.pendingIO.then(fn);
+		this.pendingIO = task.catch(() => undefined);
+		return task;
 	}
 
 	// ---------- small helpers ----------
@@ -139,7 +138,7 @@ export class DriveAuthority extends DurableObject<Env> {
 		return Number(this.getMeta("head_seq") ?? "0");
 	}
 	private getNode(key: string): NodeRow | undefined {
-		return this.sql.exec<NodeRow>("SELECT * FROM nodes WHERE path=?", key).toArray()[0];
+		return this.tree.get(key);
 	}
 	private getVersion(id: string): VersionRow | undefined {
 		return this.sql.exec<VersionRow>("SELECT * FROM versions WHERE id=?", id).toArray()[0];
@@ -160,6 +159,8 @@ export class DriveAuthority extends DurableObject<Env> {
 			this.setMeta("head_seq", "0");
 			this.setMeta("created_at", String(createdAt));
 		});
+		this.setMeta("gc_next_at", String(Date.now() + GC_INTERVAL_MS));
+		this.ctx.waitUntil(this.scheduleAlarm(Number(this.getMeta("gc_next_at")), null));
 		return ok({ driveId, placement, createdAt });
 	}
 
@@ -181,7 +182,7 @@ export class DriveAuthority extends DurableObject<Env> {
 		const i = this.info();
 		if (!i) return this.noDrive();
 		const agg = this.sql
-			.exec<{ c: number; b: number }>("SELECT COUNT(*) AS c, COALESCE(SUM(size),0) AS b FROM nodes WHERE type='file'")
+			.exec<{ c: number; b: number }>(LIVE_TREE + " SELECT COUNT(*) AS c, COALESCE(SUM(size),0) AS b FROM tree WHERE type='file'")
 			.one();
 		return ok({ ...i, headSeq: this.headSeq(), fileCount: agg.c, bytes: agg.b });
 	}
@@ -195,7 +196,20 @@ export class DriveAuthority extends DurableObject<Env> {
 	}
 
 	/** Records shards the Worker has verified in R2. */
-	markShards(shards: [string, number][]): Result<null> {
+	markShards(shards: [string, number][]): Promise<Result<null>> {
+		return this.withIO(async () => {
+			if (!this.info()) return this.noDrive();
+			const lineage = this.getMeta("drive_id")!;
+			const present: [string, number][] = [];
+			for (const [h] of shards) {
+				const object = await this.env.SHARDS.head(`shards/${lineage}/${h}`);
+				if (object) present.push([h, object.size]);
+			}
+			return this.recordShards(present);
+		});
+	}
+
+	private recordShards(shards: [string, number][]): Result<null> {
 		if (!this.info()) return this.noDrive();
 		this.ctx.storage.transactionSync(() => {
 			for (const [h, n] of shards) this.sql.exec("INSERT OR IGNORE INTO shards_known(h,n) VALUES(?,?)", h, n);
@@ -209,8 +223,21 @@ export class DriveAuthority extends DurableObject<Env> {
 	 * Atomic commit. `confirmed` lists shards the Worker has already HEADed in R2 (hash, size),
 	 * so unknown-but-present hashes are accepted and added to shards_known.
 	 */
-	commit(ops: NormOp[], confirmed: [string, number][], actor: string): Result<CommitResponse> {
+	commit(ops: NormOp[], confirmed: [string, number][], actor: string): Promise<Result<CommitResponse>> {
+		return this.withIO(() => this.commitExclusive(ops, confirmed, actor));
+	}
+
+	private async commitExclusive(ops: NormOp[], confirmed: [string, number][], actor: string): Promise<Result<CommitResponse>> {
 		if (!this.info()) return this.noDrive();
+		const lineage = this.getMeta("drive_id")!;
+		// Worker HEADs can race a sweep before this queued call starts; recheck under the IO lock.
+		const present: [string, number][] = [];
+		for (const [h] of confirmed) {
+			const object = await this.env.SHARDS.head(`shards/${lineage}/${h}`);
+			if (object) present.push([h, object.size]);
+		}
+		confirmed = present;
+		for (const op of ops) if (op.op === "put") op.manifest = await storeManifest(this.env.SHARDS, lineage, op.manifest);
 		// Shard registration, consistency checks and the ops share ONE transaction: a failed commit leaves nothing behind.
 		return this.runCommit(actor, (c) => {
 			for (const [h, n] of confirmed) this.sql.exec("INSERT OR IGNORE INTO shards_known(h,n) VALUES(?,?)", h, n);
@@ -228,12 +255,16 @@ export class DriveAuthority extends DurableObject<Env> {
 		});
 	}
 
-	restore(key: string, versionId: string, ifVersion: string | null, actor: string): Result<CommitResponse> {
+	restore(key: string, versionId: string, ifVersion: string | null, actor: string): Promise<Result<CommitResponse>> {
+		return this.withIO(() => this.restoreExclusive(key, versionId, ifVersion, actor));
+	}
+
+	private async restoreExclusive(key: string, versionId: string, ifVersion: string | null, actor: string): Promise<Result<CommitResponse>> {
 		if (!this.info()) return this.noDrive();
 		const v = this.getVersion(versionId);
 		if (!v || v.path !== key) return fail(404, "no_such_version", { path: key, versionId });
 		if (v.manifest === null) return fail(400, "not_restorable", { message: `version ${versionId} is a ${v.op}, not file content` });
-		const shards = JSON.parse(v.manifest) as [string, number][];
+		const shards = await loadManifest(this.env.SHARDS, this.getMeta("drive_id")!, v.manifest);
 		const op: NormOp = {
 			op: "restore",
 			key,
@@ -283,10 +314,7 @@ export class DriveAuthority extends DurableObject<Env> {
 	}
 
 	private putNode(c: CommitCtx, key: string, type: "file" | "folder", head: string, size: number, ctype: string | null, mtime: number): void {
-		this.sql.exec(
-			"INSERT OR REPLACE INTO nodes(path,type,head,size,ctype,mtime,seq,parent) VALUES(?,?,?,?,?,?,?,?)",
-			key, type, head, size, ctype, mtime, c.seq, parentOf(key),
-		);
+		this.tree.put(key, { type, head, size, ctype, mtime, seq: c.seq });
 	}
 
 	private precondition(op: { ifVersion: string | null; ifAbsent?: boolean }, node: NodeRow | undefined, ext: string): void {
@@ -345,16 +373,9 @@ export class DriveAuthority extends DurableObject<Env> {
 				this.precondition(op, node, ext);
 				if (!node || (node.type === "folder") !== op.isFolder) throw new Abort(fail(404, "no_such_path", { path: ext }));
 				const size = node.size ?? 0;
-				if (op.isFolder) {
-					const [lo, hi] = subtree(op.key);
-					this.checkSubtreeSize(lo, hi);
-					this.eachNode(lo, hi, (k) => {
-						this.newVersion(c, k.path, "delete", null, null, null, null);
-					});
-					this.sql.exec("DELETE FROM nodes WHERE path>=? AND path<?", lo, hi);
-				}
+				if (op.isFolder) this.checkSubtree(node, op.key, null);
 				const vid = this.newVersion(c, op.key, "delete", null, null, null, null);
-				this.sql.exec("DELETE FROM nodes WHERE path=?", op.key);
+				this.tree.detach(node.id);
 				this.logRow(c, ext, "delete", vid);
 				return { path: ext, versionId: vid, size: op.isFolder ? 0 : size };
 			}
@@ -367,25 +388,11 @@ export class DriveAuthority extends DurableObject<Env> {
 				if (this.getNode(op.to)) throw new Abort(fail(409, "path_conflict", { path: extTo }));
 				this.ensureParents(c, op.to);
 
-				const moveOne = (n: NodeRow, newKey: string): string => {
-					const old = n.head ? this.getVersion(n.head) : undefined;
-					const vid = this.newVersion(c, newKey, "rename", n.size ?? 0, old?.manifest ?? null, n.ctype, n.mtime);
-					this.putNode(c, newKey, n.type as "file" | "folder", vid, n.size ?? 0, n.ctype, n.mtime ?? c.ts);
-					this.newVersion(c, n.path, "delete", null, null, null, null);
-					return vid;
-				};
-				if (op.isFolder) {
-					const [lo, hi] = subtree(op.from);
-					this.checkSubtreeSize(lo, hi);
-					this.checkRenamedPathLengths(lo, hi, op.from, op.to);
-					// Move in key order, one bounded page at a time. The destination is disjoint from the source subtree.
-					this.eachNode(lo, hi, (k) => {
-						moveOne(k, op.to + k.path.slice(op.from.length));
-					});
-					this.sql.exec("DELETE FROM nodes WHERE path>=? AND path<?", lo, hi);
-				}
-				const vid = moveOne(src, op.to);
-				this.sql.exec("DELETE FROM nodes WHERE path=?", op.from);
+				if (op.isFolder) this.checkSubtree(src, op.from, op.to);
+				const old = src.head ? this.getVersion(src.head) : undefined;
+				const vid = this.newVersion(c, op.to, "rename", src.size ?? 0, old?.manifest ?? null, src.ctype, src.mtime);
+				this.newVersion(c, op.from, "delete", null, null, null, null);
+				this.tree.move(src.id, op.to, vid, c.seq);
 				// A rename is logged as a delete of the old path plus a rename of the new path.
 				this.logRow(c, extFrom, "delete", null);
 				this.logRow(c, extTo, "rename", vid);
@@ -394,38 +401,15 @@ export class DriveAuthority extends DurableObject<Env> {
 		}
 	}
 
-	/** Aborts the commit if the subtree [lo,hi) has more than MAX_SUBTREE_NODES nodes (bounded count). */
-	private checkSubtreeSize(lo: string, hi: string): void {
-		const n = this.sql
-			.exec<{ n: number }>("SELECT COUNT(*) AS n FROM (SELECT 1 FROM nodes WHERE path>=? AND path<? LIMIT ?)", lo, hi, MAX_SUBTREE_NODES + 1)
-			.one().n;
-		if (n > MAX_SUBTREE_NODES) throw new Abort(fail(400, "subtree_too_large", { limit: MAX_SUBTREE_NODES }));
-	}
-
-	/** Visits nodes in [lo,hi) in key order in bounded pages (keyset pagination; no toArray over the whole subtree). */
-	private eachNode(lo: string, hi: string, fn: (n: NodeRow) => void): void {
-		let after = "";
-		for (;;) {
-			const page = this.sql
-				.exec<NodeRow>("SELECT * FROM nodes WHERE path>=? AND path<? AND path>? ORDER BY path LIMIT ?", lo, hi, after, NODE_PAGE)
-				.toArray();
-			for (const n of page) fn(n);
-			if (page.length < NODE_PAGE) return;
-			after = page[page.length - 1]!.path;
+	private checkSubtree(root: NodeRow, from: string, to: string | null): void {
+		let count = 0;
+		for (const n of this.tree.descendants(root.id)) {
+			if (++count > MAX_SUBTREE_NODES) throw new Abort(fail(400, "subtree_too_large", { limit: MAX_SUBTREE_NODES }));
+			if (to !== null) {
+				const path = extPath(to + "/" + n.path, n.type === "folder");
+				if (utf8Len(path) > MAX_PATH_BYTES) throw new Abort(fail(400, "path_too_long", { path }));
+			}
 		}
-	}
-
-	/** Every descendant's new external path must stay within 1024 bytes; otherwise the whole commit aborts. */
-	private checkRenamedPathLengths(lo: string, hi: string, from: string, to: string): void {
-		const delta = utf8Len(to) - utf8Len(from);
-		if (delta <= 0) return;
-		const row = this.sql
-			.exec<{ path: string; type: string }>(
-				"SELECT path, type FROM nodes WHERE path>=? AND path<? AND LENGTH(CAST(path AS BLOB)) + (type='folder') + ? > ? LIMIT 1",
-				lo, hi, delta, MAX_PATH_BYTES,
-			)
-			.toArray()[0];
-		if (row) throw new Abort(fail(400, "path_too_long", { path: extPath(to + row.path.slice(from.length), row.type === "folder") }));
 	}
 
 	// ---------- reads ----------
@@ -456,9 +440,7 @@ export class DriveAuthority extends DurableObject<Env> {
 			const n = this.getNode(key);
 			if (!n || n.type !== "folder") return fail(404, "no_such_path");
 		}
-		const rows = this.sql
-			.exec<NodeRow>("SELECT * FROM nodes WHERE parent=? AND path>? ORDER BY path LIMIT ?", key, cursor ?? "", limit + 1)
-			.toArray();
+		const rows = this.tree.children(key, cursor, limit + 1);
 		const page = rows.slice(0, limit);
 		const more = rows.length > limit;
 		return ok({
@@ -473,7 +455,7 @@ export class DriveAuthority extends DurableObject<Env> {
 		});
 	}
 
-	manifest(key: string, versionId: string | null) {
+	async manifest(key: string, versionId: string | null) {
 		if (!this.info()) return this.noDrive();
 		let v: VersionRow | undefined;
 		if (versionId) {
@@ -487,7 +469,7 @@ export class DriveAuthority extends DurableObject<Env> {
 			if (!v) return fail(404, "no_such_path");
 		}
 		if (v.manifest === null) return fail(404, "no_such_version", { message: `version ${v.id} has no content (${v.op})` });
-		const shards = (JSON.parse(v.manifest) as [string, number][]).map(([h, n]) => ({ h, n }));
+		const shards = (await loadManifest(this.env.SHARDS, this.getMeta("drive_id")!, v.manifest)).map(([h, n]) => ({ h, n }));
 		return ok({ path: key, versionId: v.id, size: v.size ?? 0, contentType: v.ctype, mtimeMs: v.mtime, shards });
 	}
 
@@ -607,9 +589,24 @@ export class DriveAuthority extends DurableObject<Env> {
 		}
 	}
 
+	/** Internal RPC for operators/tests; also called by the shared alarm, never exposed over HTTP. */
+	gcStep() {
+		return this.withIO(async () => {
+			const lineage = this.getMeta("drive_id");
+			if (!lineage) return null;
+			const result = await new LineageGC(this.sql, this.env.SHARDS, lineage).step(this.headSeq(), Date.now(), this.env.ULS_GC_DELETE !== "1");
+			const next = Date.now() + (result.done ? GC_INTERVAL_MS : 1000);
+			this.setMeta("gc_next_at", String(next));
+			await this.scheduleAlarm(next, null);
+			return result;
+		});
+	}
+
 	async alarm(): Promise<void> {
 		const now = Date.now();
-		let nextAt = Infinity;
+		if (Number(this.getMeta("gc_next_at") ?? "Infinity") <= now) await this.gcStep();
+		const gcNext = Number(this.getMeta("gc_next_at") ?? "Infinity");
+		let nextAt = gcNext;
 		let open = 0;
 		let replaying = false;
 		const lastPing = (await this.ctx.storage.get<number>("lastPing")) ?? 0;
@@ -642,7 +639,10 @@ export class DriveAuthority extends DurableObject<Env> {
 				// closing
 			}
 		}
-		if (open === 0) return;
+		if (open === 0) {
+			if (Number.isFinite(gcNext)) await this.scheduleAlarm(gcNext, null);
+			return;
+		}
 		if (ping) await this.ctx.storage.put("lastPing", now);
 		const nextPing = (ping ? now : lastPing) + PING_INTERVAL_MS;
 		nextAt = Math.min(nextAt, replaying ? now + REPLAY_TICK_MS : nextPing);

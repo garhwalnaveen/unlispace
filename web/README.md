@@ -1,4 +1,4 @@
-# Unlispace web · M1
+# Unlispace web · M2
 
 A static Vite / React 19 / TypeScript SPA. All application files, dependencies, caches and build
 output live in this directory. Node 22.22+ and npm are recommended. No deployment is performed.
@@ -65,39 +65,81 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
   flow, mints a PKCE-bound code on an explicit button press, then opens `uls://auth/callback`.
   “Use another account” revokes the current session before returning to login.
 - `/`: organizations, trial days, drives, create, rename, exact-name confirmation for delete.
-  Plan-limit errors explain that additional drives require Teams; no invented billing route.
+  Plan-limit errors explain that additional drives require Teams; each organization links to Billing.
 - `/drives/:id/*`: root/folder listing, cursor-based Load more, breadcrumbs and file details.
   Version history has its own cursor pagination and is a panel (`?panel=versions`) backed by the data plane's `/versions` endpoint.
   Current and historical file downloads assemble shards in manifest order, checking sizes and
   SHA-256; progress reports received bytes. Files above 512 MiB direct users to the desktop app.
-  Finder links preserve the drive id and path. This browser is read-only.
-- `/settings`: profile, display-name editing and server-revoked sign-out.
+  Finder links preserve the drive id and path. Writable drives support file selection and drag-and-drop.
+  Uploads use FastCDC 2020 normalization level 1 (256 KiB / 2 MiB / 16 MiB), verified against both
+  Rust golden vectors. The uploader reads at most 16 MiB for chunking, hashes with WebCrypto,
+  probes `/shards/missing` in batches of 1000 hashes, and PUTs missing shards with three workers.
+  Progress counts prepared bytes, then uploaded or deduplicated bytes; shard PUT progress updates
+  after each successful PUT. Repeated hashes are uploaded once. Empty files commit an empty manifest.
+  The server's current stat supplies `ifVersion` for overwrites; absent paths use `ifAbsent`.
+  A 412 shows a conflict message without an unguarded retry. Failed transfers never commit.
+  New uploads create versions for matching names, as explained beside the file picker.
+  Read-only drive members do not see upload controls.
+- `/settings`: profile, display-name editing, server-revoked sign-out and access-key navigation.
+- `/settings/access-keys`: list metadata, create with organization/access/drive allowlist, reveal a
+  secret once, copy POSIX-quoted AWS environment variables, and explicitly confirm transitive revoke.
+  The secret disappears on close/navigation and is never written to browser storage.
+- `/orgs/:id/billing`: current plan, trial days, used/quota bytes, seats, storage add-ons, monthly or
+  annual checkout, paginated invoices, and the Dodo customer portal. Management controls and invoice
+  requests are limited to owners/admins. Checkout honors the catalog's availability flag. Final
+  prices are displayed by Dodo; the catalog currently provides no prices. Redirects require HTTPS.
 - Light/dark theme follows the OS initially, with a persistent manual toggle. Mobile layouts
   support 360 px. Native modal dialogs contain focus and Escape closes them. Inputs have labels,
   errors use live alerts, and status/progress updates are announced.
 
-## Session storage trade-off
+## Memory-only sessions and cookie migration
 
-Access tokens and user session data live only in memory. The rotating refresh token is kept in
-`localStorage` so sessions survive reloads. This is deliberately convenient but exposes the
-refresh credential to any script running on the same origin; XSS could steal it. Do not add
-untrusted scripts. A future cookie-based design would need a contract change.
+Access tokens, refresh tokens and user session data live only in `AuthStore` memory. Startup removes
+any legacy `unlispace.refreshToken` localStorage item without reusing it. Theme preference remains
+persistent. A reload/new tab can recover a session only from another live tab on the same origin via
+BroadcastChannel; closing all tabs requires signing in again. Nothing uses sessionStorage or IndexedDB
+for credentials. This reduces persistent credential exposure; same-origin XSS can still access a live
+session, including BroadcastChannel messages. It is not an HttpOnly boundary.
 
-A same-origin Web Lock serializes rotation and logout. BroadcastChannel distributes new access
-tokens to other tabs **without persisting them**, including when a new tab starts. Concurrent
-401s share the same refresh promise; tabs request the current access token inside the lock before
-rotating. Refresh happens 60 seconds before expiry and once on a 401. Network failures retain the
-refresh credential for retry; invalid refresh credentials clear the session in all tabs. Use a
-current browser with Web Locks and BroadcastChannel on HTTPS or localhost. If Web Locks is absent,
-refresh fails explicitly instead of risking refresh-token reuse and session-family revocation.
+A same-origin Web Lock serializes rotation and logout. Each rotation asks live peers for their latest
+in-memory session while holding the lock, preventing concurrent tabs from reusing an old refresh
+token. Concurrent 401s share one refresh promise. Refresh happens one minute before expiry and once
+on a 401. Network failures retain credentials in memory for retry; invalid refresh clears all tabs.
+Session-family tombstones reject delayed pre-logout broadcasts; in-flight responses only apply if
+the refresh token has not changed. Current browsers with Web Locks and BroadcastChannel are required
+for sharing; without BroadcastChannel a single tab works, but reload cannot recover its session.
 
-## Contract notes
+**HttpOnly-cookie migration (requires API-agent work):** the API should issue the rotating refresh
+credential with `Set-Cookie: ...; HttpOnly; Secure; SameSite=Lax; Path=/auth`, use a host-only cookie,
+and stop returning it in JSON for browser OTP/handoff/refresh. Keep the desktop JSON/Keychain contract
+separate. Browser refresh/logout then send `credentials: "include"`, with no refresh token in their
+request body. Credentialed CORS must allow the exact web origin and the API must verify Origin/CSRF
+for mutating cookie-authenticated requests. Coordinate SameSite behavior if web/API are ever on
+separate sites; do not silently weaken cookie settings. Remove refresh credentials from channel
+messages after that migration; continue sharing access tokens/rotation notifications and the Web
+Lock. Cookie expiry/reuse detection and logout must clear the cookie. Test reload, cross-tab races,
+logout, expired cookies and CSRF before enabling durable browser sessions. This task changes no
+backend auth contract.
 
-`m1-contract.md` is normative over the broader product design: M1 uses the M0 path-based `/v0`
-data-plane reads and bearer-authorized shard GETs, rather than the product design's future
-node-based APIs or `/_blocks` presigning. Billing, keys, memberships, invitations, uploads and
-restore controls are outside this M1 web task. No extra endpoints are invented.
+## Contract notes and verification limits
 
-No blocking endpoint gaps were found. M1's `Org.role` union excludes `viewer` although the drive-token
-authorization prose mentions it; the client follows the declared union, restricts lifecycle UI
-to owners/admins, and always requests a read token. The server remains the authority for access.
+M1/M0's path-based `/v0/drives/{id}` routes remain normative for uploads and downloads. Read and
+write grants are cached separately; only upload operations request write access. Browsers set
+`Content-Length` for typed-array PUT bodies; application code must not set this forbidden header.
+Data-plane CORS must allow the web origin, OPTIONS, GET/POST/PUT, Authorization and Content-Type,
+including error responses. See `NEEDS.md` for the current integration gap.
+
+M2 requests follow task 06 plus the API agent's implementation (`access-keys.ts`, `billing.ts`,
+`billing-catalog.ts`, `dodo.ts`): key creation uses `workspaceId`; checkout uses `plan`; billing returns
+`quotaBytes` and `state`; invoice pages return `paymentId`, ISO `createdAt`, minor-unit `amount` and
+`nextPage`. There are no invoice download URLs in the current response. The web client isolates
+these shapes in `src/m2.ts`. No payment or storage calls run against external services in tests.
+
+Tests cover both Rust FastCDC fixtures including hashes, deduplication, empty uploads, write-token
+use, concurrency/failure handling, guarded overwrites, 412 conflicts, drag-and-drop and picker flows,
+read-only controls, one-time key reveal/copy/revoke, checkout/portal requests, invoices, and memory-only
+cross-tab auth. The test suite uses one worker to limit shared-machine load. A 15-second test deadline
+accommodates existing UI tests under that load; golden fixtures have a 30-second deadline.
+
+No live Worker/R2 upload, Dodo checkout/portal, cookie migration, deployed CORS, or visual browser
+verification is claimed. No deployment is performed.

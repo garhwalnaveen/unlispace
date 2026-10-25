@@ -23,11 +23,33 @@ export function redirect(location: string): Response {
 
 const MAX_BODY = 64 * 1024;
 
-export async function readJson(req: Request): Promise<Record<string, unknown>> {
+export async function readText(req: Request | Response, max = MAX_BODY): Promise<string> {
 	const len = Number(req.headers.get("content-length") ?? "0");
-	if (len > MAX_BODY) throw new HttpError(413, "too_large");
-	const text = await req.text();
-	if (text.length > MAX_BODY) throw new HttpError(413, "too_large");
+	if (len > max) throw new HttpError(413, "too_large");
+	if (!req.body) return "";
+	const reader = req.body.getReader();
+	const decoder = new TextDecoder();
+	let text = "";
+	let bytes = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			bytes += value.byteLength;
+			if (bytes > max) {
+				await reader.cancel();
+				throw new HttpError(413, "too_large");
+			}
+			text += decoder.decode(value, { stream: true });
+		}
+		return text + decoder.decode();
+	} finally {
+		reader.releaseLock();
+	}
+}
+
+export async function readJson(req: Request): Promise<Record<string, unknown>> {
+	const text = await readText(req);
 	let v: unknown;
 	try {
 		v = JSON.parse(text || "{}");

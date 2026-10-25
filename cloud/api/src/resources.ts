@@ -3,6 +3,7 @@ import { HttpError, json, readJson, str } from "./http";
 import { PLACEMENTS } from "./env";
 import { mintDriveToken, type Authed } from "./session";
 import { newDriveId, provisionDrive } from "./users";
+import { entitledDriveAccess } from "./entitlements";
 
 type Role = "owner" | "admin" | "member" | "viewer";
 type Access = "read" | "write" | "admin";
@@ -129,7 +130,7 @@ export async function driveToken(ctx: Ctx, a: Authed, driveId: string): Promise<
 	const want = body.access ?? "write";
 	if (want !== "read" && want !== "write") throw new HttpError(400, "bad_request", "access must be read or write");
 	// Cap at the caller's role: viewer = read, everyone else = write (admin is reserved).
-	const access: Access = d.role === "viewer" ? "read" : want;
+	const access = await entitledDriveAccess(ctx, d.org_id, d.role === "viewer" ? "read" : want);
 	const { token, expiresAt } = await mintDriveToken(ctx, { sub: a.userId, sid: a.sid, org: d.org_id, drives: [{ id: d.id, access }] });
 	return json({ token, expiresAt, endpoint: ctx.env.ULS_DATA_ENDPOINT, driveId: d.id });
 }

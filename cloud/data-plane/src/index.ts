@@ -1,4 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { getShard, signBlocks, serveBlock } from "./blocks";
+import { readStreamCommit } from "./stream-commit";
 import { DriveAuthority, EXP_HEADER } from "./drive";
 import { ACCESS_RANK, verifyDriveToken, type Access } from "./jwt";
 import { PLACEMENTS, type Fail, type Placement } from "./types";
@@ -175,46 +177,6 @@ async function putShard(request: Request, env: Env, stub: DriveStub, driveId: st
 	return json({ hash, size, stored: created }, created ? 201 : 200);
 }
 
-async function getShard(request: Request, env: Env, driveId: string, hash: string): Promise<Response> {
-	const rangeHeader = request.headers.get("Range");
-	const key = shardKey(driveId, hash);
-	const headers = new Headers({
-		"Cache-Control": "public, max-age=31536000, immutable",
-		ETag: `"${hash}"`,
-		"Accept-Ranges": "bytes",
-		"Content-Type": "application/octet-stream",
-	});
-	if (!rangeHeader) {
-		const obj = await env.SHARDS.get(key);
-		if (!obj) return err(404, "no_such_shard");
-		headers.set("Content-Length", String(obj.size));
-		return new Response(obj.body, { status: 200, headers });
-	}
-	const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
-	if (!m || (m[1] === "" && m[2] === "")) return err(416, "bad_range");
-	const head = await env.SHARDS.head(key);
-	if (!head) return err(404, "no_such_shard");
-	const size = head.size;
-	let start: number;
-	let end: number;
-	if (m[1] === "") {
-		const suffix = Number(m[2]);
-		start = Math.max(0, size - suffix);
-		end = size - 1;
-	} else {
-		start = Number(m[1]);
-		end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
-	}
-	if (start >= size || start > end) {
-		return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
-	}
-	const obj = await env.SHARDS.get(key, { range: { offset: start, length: end - start + 1 } });
-	if (!obj) return err(404, "no_such_shard");
-	headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
-	headers.set("Content-Length", String(end - start + 1));
-	return new Response(obj.body, { status: 206, headers });
-}
-
 /** Returns hashes confirmed present in R2 (by HEAD, in parallel) among `hashes`, with sizes. */
 async function headAll(env: Env, driveId: string, hashes: string[]): Promise<[string, number][]> {
 	const out: [string, number][] = [];
@@ -230,10 +192,11 @@ async function headAll(env: Env, driveId: string, hashes: string[]): Promise<[st
 
 // ---------- routing ----------
 
-async function handle(request: Request, env: Env): Promise<Response> {
+async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 	const url = new URL(request.url);
 	const path = url.pathname;
 	if (path === "/healthz") return json({ ok: true });
+	if (path.startsWith("/_blocks/")) return serveBlock(request, env, ctx, (drive) => stubFor(env, drive).describe());
 
 	// Route first, so auth knows what is being asked for (and the query token is limited to the watch upgrade).
 	const m = /^\/v0\/drives\/([^/]+)(?:\/(.*))?$/.exec(path);
@@ -316,9 +279,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
 	// commit / restore
 	if (rest === "commit") {
-		const body = await readJson(request, MAX_COMMIT_BYTES);
+		const streamed = request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() === "application/x-ndjson";
+		const body = streamed ? null : await readJson(request, MAX_COMMIT_BYTES);
 		if (body instanceof Response) return body;
-		const ops = parseOps(body);
+		const ops = streamed ? await readStreamCommit(request) : parseOps(body);
 		if (!Array.isArray(ops)) return failResponse(ops);
 		const wanted = new Set<string>();
 		for (const op of ops) if (op.op === "put") for (const [h] of op.shards) wanted.add(h);
@@ -350,7 +314,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
 		}
 		if (rest === "manifest") {
 			const r = await stub.manifest(p.key, url.searchParams.get("versionId"));
-			return r.ok ? json(r.data) : failResponse(r);
+			if (!r.ok) return failResponse(r);
+			if (!env.ULS_BLOCK_KEY) return err(503, "block_signing_unavailable");
+			return json({ ...r.data, ...await signBlocks(url.origin, driveId, r.data.shards, env.ULS_BLOCK_KEY) });
 		}
 		const limit = intParam(url, "limit", 1000, 1, 1000);
 		if (limit === null) return err(400, "bad_request", "limit must be a positive integer");
@@ -424,9 +390,9 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
 }
 
 export default {
-	async fetch(request, env): Promise<Response> {
+	async fetch(request, env, ctx): Promise<Response> {
 		try {
-			return await handle(request, env);
+			return await handle(request, env, ctx);
 		} catch (e) {
 			console.error("unhandled", e);
 			return err(500, "internal", e instanceof Error ? e.message : "unknown");

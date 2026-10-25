@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)/Unlispace"
+swift build -c release "$@"
+BIN="$(swift build -c release --show-bin-path "$@")/Unlispace"
 
 APP="$ROOT/build/Unlispace.app"
 rm -rf "$APP"

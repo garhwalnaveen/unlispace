@@ -1,11 +1,13 @@
 import type { AppEnv } from "./env";
 import type { EmailSender } from "./email";
 import { createUlid } from "./ulid";
+import type { DodoPayments } from "./dodo";
 
 export interface Deps {
 	now?: () => number;
 	fetch?: typeof fetch;
 	email?: EmailSender;
+	dodo?: DodoPayments;
 }
 
 export interface Ctx {
@@ -15,6 +17,7 @@ export interface Ctx {
 	now: number;
 	fetch: typeof fetch;
 	email: EmailSender;
+	dodo?: DodoPayments;
 }
 
 const gen = createUlid();

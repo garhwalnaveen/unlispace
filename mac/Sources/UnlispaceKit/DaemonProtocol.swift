@@ -67,6 +67,18 @@ public struct TransferInfo: Codable, Sendable, Equatable, Identifiable {
     }
 
     public var isFinished: Bool { status == .done || status == .failed }
+
+    public var progress: Double? {
+        guard bytesTotal > 0 else { return nil }
+        return min(1, max(0, Double(bytesDone) / Double(bytesTotal)))
+    }
+}
+
+/// Proposed wire event; see mac/NEEDS.md. `copy` is the preserved local edit.
+public struct ConflictEvent: Codable, Sendable, Equatable {
+    public var driveId: String
+    public var path: String
+    public var copy: String
 }
 
 public struct ChangeEvent: Codable, Sendable, Equatable {
@@ -101,6 +113,7 @@ public enum DaemonEvent: Sendable, Equatable {
     case transfer(TransferInfo)
     case change(ChangeEvent)
     case state(StateEvent)
+    case conflict(ConflictEvent)
     case unknown(name: String)
 }
 
@@ -167,6 +180,7 @@ public enum DaemonCodec {
             case "transfer": return .event(.transfer(try data.decode(TransferInfo.self)))
             case "change": return .event(.change(try data.decode(ChangeEvent.self)))
             case "state": return .event(.state(try data.decode(StateEvent.self)))
+            case "conflict": return .event(.conflict(try data.decode(ConflictEvent.self)))
             default: return .event(.unknown(name: name))
             }
         }

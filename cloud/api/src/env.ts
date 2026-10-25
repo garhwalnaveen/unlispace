@@ -25,4 +25,12 @@ export interface AppEnv {
 	RESEND_API_KEY?: string;
 	GOOGLE_CLIENT_ID?: string;
 	GOOGLE_CLIENT_SECRET?: string;
+	/** JSON object of version character -> base64-encoded master (at least 32 bytes). */
+	ULS_ACCESS_KEY_MASTERS?: string;
+	ULS_ACCESS_KEY_VERSION?: string;
+	DODO_PAYMENTS_API_KEY?: string;
+	DODO_PAYMENTS_WEBHOOK_KEY?: string;
+	DODO_PAYMENTS_ENVIRONMENT?: "test_mode" | "live_mode";
+	/** JSON BillingProducts: recurring seat product IDs plus recurring storage addon IDs. */
+	DODO_PRODUCTS?: string;
 }

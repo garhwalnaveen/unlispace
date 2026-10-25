@@ -11,6 +11,7 @@ import {
 
 export const REFRESH_KEY = "unlispace.refreshToken";
 interface MemorySession {
+  familyId: string;
   accessToken: string;
   expiresAt: number;
   user: User;
@@ -23,7 +24,7 @@ interface AuthState {
 type ChannelMessage =
   | { type: "session"; session: MemorySession; refreshToken: string }
   | { type: "request" }
-  | { type: "logout" };
+  | { type: "logout"; familyId: string | null };
 
 export class AuthStore {
   private memory: MemorySession | null = null;
@@ -33,34 +34,31 @@ export class AuthStore {
   private refreshing: Promise<void> | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private channel: BroadcastChannel | null;
+  private revokedFamilies = new Set<string>();
   readonly api = new Api(<T>(path: string, init?: RequestInit) =>
     this.request<T>(path, init),
   );
 
   constructor(
-    private storage: Storage = localStorage,
+    storage: Storage = localStorage,
     channel: BroadcastChannel | null = typeof BroadcastChannel === "undefined"
       ? null
       : new BroadcastChannel("unlispace.auth"),
   ) {
+    // Discard legacy persisted credentials; never read them back into a session.
+    storage.removeItem(REFRESH_KEY);
     this.channel = channel;
     if (channel)
       channel.onmessage = ({ data }: MessageEvent<ChannelMessage>) => {
-        if (
-          data.type === "session" &&
-          this.storage.getItem(REFRESH_KEY) === data.refreshToken
-        )
-          this.apply(data.session, data.refreshToken);
-        if (data.type === "logout" && !this.storage.getItem(REFRESH_KEY))
+        if (data.type === "session") this.apply(data.session, data.refreshToken);
+        if (data.type === "logout") {
+          if (data.familyId) this.revokedFamilies.add(data.familyId);
           this.clear(false);
-        if (
-          data.type === "request" &&
-          this.memory &&
-          this.storage.getItem(REFRESH_KEY)
-        )
-          this.broadcast();
+        }
+        if (data.type === "request") this.broadcast();
       };
   }
+
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -73,6 +71,7 @@ export class AuthStore {
     this.listeners.forEach((listener) => listener());
   }
   private apply(session: MemorySession, refreshToken: string) {
+    if (this.revokedFamilies.has(session.familyId)) return;
     this.memory = session;
     this.memoryRefreshToken = refreshToken;
     this.emit({ user: session.user, ready: true, error: null });
@@ -85,18 +84,18 @@ export class AuthStore {
     );
   }
   private broadcast() {
-    const refreshToken = this.storage.getItem(REFRESH_KEY);
-    if (this.memory && refreshToken && refreshToken === this.memoryRefreshToken)
+    const refreshToken = this.memoryRefreshToken;
+    if (this.memory && refreshToken)
       this.channel?.postMessage({
         type: "session",
         session: this.memory,
         refreshToken,
       } satisfies ChannelMessage);
   }
-  accept = (session: Session) => {
-    this.storage.setItem(REFRESH_KEY, session.refreshToken);
+  accept = (session: Session, familyId: string = crypto.randomUUID()) => {
     this.apply(
       {
+        familyId,
         accessToken: session.accessToken,
         expiresAt: Date.now() + session.expiresIn * 1000,
         user: session.user,
@@ -105,42 +104,40 @@ export class AuthStore {
     );
     this.broadcast();
   };
+  private async requestSession() {
+    if (!this.channel) return;
+    this.channel.postMessage({ type: "request" } satisfies ChannelMessage);
+    await new Promise((resolve) => setTimeout(resolve, 75));
+  }
   async start() {
-    if (!this.storage.getItem(REFRESH_KEY)) {
+    await this.requestSession();
+    if (!this.memoryRefreshToken) {
       this.emit({ user: null, ready: true, error: null });
       return;
     }
-    try {
-      await this.refresh();
-    } catch {
-      /* The snapshot carries the recoverable error. */
-    }
+    try { await this.refresh(); } catch { /* Snapshot carries the recoverable error. */ }
   }
   refresh(rejectedToken?: string): Promise<void> {
     if (this.refreshing) return this.refreshing;
     const rotate = async () => {
-      if (!this.storage.getItem(REFRESH_KEY))
-        throw new ApiError(401, "invalid_refresh");
-      // The lock protects rotation; BroadcastChannel shares the resulting in-memory access token.
-      if (this.channel) {
-        this.channel.postMessage({ type: "request" } satisfies ChannelMessage);
-        await new Promise((resolve) => setTimeout(resolve, 75));
-      }
+      // Every rotation asks peers inside the lock, so waiters use the latest token.
+      await this.requestSession();
+      if (!this.memoryRefreshToken) throw new ApiError(401, "invalid_refresh");
       if (
         this.memory &&
-        this.memoryRefreshToken === this.storage.getItem(REFRESH_KEY) &&
         this.memory.expiresAt > Date.now() + 60_000 &&
         this.memory.accessToken !== rejectedToken
       )
         return;
-      const refreshToken = this.storage.getItem(REFRESH_KEY);
+      const refreshToken = this.memoryRefreshToken;
       if (!refreshToken) throw new ApiError(401, "invalid_refresh");
+      const familyId = this.memory?.familyId;
       const session = await publicPost<Session>("/auth/refresh", {
         refreshToken,
       });
       // Signing out while the network request was pending must not resurrect a session.
-      if (this.storage.getItem(REFRESH_KEY) === refreshToken)
-        this.accept(session);
+      if (this.memoryRefreshToken === refreshToken)
+        this.accept(session, familyId);
     };
     this.refreshing = (async () => {
       try {
@@ -186,19 +183,21 @@ export class AuthStore {
   async logout() {
     // Logout and rotation share a lock so logout always revokes the latest refresh token.
     await navigator.locks.request("unlispace.auth.refresh", async () => {
-      const refreshToken = this.storage.getItem(REFRESH_KEY);
+      await this.requestSession();
+      const refreshToken = this.memoryRefreshToken;
       if (refreshToken) await publicPost("/auth/logout", { refreshToken });
       this.clear();
     });
   }
   private clear(broadcast = true) {
+    const familyId = this.memory?.familyId || null;
+    if (familyId) this.revokedFamilies.add(familyId);
     clearTimeout(this.timer);
     this.memory = null;
     this.memoryRefreshToken = null;
-    this.storage.removeItem(REFRESH_KEY);
     this.emit({ user: null, ready: true, error: null });
     if (broadcast)
-      this.channel?.postMessage({ type: "logout" } satisfies ChannelMessage);
+      this.channel?.postMessage({ type: "logout", familyId } satisfies ChannelMessage);
   }
   dispose() {
     clearTimeout(this.timer);

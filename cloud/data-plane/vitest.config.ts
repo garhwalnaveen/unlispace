@@ -7,7 +7,7 @@ export default defineConfig({
 			wrangler: { configPath: "./wrangler.jsonc" },
 			// Fixed test token so the suite doesn't depend on a local .dev.vars file.
 			// ULS_JWT_PUBLIC_JWKS is set per test file (tests generate their own Ed25519 keypair).
-			miniflare: { bindings: { ULS_DEV_TOKEN: "uls-dev-local-token", ULS_JWT_PUBLIC_JWKS: '{"keys":[]}' } },
+			miniflare: { bindings: { ULS_DEV_TOKEN: "uls-dev-local-token", ULS_BLOCK_KEY: "test-only-block-signing-key", ULS_JWT_PUBLIC_JWKS: '{"keys":[]}' } },
 		}),
 	],
 	test: {

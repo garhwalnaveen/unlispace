@@ -28,7 +28,7 @@ export interface Drive {
 export interface Org {
   id: string;
   name: string;
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "member" | "viewer";
   tier: "individual" | "teams";
   trialEndsAt: number | null;
   drives: Drive[];
@@ -110,7 +110,7 @@ export async function publicPost<T>(path: string, body: unknown): Promise<T> {
 }
 export type AuthRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 export class Api {
-  constructor(private request: AuthRequest) {}
+  constructor(readonly request: AuthRequest) {}
   me = () => this.request<Profile>("/me");
   updateMe = (displayName: string) =>
     this.request<Profile>("/me", this.json("PATCH", { displayName }));
@@ -131,10 +131,10 @@ export class Api {
     this.request<{ ok: true }>(`/drives/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
-  driveToken = (id: string) =>
+  driveToken = (id: string, access: "read" | "write" = "read") =>
     this.request<DriveToken>(
       `/drives/${encodeURIComponent(id)}/token`,
-      this.json("POST", { access: "read" }),
+      this.json("POST", { access }),
     );
   desktopCode = (state: string, codeChallenge: string) =>
     this.request<{ code: string }>(
@@ -150,29 +150,35 @@ export class Api {
   }
 }
 
+export interface PutOperation {
+  op: "put"; path: string; ifVersion?: string; ifAbsent?: boolean;
+  size: number; contentType: string; mtimeMs: number; shards: { h: string; n: number }[];
+}
+
 export class DriveApi {
   private grant: DriveToken | null = null;
   private minting: Promise<DriveToken> | null = null;
   constructor(
     private api: Api,
     readonly id: string,
+    private access: "read" | "write" = "read",
   ) {}
   private async token(): Promise<DriveToken> {
     if (this.grant && this.grant.expiresAt > Date.now() + 30_000)
       return this.grant;
     this.minting ??= this.api
-      .driveToken(this.id)
+      .driveToken(this.id, this.access)
       .then((grant) => (this.grant = grant))
       .finally(() => {
         this.minting = null;
       });
     return this.minting;
   }
-  private async fetch(path: string): Promise<Response> {
+  private async fetch(path: string, init: RequestInit = {}): Promise<Response> {
     const send = (grant: DriveToken) =>
       fetch(
         `${grant.endpoint.replace(/\/$/, "")}/v0/drives/${encodeURIComponent(this.id)}/${path}`,
-        { headers: { Authorization: `Bearer ${grant.token}` } },
+        { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), Authorization: `Bearer ${grant.token}` } },
       );
     const grant = await this.token();
     let response = await send(grant);
@@ -203,6 +209,18 @@ export class DriveApi {
     if (!response.ok) await readResponse(response);
     return response.arrayBuffer();
   }
+  missing = (hashes: string[]) => this.send<{ missing: string[] }>("shards/missing", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hashes }),
+  });
+  putShard = (hash: string, body: Uint8Array<ArrayBuffer>) => this.send(`shards/${hash}`, {
+    method: "PUT", body, headers: { "Content-Type": "application/octet-stream" },
+  });
+  commit = (op: PutOperation) => this.send<{ seq: number }>("commit", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ops: [op] }),
+  });
+  private async send<T>(path: string, init: RequestInit): Promise<T> {
+    return readResponse<T>(await this.fetch(path, init));
+  }
   private async json<T>(path: string): Promise<T> {
     return readResponse<T>(await this.fetch(path));
   }
@@ -220,6 +238,14 @@ export function errorMessage(error: unknown): string {
       invalid_refresh: "Your session has expired. Please sign in again.",
       not_configured:
         "Google sign-in is not configured on this server. Please use email.",
+      precondition_failed: "This file changed while you were uploading. Your upload was not committed. Refresh the folder and try again.",
+      quota_exceeded: "This organization has reached its storage quota. Open Billing to add storage.",
+      forbidden: "You do not have permission to perform this action.",
+      keys_not_configured: "Access keys are not configured on this server yet.",
+      billing_not_configured: "Billing is not configured on this server yet. Please try again later.",
+      no_billing_customer: "A billing portal will be available after your first checkout.",
+      subscription_exists: "You already have a subscription. Use Manage subscription to change it.",
+      seats_below_members: "Choose enough seats for all current organization members.",
       no_such_path: "This item could not be found. It may have moved.",
       no_such_drive: "This drive is no longer available.",
     };

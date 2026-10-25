@@ -11,6 +11,15 @@ bash scripts/bundle.sh      # produces build/Unlispace.app, ad-hoc signed
 ```
 With full Xcode, plain `swift test` works. Under the CLT only, `scripts/test.sh` adds the
 framework search paths for Swift Testing (XCTest is not shipped with the CLT).
+The test gate requires an existing `../engine/target/debug/ulsd`. `DaemonIntegrationTests`
+spawns that binary with an isolated HOME under `/tmp`, exercises the real socket client
+(`status`, `drives.list`, `config.set`, errors and cache-cap persistence), then stops it and
+deletes its state. It does not sign in, mount drives, or contact remote services.
+
+If the host cannot start SwiftPM's nested `sandbox-exec`, use `swift build -c release
+--disable-sandbox`, `bash scripts/test.sh --disable-sandbox`, and `bash scripts/bundle.sh
+--disable-sandbox`. Both scripts forward arguments to SwiftPM. Build artifacts stay under
+`mac/.build` and `mac/build`.
 
 `bundle.sh` places no `ulsd` binary unless you set `ULSD_BIN=/path/to/ulsd`; without it the app
 reports "engine not installed".
@@ -52,10 +61,25 @@ it ends at the first successful hand-off. If the daemon rejects the session (`un
   not exist, its nearest existing parent opens.
 
 ## Menu and Settings
+First launch opens a setup window: sign in, choose real daemon drives, then read the
+Network Volumes privacy explanation before mounting. “Set up later” leaves setup incomplete;
+the window returns next launch and can always be opened from the menu or Settings. The app
+starts polling at launch, independently of opening the menu. Setup never registers the engine
+or login items automatically.
+
 Signed out: "Sign in to Unlispace". Signed in: email (`auth.status`), engine state, live
 `transfer` / `change` / `state` events, drives with mount state (`drives.list`), mount/unmount,
 "Sign out" (`auth.signOut`). Settings: account, cache cap (`config.set cacheCapBytes`), launch at
 login, Advanced -> Developer (API endpoint override, M0 dev endpoint + token via `config.set`).
+The menu uses a native window-style popover; “Transfers” opens individual progress bars,
+updated by `transfer` events. Unknown totals show indeterminate progress. Finished transfers
+leave the list; failures show an error in the menu. Native semantic colors follow light/dark
+appearance; controls and progress bars have VoiceOver labels and values.
+
+The proposed `conflict` event is rendered in the menu even when notifications are denied.
+Setup and Settings offer an explicit “Enable conflict notifications…” action. Authorized
+alerts use UserNotifications, including while the app is foregrounded. See `NEEDS.md` for
+the daemon event proposal; the real daemon does not yet emit it.
 
 Logging: all error text goes through `LogFormat` (`scrub`/`describe`/`url`); secret-bearing types
 redact in `description`. Tokens, codes and verifiers are never logged.
@@ -79,10 +103,12 @@ Targets: `UnlispaceKit` (all testable logic), `Unlispace` (UI shell), tests in `
 Protocol: see `DAEMON-PROTOCOL.md`.
 
 ## What is mocked or untested
-- `MockDaemonClient` is used whenever the socket is absent (two demo drives, simulated mount and
-  auth.*; `auth.set` always "succeeds" as `demo@unlispace.local`).
-- The real socket client is unit-tested only for the missing-socket case and codec; it has not run
-  against a real `ulsd`. The browser sign-in has not run against a real server.
+- `MockDaemonClient` is used internally whenever the socket is absent; its demo drives and
+  transfers are hidden in the UI. Onboarding cannot mount mock drives.
+- The real socket client has a separate integration test against the local debug `ulsd`.
+  Browser sign-in has not run against a real server.
+- Onboarding, light/dark layout, keyboard/VoiceOver behavior and notification authorization or
+  delivery need manual review. The app was not launched for this task.
 - SMAppService registration and launch-at-login were not exercised (rules forbade it).
 - `uls://open` Finder opening is not exercised in tests (the parser, validator and path resolver are).
 - Finder Sync extension is not built (needs Xcode); see `FinderSync/README.md`.

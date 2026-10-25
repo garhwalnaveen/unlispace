@@ -1,8 +1,15 @@
-# Unlispace control-plane API (M1)
+# Unlispace control-plane API (M1 + M2)
 
 Worker `unlispace-api`: auth (email OTP, Google OIDC, desktop PKCE), sessions, orgs, drives, and drive-token minting.
 Implements `docs/design/m1-contract.md`. Storage is D1 (`DB`); drive lifecycle goes to the data plane through the
 `DATA_PLANE` service binding (`DataPlaneAdmin` entrypoint).
+
+M2 adds versioned HMAC-derived S3 access keys with parent scopes/transitive revocation and Dodo
+Payments billing (public catalog, checkout, billing state, invoices, portal and signed webhooks).
+The complete request/response and configuration contracts are in [M2-API.md](M2-API.md);
+cross-owner integration needs and verification limits are in [NEEDS.md](NEEDS.md).
+Expired trials receive read-only drive tokens; over-quota write-token requests return
+`403 quota_exceeded`. Existing tokens retain the M1 lifetime.
 
 ## Run locally
 
@@ -23,6 +30,11 @@ If `npm install` crashes with "edgesOut", install the devDependencies in groups.
 Vars in `wrangler.jsonc`: `ULS_ISSUER`, `ULS_DATA_ENDPOINT`, `ULS_WEB_ORIGIN` (local values; override for production).
 Secrets (`.dev.vars` locally, `wrangler secret put` in production): `ULS_JWT_PRIVATE_JWK`, `ULS_JWT_PUBLIC_JWKS`,
 optional `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (without them `/auth/google/*` is `501 not_configured`), `RESEND_API_KEY`.
+M2 key secrets: `ULS_ACCESS_KEY_MASTERS` (JSON version → base64 master, each at least 32 bytes);
+`ULS_ACCESS_KEY_VERSION` selects the issuing version, default `1`.
+Billing: `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, explicit
+`DODO_PAYMENTS_ENVIRONMENT=test_mode|live_mode`, and `DODO_PRODUCTS` (catalog JSON; see M2 contract).
+Catalog remains public without credentials, with `checkoutAvailable:false`.
 `ULS_DEV_LOG_OTP=1` logs OTP codes instead of emailing them (dev only). `ULS_EMAIL_FROM` sets the sender (default `login@unlispace.com`).
 
 Email sender order: console (dev flag), Resend (`RESEND_API_KEY`), Cloudflare Email Service `send_email` binding `EMAIL`.
@@ -37,4 +49,10 @@ The sending domain must be onboarded first (`npx wrangler email sending enable <
 - `src/session.ts` access/drive token minting, refresh rotation + reuse detection, bearer auth
 - `src/otp.ts`, `src/google.ts`, `src/onetime.ts`, `src/ratelimit.ts`, `src/email.ts`
 - `src/users.ts` first sign-in provisioning; `src/resources.ts` me/orgs/drives/token
-- `migrations/0001_init.sql`; `test/` suite
+- `src/access-keys.ts` key scopes, derivation, revocation and internal verification/last-use helpers
+- `src/billing.ts`, `src/billing-catalog.ts`, `src/entitlements.ts` billing routes and token entitlements
+- `src/dodo.ts` injectable provider interface, REST adapter and Standard Webhooks verification
+- `migrations/0001_init.sql`, `migrations/0002_keys_billing.sql`; `test/` suite (all external I/O mocked)
+
+Gate (from this directory): `npx tsc --noEmit && npm test`. For a sandbox that cannot write the
+user's global Wrangler log folder, set `WRANGLER_LOG_PATH=./.wrangler/logs` for the gate.

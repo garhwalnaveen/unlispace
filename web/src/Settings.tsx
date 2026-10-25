@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "./context";
 import { ErrorNotice, Loading, useLoad } from "./ui";
 export function Settings() {
@@ -45,6 +46,7 @@ export function Settings() {
           <p className="muted">A few details to make this space yours.</p>
         </div>
       </header>
+      <p><Link to="/settings/access-keys">Manage access keys →</Link></p>
       <section className="panel settings">
         <ErrorNotice error={error} />
         {Boolean(error) && <button onClick={reload}>Try again</button>}

@@ -31,6 +31,9 @@ struct SettingsView: View {
                     .onChange(of: cacheGB) { _, v in AppSettings.cacheCapGB = v; model.pushCacheCap() }
             }
             Section("General") {
+                Button("Set up Unlispace…") { AppDelegate.showOnboarding() }
+                Button("Enable conflict notifications…") { Task { await model.enableConflictNotifications() } }
+                if let message = model.notificationMessage { Text(message).foregroundStyle(.secondary) }
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, v in
                         do { try LaunchAtLogin.set(v) }

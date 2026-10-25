@@ -161,11 +161,12 @@ export function Home() {
                     ` · ${days > 0 ? `${days} trial day${days === 1 ? "" : "s"} remaining` : "Trial ended"}`}
                 </p>
               </div>
+              <div className="actions"><Link to={`/orgs/${encodeURIComponent(org.id)}/billing`}>Billing</Link>
               {canManage && (
                 <button onClick={() => setAction({ kind: "create", org })}>
                   + New drive
                 </button>
-              )}
+              )}</div>
             </div>
             <div className="drives-grid">
               {drives.map((drive) => (

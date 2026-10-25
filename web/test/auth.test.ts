@@ -62,7 +62,7 @@ describe("rotating sessions", () => {
       { id: "u_test" },
       { id: "u_test" },
     ]);
-    expect(localStorage.getItem(REFRESH_KEY)).toBe("rt_new");
+    expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
     expect(
       fetcher.mock.calls.filter(([url]) =>
         String(url).endsWith("/auth/refresh"),
@@ -71,13 +71,14 @@ describe("rotating sessions", () => {
   });
 
   it("shares a refresh and in-memory access token across two tabs", async () => {
-    localStorage.setItem(REFRESH_KEY, "rt_old");
     const first = store(new TestChannel());
     const second = store(new TestChannel());
     const fetcher = vi.fn(async (_url: string, _init?: RequestInit) =>
       json(rotated),
     );
     vi.stubGlobal("fetch", fetcher);
+    first.accept({ ...session, expiresIn: 1 });
+    await Promise.resolve();
     await Promise.all([first.start(), second.start()]);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(first.getSnapshot().user).toEqual(session.user);
@@ -97,7 +98,7 @@ describe("rotating sessions", () => {
     auth.accept({ ...session, expiresIn: 120 });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem(REFRESH_KEY)).toBe("rt_new");
+    expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
   });
 
   it("clears revoked credentials without retrying forever", async () => {
@@ -119,13 +120,13 @@ describe("rotating sessions", () => {
 
   it("keeps the refresh credential after a network failure so retry is possible", async () => {
     const auth = store();
-    localStorage.setItem(REFRESH_KEY, "rt_old");
+    auth.accept({ ...session, expiresIn: 1 });
     vi.stubGlobal(
       "fetch",
       vi.fn().mockRejectedValue(new TypeError("Network unavailable")),
     );
     await auth.start();
-    expect(localStorage.getItem(REFRESH_KEY)).toBe("rt_old");
+    expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
     expect(auth.getSnapshot()).toMatchObject({
       ready: true,
       error: "Network unavailable",
@@ -158,18 +159,32 @@ describe("rotating sessions", () => {
   });
 });
 
-it("does not broadcast an old access token after another tab changes the refresh credential", async () => {
+it("discards legacy persisted credentials and starts signed out when no live tab exists", async () => {
+  localStorage.setItem(REFRESH_KEY, "legacy-secret");
+  const auth = store();
+  await auth.start();
+  expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+  expect(auth.getSnapshot()).toMatchObject({ ready: true, user: null });
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("recovers the session from a live tab without writing browser storage", async () => {
   const first = store(new TestChannel());
   first.accept(session);
-  localStorage.setItem(REFRESH_KEY, "rt_new");
-  const observer = new TestChannel();
-  const receive = vi.fn();
-  observer.onmessage = receive;
-  observer.postMessage({ type: "request" });
   await Promise.resolve();
-  await Promise.resolve();
-  expect(receive).not.toHaveBeenCalled();
-  observer.close();
+  const second = store(new TestChannel());
+  await second.start();
+  expect(second.getSnapshot().user).toEqual(session.user);
+  expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+  expect(sessionStorage.length).toBe(0);
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("signs out after all live sessions are disposed", async () => {
+  const first = store(new TestChannel());
+  first.accept(session);
+  first.dispose();
+  const second = store(new TestChannel());
+  await second.start();
+  expect(second.getSnapshot().user).toBeNull();
 });
 it("lets a user explicitly retry a failed refresh even when their old access token is still fresh", async () => {
   const auth = store();
@@ -180,5 +195,32 @@ it("lets a user explicitly retry a failed refresh even when their old access tok
   vi.stubGlobal("fetch", fetcher);
   await auth.retry();
   expect(fetcher).toHaveBeenCalledTimes(1);
-  expect(localStorage.getItem(REFRESH_KEY)).toBe("rt_new");
+  expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+});
+it("ignores a delayed broadcast from a signed-out session", async () => {
+  const first = store(new TestChannel());
+  const observer = new TestChannel();
+  let snapshot: unknown;
+  observer.onmessage = ({ data }) => { if (data.type === "session") snapshot = data; };
+  first.accept(session);
+  await Promise.resolve();
+  vi.stubGlobal("fetch", vi.fn(async () => json({ ok: true })));
+  await first.logout();
+  observer.postMessage(snapshot);
+  await Promise.resolve();
+  expect(first.getSnapshot().user).toBeNull();
+  observer.close();
+});
+it("uses one rotation when two tabs receive 401 at once", async () => {
+  const first = store(new TestChannel());
+  const second = store(new TestChannel());
+  first.accept(session);
+  await Promise.resolve();
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/auth/refresh")) return json(rotated);
+    return new Headers(init?.headers).get("Authorization") === "Bearer access-new" ? json({ id: "u_test" }) : json({ error: "unauthorized" }, 401);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await Promise.all([first.api.me(), second.api.me()]);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/auth/refresh"))).toHaveLength(1);
 });

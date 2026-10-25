@@ -12,6 +12,7 @@ import {
   Loading,
   useLoad,
 } from "./ui";
+import { Upload } from "./FileUpload";
 import { useListing, useVersions } from "./usePagination";
 
 function Breadcrumbs({ drive, path }: { drive: Drive; path: string }) {
@@ -41,9 +42,9 @@ function Breadcrumbs({ drive, path }: { drive: Drive; path: string }) {
     </nav>
   );
 }
-function Folder({ api, path }: { api: DriveApi; path: string }) {
+function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | null; path: string }) {
   const listing = useListing(api, path);
-  return (
+  const content = (
     <>
       <div className="section-heading">
         <p className="muted small">
@@ -96,7 +97,7 @@ function Folder({ api, path }: { api: DriveApi; path: string }) {
           <div className="empty">
             <FileIcon folder />
             <h2>A little breathing room.</h2>
-            <p>This folder is empty. Add files using the desktop app.</p>
+            <p>{writeApi ? "This folder is empty. Drop files here to get started." : "This folder is empty."}</p>
           </div>
         )}
       </div>
@@ -112,6 +113,7 @@ function Folder({ api, path }: { api: DriveApi; path: string }) {
       )}
     </>
   );
+  return writeApi ? <Upload api={writeApi} path={path} onDone={listing.reload}>{content}</Upload> : content;
 }
 function Versions({
   api,
@@ -298,6 +300,8 @@ function DriveContents({
   api: DriveApi;
   path: string;
 }) {
+  const { auth } = useAuth();
+  const writeApi = useMemo(() => drive.access === "read" ? null : new DriveApi(auth.api, drive.id, "write"), [auth, drive.id, drive.access]);
   const load = useCallback(
     () =>
       path && !path.endsWith("/") ? api.stat(path) : Promise.resolve(null),
@@ -328,6 +332,7 @@ function DriveContents({
         ) : (
           <Folder
             api={api}
+            writeApi={writeApi}
             path={path && !path.endsWith("/") ? path + "/" : path}
           />
         ))

@@ -14,6 +14,8 @@ let package = Package(
         // Thin SwiftUI/AppKit shell.
         .executableTarget(name: "Unlispace", dependencies: ["UnlispaceKit"]),
         .testTarget(name: "UnlispaceKitTests", dependencies: ["UnlispaceKit"]),
+        .testTarget(name: "DaemonIntegrationTests", dependencies: ["UnlispaceKit"]),
+        .testTarget(name: "UnlispaceAppTests", dependencies: ["Unlispace"]),
     ],
     swiftLanguageModes: [.v6]
 )

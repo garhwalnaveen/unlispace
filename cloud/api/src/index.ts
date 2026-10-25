@@ -6,6 +6,8 @@ import { configured, googleCallback, googleStart } from "./google";
 import { takeOneTime, putOneTime } from "./onetime";
 import { normalizeEmail, otpStart, otpVerify } from "./otp";
 import * as R from "./resources";
+import * as K from "./access-keys";
+import * as B from "./billing";
 import { authenticate, createSession, logout, refreshSession } from "./session";
 import { sha256B64url, timingSafeEqual } from "./util";
 import { findOrCreateUser } from "./users";
@@ -19,6 +21,14 @@ async function route(ctx: Ctx): Promise<Response> {
 	const seg = p.split("/").filter(Boolean);
 
 	if (p === "/healthz" && m === "GET") return json({ ok: true });
+	if (p === "/billing/catalog") {
+		if (m === "GET") return B.getCatalog(ctx);
+		throw new HttpError(405, "method_not_allowed");
+	}
+	if (p === "/webhooks/dodo") {
+		if (m === "POST") return B.webhook(ctx);
+		throw new HttpError(405, "method_not_allowed");
+	}
 
 	// ---- auth (unauthenticated unless noted) ----
 	if (seg[0] === "auth") {
@@ -94,10 +104,19 @@ async function route(ctx: Ctx): Promise<Response> {
 	}
 
 	// ---- authenticated resources ----
-	const known = p === "/me" || p === "/orgs" || /^\/(orgs\/[^/]+\/drives|drives\/[^/]+(\/token)?)$/.test(p);
+	const known = p === "/me" || p === "/orgs" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/token)?)$/.test(p);
 	if (!known) throw new HttpError(404, "not_found");
 	const a = await authenticate(ctx);
-	if (p === "/me") {
+	if (seg[0] === "keys") {
+		if (seg.length === 1 && m === "GET") return K.listKeys(ctx, a);
+		if (seg.length === 1 && m === "POST") return K.createKey(ctx, a);
+		if (seg.length === 2 && m === "DELETE") return K.revokeKey(ctx, a, seg[1]!);
+	} else if (seg[0] === "orgs" && seg[2] === "billing") {
+		if (seg.length === 3 && m === "GET") return B.getBilling(ctx, a, seg[1]!);
+		if (seg[3] === "checkout" && m === "POST") return B.checkout(ctx, a, seg[1]!);
+		if (seg[3] === "invoices" && m === "GET") return B.invoices(ctx, a, seg[1]!);
+		if (seg[3] === "portal" && m === "POST") return B.portal(ctx, a, seg[1]!);
+	} else if (p === "/me") {
 		if (m === "GET") return R.getMe(ctx, a);
 		if (m === "PATCH") return R.patchMe(ctx, a);
 	} else if (p === "/orgs") {
@@ -118,7 +137,7 @@ export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promis
 	const cors = corsHeaders(env, req);
 	if (req.method === "OPTIONS") return preflight(env, req);
 	const f = deps.fetch ?? fetch;
-	const ctx: Ctx = { env, req, url: new URL(req.url), now: deps.now ? deps.now() : Date.now(), fetch: f, email: deps.email ?? selectSender(env, f) };
+	const ctx: Ctx = { env, req, url: new URL(req.url), now: deps.now ? deps.now() : Date.now(), fetch: f, email: deps.email ?? selectSender(env, f), dodo: deps.dodo };
 	let res: Response;
 	try {
 		res = await route(ctx);

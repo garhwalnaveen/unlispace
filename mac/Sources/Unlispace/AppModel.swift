@@ -20,6 +20,8 @@ final class AppModel {
     var lastChangeLine: String?
     var stateMessage: String?
     var notice: String?
+    var lastConflict: ConflictEvent?
+    var notificationMessage: String?
 
     private var client: any DaemonClient
     private var eventTask: Task<Void, Never>?
@@ -27,6 +29,7 @@ final class AppModel {
     private let keychain = Keychain()
     private let handoff = SessionHandoff()
     private let auth = DesktopAuth()
+    private let conflictNotifications = ConflictNotifications()
 
     init() {
         client = MockDaemonClient()
@@ -81,7 +84,7 @@ final class AppModel {
             } else {
                 status = AppStatus(engine: st.state)
             }
-            if status != .signedOut || usingMock && (account != nil || hasDevToken) {
+            if !usingMock, status != .signedOut {
                 drives = try await client.listDrives()
                 transfers = try await client.transfers()
             } else {
@@ -92,8 +95,12 @@ final class AppModel {
         } catch {
             if !usingMock {
                 // Daemon went away: fall back to mock and say so.
+                eventTask?.cancel()
+                await client.disconnect()
                 client = MockDaemonClient()
                 usingMock = true
+                drives = []
+                transfers = []
             }
             status = .error
             lastError = LogFormat.describe(error)
@@ -120,13 +127,20 @@ final class AppModel {
         case .state(let s):
             status = AppStatus(engine: s.state)
             stateMessage = s.message
-            if s.state == .signedOut { account = nil; drives = []; transfers = [] }
+            if s.state == .signedOut { account = nil; drives = []; transfers = []; lastConflict = nil }
         case .transfer(let t):
             transfers.removeAll { $0.id == t.id }
             if !t.isFinished { transfers.append(t) }
+            if t.status == .failed { lastError = "Transfer failed: \(t.path)" }
         case .change(let c):
             let name = drives.first { $0.driveId == c.driveId }?.name ?? c.driveId
             lastChangeLine = "\(name): \(c.paths.count) remote change\(c.paths.count == 1 ? "" : "s")"
+        case .conflict(let conflict):
+            lastConflict = conflict
+            Task {
+                do { try await conflictNotifications.post(conflict) }
+                catch { notificationMessage = "Could not show conflict notification: \(LogFormat.describe(error))" }
+            }
         case .unknown: break
         }
     }
@@ -190,12 +204,35 @@ final class AppModel {
             account = nil
             drives = []
             transfers = []
+            lastConflict = nil
             notice = nil
             await refresh()
         }
     }
 
     // MARK: drives
+
+    /// Mount only after onboarding has explained Network Volumes privacy.
+    func mountSelectedDrives(_ ids: Set<String>) async throws {
+        guard !usingMock, isSignedIn else { throw DaemonClientError.notConnected }
+        let available = try await client.listDrives()
+        guard ids.isSubset(of: Set(available.map(\.driveId))) else {
+            throw DaemonClientError.remote(DaemonError(code: "no_such_drive", message: "Refresh the drive list and choose again."))
+        }
+        for drive in available where ids.contains(drive.driveId) && drive.mountState != .mounted {
+            try await client.mount(driveId: drive.driveId)
+        }
+        await refresh()
+    }
+
+    func enableConflictNotifications() async {
+        do {
+            let allowed = try await conflictNotifications.enable()
+            notificationMessage = allowed ? "Conflict notifications enabled." : "Notifications are disabled. Conflicts will still appear in the menu."
+        } catch {
+            notificationMessage = "Could not enable notifications: \(LogFormat.describe(error))"
+        }
+    }
 
     func mount(_ d: DriveInfo) { run { try await $0.mount(driveId: d.driveId) } }
     func unmount(_ d: DriveInfo) { run { try await $0.unmount(driveId: d.driveId) } }

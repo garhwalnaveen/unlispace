@@ -12,6 +12,8 @@ import { Callback, Desktop, Login } from "./AuthPages";
 import { useAuth } from "./context";
 import { DriveBrowser } from "./DriveBrowser";
 import { Home } from "./Home";
+import { AccessKeys } from "./AccessKeys";
+import { Billing } from "./Billing";
 import { Settings } from "./Settings";
 import { ErrorNotice, Loading } from "./ui";
 function Protected() {
@@ -91,6 +93,8 @@ export function App() {
               <Route path="/" element={<Home />} />
               <Route path="/drives/:id/*" element={<DriveBrowser />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/access-keys" element={<AccessKeys />} />
+              <Route path="/orgs/:id/billing" element={<Billing />} />
             </Route>
             <Route
               path="*"

@@ -45,6 +45,31 @@ import Foundation
         #expect(t.id == "t1" && t.direction == .upload && t.bytesDone == 10 && t.bytesTotal == 100 && t.status == .active)
     }
 
+    @Test func decodeProposedConflictEvent() throws {
+        let line = Data(#"{"event":"conflict","data":{"driveId":"a","path":"/notes.txt","copy":"/notes (conflict).txt","future":true}}"#.utf8)
+        guard case .event(.conflict(let conflict)) = try DaemonCodec.decodeServerLine(line) else { Issue.record("expected conflict"); return }
+        #expect(conflict.driveId == "a")
+        #expect(conflict.path == "/notes.txt")
+        #expect(conflict.copy == "/notes (conflict).txt")
+        #expect(throws: (any Error).self) {
+            try DaemonCodec.decodeServerLine(Data(#"{"event":"conflict","data":{"path":"/notes.txt"}}"#.utf8))
+        }
+    }
+
+    @Test func transferProgressClampsAndHandlesUnknownSize() {
+        var transfer = TransferInfo(id: "one", driveId: "a", path: "/x", direction: .upload,
+                                    bytesDone: 50, bytesTotal: 100, status: .active)
+        #expect(transfer.progress == 0.5)
+        transfer.bytesDone = 200
+        #expect(transfer.progress == 1)
+        transfer.bytesDone = -1
+        #expect(transfer.progress == 0)
+        transfer.bytesTotal = 0
+        #expect(transfer.progress == nil)
+        transfer.bytesTotal = -1
+        #expect(transfer.progress == nil)
+    }
+
     @Test func decodeChangeEvent() throws {
         let line = Data(#"{"event":"change","data":{"driveId":"a","seq":42,"paths":["/a","/b"]}}"#.utf8)
         guard case .event(.change(let c)) = try DaemonCodec.decodeServerLine(line) else { Issue.record(); return }
