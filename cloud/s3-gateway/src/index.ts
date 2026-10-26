@@ -76,9 +76,9 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
         resolveSource: async bucket => {
           const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
           authorize(auth.key, info.driveId, "read");
-          return new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId, deps.state);
+          return new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId);
         },
-        dp: new DataPlane(deps.dataPlane, deps.tokens, auth.key, b, deps.state),
+        dp: new DataPlane(deps.dataPlane, deps.tokens, auth.key, b),
       });
       if (bucket === null) {
         if (method !== "GET") throw new S3Error(405, "MethodNotAllowed");
@@ -164,7 +164,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
     }
     const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
     authorize(auth.key, info.driveId, "read");
-    c = {...c, dp: new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId, deps.state)};
+    c = {...c, dp: new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId)};
     if (method === "DELETE" && !q.size) {
       authorize(auth.key, info.driveId, "admin");
       await control(() => deps.controlPlane.deleteDrive(auth.key.keyId, bucket, {hard: request.headers.get("x-uls-hard-delete") === "true"}));

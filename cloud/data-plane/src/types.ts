@@ -16,6 +16,8 @@ export type Placement = (typeof PLACEMENTS)[number];
 export type NormOp =
 	| {
 			op: "put" | "restore";
+		restoredFrom?: string;
+		nodeId?: string;
 			key: string;
 			ifVersion: string | null;
 			ifAbsent: boolean;

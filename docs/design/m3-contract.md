@@ -58,6 +58,24 @@ CORS with an exact allowlist from env `ULS_WEB_ORIGINS` (comma-separated). `OPTI
 methods `GET, POST, PUT`, headers `Authorization, Content-Type`, `Vary: Origin`, on every response
 including errors. No wildcard, no credentials.
 
+### 2.3 Node history and historical trees
+
+Versions retain `node_id` and the path at commit time. Reads/restores by version ID at the
+current path resolve by node identity. Delete/recreate starts a distinct history.
+`GET /v0/drives/{id}/versions?path=<path>&includeRenames=1` includes metadata-only rename
+versions; without the flag they are omitted. Existing pagination applies; version rows gain
+`operation` (`write`, `restore`, `mkdir`, `delete`, `rename`) and `restoredFrom: string | null`.
+
+`GET /v0/drives/{id}/tree-at?path=<folder/>&ts=<epoch ms>&limit=<1..1000>&cursor=<opaque>`
+requires read access. Root is the empty path. Response:
+```ts
+{entries: {path: string; nodeId: string; versionId: string; size: number; type: "file" | "folder"}[]; cursor: string | null}
+```
+Entries are recursive descendants, excluding the requested folder, sorted by historical path;
+folders end in `/`. Missing historical subtrees return an empty page. `ts` is inclusive;
+all commits in the same millisecond are included. Path records cover every moved/deleted
+descendant in the same transaction; fork exports, snapshots, and retention preserve them.
+
 ## 3. Control plane (`cloud/api`)
 
 ### 3.1 Migration `0003_m3.sql`

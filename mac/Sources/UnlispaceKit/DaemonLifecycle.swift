@@ -25,12 +25,20 @@ public enum DaemonLifecycle {
     public static var isBundled: Bool { Bundle.main.bundleURL.pathExtension == "app" }
 
     public static func state(bundle: Bundle = .main) -> EngineInstallState {
-        guard isBundled, engineBinaryExists(bundle: bundle) else { return .notInstalled }
-        switch SMAppService.agent(plistName: plistName).status {
+        state(bundle: bundle, serviceStatus: SMAppService.agent(plistName: plistName).status)
+    }
+
+    static func state(bundle: Bundle, serviceStatus: SMAppService.Status) -> EngineInstallState {
+        guard bundle.bundleURL.pathExtension == "app", engineBinaryExists(bundle: bundle) else { return .notInstalled }
+        switch serviceStatus {
         case .enabled: return .enabled
         case .requiresApproval: return .requiresApproval
         case .notRegistered: return .notRegistered
-        case .notFound: return .notInstalled
+        case .notFound:
+            let plist = bundle.bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/\(plistName)")
+            // A fresh ad-hoc bundle can report notFound until its first registration.
+            return FileManager.default.fileExists(atPath: plist.path) ? .notRegistered
+                : .failed("The engine service declaration is missing. Reinstall a complete Unlispace app bundle.")
         @unknown default: return .failed("unknown status")
         }
     }
@@ -45,6 +53,10 @@ public enum DaemonLifecycle {
             return .failed(error.localizedDescription)
         }
         return state()
+    }
+
+    public static func unregisterNow() throws {
+        try SMAppService.agent(plistName: plistName).unregister()
     }
 
     public static func unregister() async {

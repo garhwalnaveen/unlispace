@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import ServiceManagement
 import UnlispaceKit
 
 @MainActor
@@ -11,6 +12,7 @@ final class AppModel {
     var uploads: UploadsSnapshot?
     var pins: [OfflinePin]?
     var mounts: [DaemonMount]?
+    private(set) var pendingDriveActions: Set<String> = []
     let updates = UpdateController()
     var usingMock = false
     var engineInstall: EngineInstallState = .notInstalled
@@ -26,10 +28,15 @@ final class AppModel {
     var notice: String?
     var lastConflict: ConflictEvent?
     var notificationMessage: String?
+    var notificationAccess: AccessStatus = .checking
+    var loginAccess: AccessStatus = .checking
+    var requestingNotifications = false
+    var permissionMessage: String?
 
     private var client: any DaemonClient
     private var eventTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
+    private var signInTask: Task<Void, Never>?
     private let keychain = Keychain()
     private let handoff = SessionHandoff()
     private let auth = DesktopAuth()
@@ -174,7 +181,7 @@ final class AppModel {
     }
 
     func setPin(driveId: String, path: String, pinned: Bool) {
-        run { try await $0.pin(driveId: driveId, path: path, pinned: pinned) }
+        run(driveId: driveId) { try await $0.pin(driveId: driveId, path: path, pinned: pinned) }
     }
 
     // MARK: sign in / out
@@ -182,13 +189,13 @@ final class AppModel {
     func signIn() {
         guard !signingIn else { return }
         guard let api = AppSettings.validateEndpoint(AppSettings.apiEndpoint) else {
-            lastError = "API endpoint must be https:// (http:// only for localhost)."
+            lastError = "Set your API endpoint in Settings → Advanced → Connection overrides, or use an app build configured for your service. HTTPS is required except for localhost."
             return
         }
         signingIn = true
         notice = nil
-        Task {
-            defer { signingIn = false }
+        signInTask = Task {
+            defer { signingIn = false; signInTask = nil }
             do {
                 let session = try await auth.signIn(api: api)
                 let target: (any DaemonClient)? = usingMock ? nil : client
@@ -203,6 +210,8 @@ final class AppModel {
                 lastError = nil
             } catch AuthError.cancelled {
                 // user closed the sheet
+            } catch is CancellationError {
+            } catch let error as URLError where error.code == .cancelled {
             } catch {
                 lastError = "Sign-in failed: \(LogFormat.describe(error))"
                 Log.auth.error("sign-in failed: \(LogFormat.describe(error))")
@@ -210,6 +219,12 @@ final class AppModel {
             await refresh()
         }
     }
+
+    func openSignInBrowser() {
+        if !auth.openBrowser() { lastError = "Sign-in is still preparing. Wait a moment, then try Open browser again." }
+    }
+
+    func cancelSignIn() { signInTask?.cancel(); auth.cancel() }
 
     /// Called each time a real daemon connection is made.
     func retryPendingSession() async {
@@ -257,21 +272,59 @@ final class AppModel {
         await refresh()
     }
 
-    func enableConflictNotifications() async {
+    func refreshPermissions() async {
+        engineInstall = DaemonLifecycle.state()
+        let login = AccessStatus.loginItem(SMAppService.mainApp.status)
+        let notifications = AccessStatus.notifications(await conflictNotifications.authorizationStatus())
+        if loginAccess != login { permissionMessage = nil }
+        if notificationAccess != notifications { notificationMessage = nil }
+        loginAccess = login
+        notificationAccess = notifications
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
         do {
-            let allowed = try await conflictNotifications.enable()
-            notificationMessage = allowed ? "Conflict notifications enabled." : "Notifications are disabled. Conflicts will still appear in the menu."
+            try LaunchAtLogin.set(enabled)
+            loginAccess = .loginItem(SMAppService.mainApp.status)
+            permissionMessage = loginAccess == .needsApproval
+                ? "Review Unlispace in System Settings → General → Login Items."
+                : enabled ? "Launch at login enabled." : "Launch at login disabled."
         } catch {
-            notificationMessage = "Could not enable notifications: \(LogFormat.describe(error))"
+            loginAccess = .loginItem(SMAppService.mainApp.status)
+            permissionMessage = "Could not change launch at login: \(LogFormat.describe(error))"
         }
     }
 
-    func mount(_ d: DriveInfo) { run { try await $0.mount(driveId: d.driveId) } }
-    func unmount(_ d: DriveInfo) { run { try await $0.unmount(driveId: d.driveId) } }
+    func enableConflictNotifications() async {
+        guard !requestingNotifications else { return }
+        requestingNotifications = true
+        permissionMessage = nil
+        defer { requestingNotifications = false }
+        let feedback: String
+        do {
+            let allowed = try await conflictNotifications.enable()
+            feedback = allowed ? "Conflict notifications enabled." : "You can enable alerts in System Settings → Notifications → Unlispace."
+        } catch {
+            feedback = "Could not enable notifications: \(LogFormat.describe(error))"
+        }
+        await refreshPermissions()
+        notificationMessage = feedback
+    }
 
-    private func run(_ op: @escaping @Sendable (any DaemonClient) async throws -> Void) {
+    func mount(_ d: DriveInfo) { run(driveId: d.driveId) { try await $0.mount(driveId: d.driveId) } }
+    func unmount(_ d: DriveInfo) { run(driveId: d.driveId) { try await $0.unmount(driveId: d.driveId) } }
+
+    func isDriveBusy(_ drive: DriveInfo) -> Bool {
+        pendingDriveActions.contains(drive.driveId) || drive.mountState == .mounting || drive.mountState == .unmounting
+    }
+
+    private func run(driveId: String, _ op: @escaping @Sendable (any DaemonClient) async throws -> Void) {
+        guard !usingMock, !pendingDriveActions.contains(driveId) else { return }
+        if let drive = drives.first(where: { $0.driveId == driveId }), isDriveBusy(drive) { return }
+        pendingDriveActions.insert(driveId)
         let c = client
         Task {
+            defer { pendingDriveActions.remove(driveId) }
             do { try await op(c); await refresh() }
             catch { lastError = LogFormat.describe(error); Log.app.error("daemon op failed: \(LogFormat.describe(error))") }
         }
@@ -288,9 +341,7 @@ final class AppModel {
         do {
             switch try DeepLink.parse(url) {
             case .authCallback:
-                // ASWebAuthenticationSession consumes the real callback. One arriving here has no
-                // session waiting for it, so it is ignored.
-                Log.auth.info("ignoring auth callback with no sign-in in progress")
+                if !auth.receiveCallback(url) { Log.auth.info("ignoring unmatched auth callback") }
             case .open(let driveId, let path):
                 Task { await openDrive(driveId: driveId, path: path) }
             }

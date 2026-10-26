@@ -53,3 +53,19 @@ Deviations and interpretations of the contract are in `CONTRACT-NOTES.md`.
 - `src/drive.ts` `DriveAuthority` Durable Object
 - `src/validate.ts`, `src/types.ts`, `src/ulid.ts` helpers
 - `test/` vitest suite, `scripts/smoke.sh` curl smoke test
+
+## Rename-safe history
+
+Versions belong to stable node IDs; their stored `path` remains the path at commit time.
+`versions?path=<current path>` lists content history oldest first, omitting metadata-only
+rename versions; `includeRenames=1` includes those versions. Rows also expose `operation`
+and `restoredFrom`. Historical manifests and restores accept old version IDs at the current
+path. Deleting and recreating a path starts a separate identity and history.
+
+`GET /v0/drives/{id}/tree-at?path=<folder/>&ts=<epoch ms>&limit=1000&cursor=<opaque>`
+requires read access and returns `{entries:[{path,nodeId,versionId,size,type}],cursor}`.
+It recursively lists descendants (excluding the requested folder) at that instant, using
+paths as they existed then; folders end in `/`. Root is `path=`. Pages sort by path;
+`cursor` is null on the last page. Equal timestamps include the whole millisecond.
+History and path logs survive forks and snapshots; legacy state is migrated on load/import.
+GC marks every retained version, including versions written before a rename.

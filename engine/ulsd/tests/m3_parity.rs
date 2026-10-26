@@ -197,3 +197,25 @@ async fn historical_file_renames_retain_bytes_and_folder_deletes_hide_descendant
     assert!(ulsd::history::at(&c,"drive","folder/new",deleted).await.unwrap().is_none());
     assert!(ulsd::history::plan(&c,"drive","folder/",deleted).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn explicit_dev_token_never_resolves_through_an_existing_daemon_socket() {
+    let server = uls_mock::MockServer::start("isolated-token").await;
+    let client = Client::builder(server.url(), "isolated-token").build().unwrap();
+    client.create_drive("fixture-drive", None).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    std::fs::write(&source, b"fixture").unwrap();
+    client.upload_file("fixture-drive", &source, "file", None).await.unwrap();
+    let socket = dir.path().join("unrelated.sock");
+    // The socket exists but never responds. Consulting it would hang instead of using the fixture.
+    let _listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_ulsd"));
+    command.args(["stat", "fixture-drive", "file", "--json"])
+        .env("ULS_ENDPOINT", server.url()).env("ULS_DEV_TOKEN", "isolated-token")
+        .env("ULS_SOCKET", &socket).env_remove("ULS_ACCESS_TOKEN").kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(5), command.output()).await.unwrap().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stat: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stat["size"], 7);
+}

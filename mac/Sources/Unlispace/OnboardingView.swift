@@ -4,16 +4,24 @@ import UnlispaceKit
 struct OnboardingView: View {
     var model: AppModel
     var finish: () -> Void
+    @AppStorage("appearance") private var appearance = "system"
     @AppStorage("onboardingCompleted") private var completed = false
     @State private var step = Step.signIn
     @State private var selected: Set<String> = []
     @State private var mounting = false
     @State private var error: String?
 
-    private enum Step { case signIn, drives, privacy }
+    private enum Step: Equatable { case signIn, drives, privacy }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 8) {
+                Label("1  Sign in", systemImage: step == .signIn ? "circle.fill" : "checkmark.circle.fill")
+                Image(systemName: "chevron.right")
+                Text("2  Choose drives")
+                Image(systemName: "chevron.right")
+                Text("3  Access & permissions")
+            }.font(.caption).foregroundStyle(.secondary)
             Text(title).font(.largeTitle).accessibilityAddTraits(.isHeader)
             switch step {
             case .signIn: signInStep
@@ -35,7 +43,12 @@ struct OnboardingView: View {
             }
         }
         .padding(28)
-        .frame(width: 500, height: 480)
+        .frame(width: 640, height: 660)
+        .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+        .task(id: step) { if step == .privacy { await model.refreshPermissions() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if step == .privacy { Task { await model.refreshPermissions() } }
+        }
         .onChange(of: model.isSignedIn) { _, signedIn in
             if signedIn, step == .signIn { step = .drives }
             if !signedIn { step = .signIn; selected = [] }
@@ -54,6 +67,10 @@ struct OnboardingView: View {
                 Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
                     .disabled(model.signingIn)
                     .keyboardShortcut(.defaultAction)
+                if model.signingIn {
+                    Button("Open browser") { model.openSignInBrowser() }
+                    Button("Cancel sign-in") { model.cancelSignIn() }
+                }
             }
         }
     }
@@ -65,6 +82,9 @@ struct OnboardingView: View {
                 Text("Waiting for the engine. Your drives will appear when it connects.")
                 if model.engineInstall == .notRegistered || model.engineInstall == .requiresApproval {
                     Button("Enable engine…") { model.installEngine() }
+                } else if case .failed(let message) = model.engineInstall {
+                    Text(message).foregroundStyle(.secondary)
+                    Button("Try enabling engine…") { model.installEngine() }
                 } else if model.engineInstall == .notInstalled {
                     Text("The engine is not installed. Install a bundle that includes ulsd to continue.")
                 }
@@ -88,13 +108,12 @@ struct OnboardingView: View {
     }
 
     private var privacyStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("macOS treats mounted drives as network volumes, even though Unlispace connects locally on your Mac. Each app, such as Terminal or your editor, may ask once for permission to access “Network Volumes”. Allow access for apps you want to use with your drives.")
-            Text("If you deny access, you can change it later in System Settings → Privacy & Security → Files and Folders for that app.")
-                .foregroundStyle(.secondary)
-            Text("Unlispace can notify you when a conflicting edit is saved as a separate copy.")
-            Button("Enable conflict notifications…") { Task { await model.enableConflictNotifications() } }
-            if let message = model.notificationMessage { Text(message).foregroundStyle(.secondary) }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Your drives appear as network volumes. When an app first opens them, macOS may ask you to allow access. Review the details and optional features below.")
+                .font(.callout).foregroundStyle(.secondary)
+            Form { PermissionsContent(model: model) }
+                .formStyle(.grouped)
+                .accessibilityLabel("Review access and optional features")
             Button(mounting ? "Mounting drives…" : "Finish setup", action: finishSetup)
                 .disabled(mounting || model.usingMock || !model.isSignedIn)
                 .keyboardShortcut(.defaultAction)
@@ -125,7 +144,7 @@ struct OnboardingView: View {
         switch step {
         case .signIn: "Welcome to Unlispace"
         case .drives: "Choose your drives"
-        case .privacy: "Network Volumes privacy"
+        case .privacy: "Access & permissions"
         }
     }
 }

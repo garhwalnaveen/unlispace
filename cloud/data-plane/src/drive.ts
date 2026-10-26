@@ -1,3 +1,4 @@
+import { HISTORY_SCHEMA, migrateHistory } from "./history";
 import { DurableObject } from "cloudflare:workers";
 import { createUlid } from "./ulid";
 import { LIVE_TREE, migrateNodes, NodeTree, type NodeRow } from "./nodes";
@@ -18,6 +19,8 @@ import { GC_SCHEMA, GC_INTERVAL_MS, LineageGC } from "./gc";
 
 type Row = Record<string, SqlStorageValue>;
 interface VersionRow extends Row {
+	node_id: string;
+	restored_from: string | null;
 	id: string;
 	path: string;
 	op: string;
@@ -102,8 +105,9 @@ export class DriveAuthority extends DurableObject<Env> {
 		super(ctx, env);
 		this.sql = ctx.storage.sql;
 		this.ctx.storage.transactionSync(() => {
-			for (const stmt of [...SCHEMA, ...GC_SCHEMA]) this.sql.exec(stmt);
+			for (const stmt of [...SCHEMA, ...GC_SCHEMA, ...HISTORY_SCHEMA]) this.sql.exec(stmt);
 			migrateNodes(this.sql);
+			migrateHistory(this.sql);
 			if (!this.sql.exec<{name: string}>("PRAGMA table_info(shards_known)").toArray().some(c => c.name === "inherited"))
 				this.sql.exec("ALTER TABLE shards_known ADD COLUMN inherited INTEGER NOT NULL DEFAULT 0");
 			const id = this.getMeta("drive_id");
@@ -195,7 +199,7 @@ export class DriveAuthority extends DurableObject<Env> {
 			if (hard) {
 				for (const ws of this.ctx.getWebSockets()) ws.close(WS_CLOSE_DELETED, "drive_deleted");
 				this.ctx.storage.transactionSync(() => {
-					for (const table of ["nodes", "versions", "log", "shards_known", "gc_state", "gc_marks"]) this.sql.exec(`DELETE FROM ${table}`);
+					for (const table of ["nodes", "versions", "path_log", "log", "shards_known", "gc_state", "gc_marks"]) this.sql.exec(`DELETE FROM ${table}`);
 					// Frozen exports must finish even if the source is hard-deleted mid-fork.
 					const importing = this.getMeta("importing");
 					if (importing) this.sql.exec("DELETE FROM export_rows WHERE token=?", importing);
@@ -319,10 +323,10 @@ export class DriveAuthority extends DurableObject<Env> {
 			this.ctx.storage.transactionSync(() => {
 				for (const {payload} of this.sql.exec<{payload: string}>("SELECT payload FROM export_rows WHERE token=? ORDER BY id", token)) {
 					const r = validateExportRow(JSON.parse(payload));
-					if (fork && r.table === "log") continue;
 					const cols = EXPORT_COLUMNS[r.table];
 					this.sql.exec(`INSERT OR REPLACE INTO ${r.table}(${cols.join(",")}) VALUES(${cols.map(() => "?").join(",")})`, ...cols.map(c => r.row[c]!));
 				}
+				migrateHistory(this.sql);
 				this.setMeta("drive_id", driveId);
 				this.setMeta("lineage", header.lineage);
 				this.setMeta("head_seq", String(header.seq));
@@ -340,6 +344,7 @@ export class DriveAuthority extends DurableObject<Env> {
 					this.setMeta("forkOf", JSON.stringify({driveId: header.driveId, seq: header.seq, ts: header.ts}));
 					this.sql.exec("UPDATE shards_known SET inherited=1");
 					this.sql.exec("DELETE FROM lineage_members");
+					this.sql.exec("DELETE FROM log");
 					this.sql.exec("INSERT INTO log(seq,path,op,version) VALUES(?,'','resync',NULL)", header.seq);
 				}
 				this.sql.exec("DELETE FROM meta WHERE k='importing'");
@@ -497,7 +502,7 @@ export class DriveAuthority extends DurableObject<Env> {
 	private async restoreExclusive(key: string, versionId: string, ifVersion: string | null, actor: string): Promise<Result<CommitResponse>> {
 		if (!this.info()) return this.noDrive();
 		const v = this.getVersion(versionId);
-		if (!v || v.path !== key) return fail(404, "no_such_version", { path: key, versionId });
+		if (!v || v.node_id !== this.historyNode(key)) return fail(404, "no_such_version", { path: key, versionId });
 		if (v.manifest === null) return fail(400, "not_restorable", { message: `version ${versionId} is a ${v.op}, not file content` });
 		const shards = await loadManifest(this.env.SHARDS, this.lineage(), v.manifest);
 		const op: NormOp = {
@@ -510,6 +515,8 @@ export class DriveAuthority extends DurableObject<Env> {
 			mtimeMs: v.mtime ?? Date.now(),
 			manifest: v.manifest,
 			shards,
+			restoredFrom: versionId,
+			nodeId: v.node_id,
 		};
 		return this.runCommit(actor, (c) => [this.applyOp(op, c)]);
 	}
@@ -539,17 +546,19 @@ export class DriveAuthority extends DurableObject<Env> {
 		c.events.push({ ev: row.ev, seq: c.seq, path, op, versionId });
 	}
 
-	private newVersion(c: CommitCtx, key: string, op: string, size: number | null, manifest: string | null, ctype: string | null, mtime: number | null): string {
+	private newVersion(c: CommitCtx, key: string, op: string, size: number | null, manifest: string | null, ctype: string | null, mtime: number | null, nodeId = this.getNode(key)?.id ?? crypto.randomUUID(), restoredFrom: string | null = null): string {
 		const id = "v_" + this.ulid();
 		this.sql.exec(
-			"INSERT INTO versions(id,path,op,size,manifest,seq,ts,actor,ctype,mtime) VALUES(?,?,?,?,?,?,?,?,?,?)",
-			id, key, op, size, manifest, c.seq, c.ts, c.actor, ctype, mtime,
+			"INSERT INTO versions(id,path,op,size,manifest,seq,ts,actor,ctype,mtime,node_id,restored_from) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+			id, key, op, size, manifest, c.seq, c.ts, c.actor, ctype, mtime, nodeId, restoredFrom,
 		);
 		return id;
 	}
 
 	private putNode(c: CommitCtx, key: string, type: "file" | "folder", head: string, size: number, ctype: string | null, mtime: number): void {
-		this.tree.put(key, { type, head, size, ctype, mtime, seq: c.seq });
+		const nodeId = this.getVersion(head)!.node_id;
+		this.tree.put(key, { type, head, size, ctype, mtime, seq: c.seq }, nodeId);
+		this.sql.exec("INSERT INTO path_log VALUES(?,?,?,?,?)", c.seq, c.ts, nodeId, key, type);
 	}
 
 	private precondition(op: { ifVersion: string | null; ifAbsent?: boolean }, node: NodeRow | undefined, ext: string): void {
@@ -586,7 +595,7 @@ export class DriveAuthority extends DurableObject<Env> {
 				this.precondition(op, node, op.key);
 				if (node?.type === "folder") throw new Abort(fail(409, "path_conflict", { path: op.key }));
 				this.ensureParents(c, op.key);
-				const vid = this.newVersion(c, op.key, op.op, op.size, op.manifest, op.ctype, op.mtimeMs);
+				const vid = this.newVersion(c, op.key, op.op, op.size, op.manifest, op.ctype, op.mtimeMs, node?.id ?? (op.op === "restore" ? op.nodeId : undefined), op.op === "restore" ? op.restoredFrom ?? null : null);
 				this.putNode(c, op.key, "file", vid, op.size, op.ctype, op.mtimeMs);
 				this.logRow(c, op.key, op.op, vid);
 				return { path: op.key, versionId: vid, size: op.size };
@@ -610,6 +619,7 @@ export class DriveAuthority extends DurableObject<Env> {
 				const size = node.size ?? 0;
 				if (op.isFolder) this.checkSubtree(node, op.key, null);
 				const vid = this.newVersion(c, op.key, "delete", null, null, null, null);
+				this.recordSubtree(c, node, op.key, op.key, "delete");
 				this.tree.detach(node.id);
 				this.logRow(c, ext, "delete", vid);
 				return { path: ext, versionId: vid, size: op.isFolder ? 0 : size };
@@ -625,8 +635,8 @@ export class DriveAuthority extends DurableObject<Env> {
 
 				if (op.isFolder) this.checkSubtree(src, op.from, op.to);
 				const old = src.head ? this.getVersion(src.head) : undefined;
-				const vid = this.newVersion(c, op.to, "rename", src.size ?? 0, old?.manifest ?? null, src.ctype, src.mtime);
-				this.newVersion(c, op.from, "delete", null, null, null, null);
+				const vid = this.newVersion(c, op.to, "rename", src.size ?? 0, old?.manifest ?? null, src.ctype, src.mtime, src.id);
+				this.recordSubtree(c, src, op.from, op.to, "rename");
 				this.tree.move(src.id, op.to, vid, c.seq);
 				// A rename is logged as a delete of the old path plus a rename of the new path.
 				this.logRow(c, extFrom, "delete", null);
@@ -695,7 +705,7 @@ export class DriveAuthority extends DurableObject<Env> {
 		let v: VersionRow | undefined;
 		if (versionId) {
 			v = this.getVersion(versionId);
-			if (!v || v.path !== key) return fail(404, "no_such_version", { path: key, versionId });
+			if (!v || v.node_id !== this.historyNode(key)) return fail(404, "no_such_version", { path: key, versionId });
 		} else {
 			const n = this.getNode(key);
 			if (!n) return fail(404, "no_such_path");
@@ -708,19 +718,34 @@ export class DriveAuthority extends DurableObject<Env> {
 		return ok({ path: key, versionId: v.id, size: v.size ?? 0, contentType: v.ctype, mtimeMs: v.mtime, shards });
 	}
 
-	versions(key: string, cursor: string | null, limit: number) {
+	private historyNode(key: string): string | null {
+		return this.getNode(key)?.id ?? this.sql.exec<{node_id:string}>("SELECT p.node_id FROM path_log p WHERE p.path=? AND p.path=(SELECT q.path FROM path_log q WHERE q.node_id=p.node_id ORDER BY q.seq DESC,q.rowid DESC LIMIT 1) ORDER BY p.seq DESC,p.rowid DESC LIMIT 1",key).toArray()[0]?.node_id ?? null;
+	}
+
+	private recordSubtree(c: CommitCtx, root: NodeRow, from: string, to: string, op: string): void {
+		this.sql.exec(`WITH RECURSIVE sub(id,path) AS (
+ SELECT ?,? UNION ALL SELECT n.id,sub.path||'/'||n.name FROM nodes n JOIN sub ON n.parent_id=sub.id
+ ) INSERT INTO path_log SELECT ?,?,id,?||substr(path,length(?)+1),? FROM sub`,root.id,from,c.seq,c.ts,to,from,op);
+	}
+
+	versions(key: string, cursor: string | null, limit: number, includeRenames = false) {
 		if (!this.info()) return this.noDrive();
-		// cursor = rowid of the last returned version (oldest first == rowid order, since versions are only appended)
 		const after = cursor === null ? 0 : Number(cursor);
 		if (!Number.isSafeInteger(after) || after < 0) return fail(400, "bad_request", { message: "invalid cursor" });
-		const rows = this.sql
-			.exec<VersionRow & { rid: number }>("SELECT rowid AS rid,id,op,size,seq,ts,actor FROM versions WHERE path=? AND rowid>? ORDER BY rowid LIMIT ?", key, after, limit + 1)
-			.toArray();
-		const page = rows.slice(0, limit);
-		return ok({
-			versions: page.map((r) => ({ versionId: r.id, op: r.op, size: r.size, seq: r.seq, ts: r.ts, actor: r.actor })),
-			cursor: rows.length > limit ? String(page[page.length - 1]!.rid) : null,
-		});
+		const rows = this.sql.exec<VersionRow & {rid:number}>(`SELECT rowid AS rid,* FROM versions WHERE node_id=? AND rowid>? ${includeRenames ? "" : "AND op!='rename'"} ORDER BY rowid LIMIT ?`,this.historyNode(key),after,limit+1).toArray();
+		const page=rows.slice(0,limit);
+		return ok({versions:page.map(r=>({versionId:r.id,op:r.op,operation:r.op === "put" ? "write" : r.op,restoredFrom:r.restored_from,size:r.size,seq:r.seq,ts:r.ts,actor:r.actor})),cursor:rows.length>limit?String(page.at(-1)!.rid):null});
+	}
+
+	treeAt(key: string, ts: number, cursor: string | null, limit: number) {
+		if (!this.info()) return this.noDrive();
+		const rows=this.sql.exec<{path:string;nodeId:string;versionId:string;size:number;type:string}>(`WITH latest AS (
+ SELECT *,ROW_NUMBER() OVER(PARTITION BY node_id ORDER BY seq DESC,rowid DESC) AS rank FROM path_log WHERE ts<=?
+ ), heads AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY node_id ORDER BY seq DESC,rowid DESC) AS rank FROM versions WHERE ts<=?)
+ SELECT p.path||CASE WHEN v.manifest IS NULL THEN '/' ELSE '' END AS path,p.node_id AS nodeId,v.id AS versionId,COALESCE(v.size,0) AS size,CASE WHEN v.manifest IS NULL THEN 'folder' ELSE 'file' END AS type
+ FROM latest p JOIN heads v ON p.node_id=v.node_id AND v.rank=1 WHERE p.rank=1 AND p.op!='delete' AND ( ?='' OR substr(p.path,1,length(?)+1)=?||'/') AND p.path>? ORDER BY p.path LIMIT ?`,ts,ts,key,key,key,cursor ?? "",limit+1).toArray();
+		const page=rows.slice(0,limit);
+		return ok({entries:page,cursor:rows.length>limit?page.at(-1)!.path.replace(/\/$/,""):null});
 	}
 
 	/** Event id of the last event of commit `seq` (0 if none): `since=<seq>` means `after=<that>`. */

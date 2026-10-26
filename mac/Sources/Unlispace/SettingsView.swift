@@ -7,56 +7,155 @@ struct SettingsView: View {
     @State private var endpoint = AppSettings.endpoint
     @State private var token = ""
     @State private var cacheGB = AppSettings.cacheCapGB
-    @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var message: String?
     private let keychain = Keychain()
 
+    @State private var page: SettingsPage? = .general
+    @AppStorage("appearance") private var appearance = "system"
+
+    private enum SettingsPage: String, CaseIterable, Identifiable {
+        case general = "General", account = "Account", cache = "Cache", permissions = "Permissions", advanced = "Advanced"
+        var id: Self { self }
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .account: "person.crop.circle"
+            case .cache: "internaldrive"
+            case .permissions: "hand.raised"
+            case .advanced: "slider.horizontal.3"
+            }
+        }
+    }
+
     var body: some View {
-        Form {
-            Section("Account") {
-                if let acct = model.account {
-                    LabeledContent("Signed in as", value: acct.email)
-                    if model.sessionPending {
-                        Text("Waiting for the engine to accept the session.").foregroundStyle(.secondary)
-                    }
-                    Button("Sign out") { model.signOut() }
-                } else {
-                    LabeledContent("Status", value: model.hasDevToken ? "Developer token in Keychain" : "Signed out")
-                    Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
-                        .disabled(model.signingIn)
+        NavigationSplitView {
+            List(SettingsPage.allCases, selection: $page) { item in
+                Label(item.rawValue, systemImage: item.symbol).tag(item).padding(.vertical, 4)
+            }
+            .navigationTitle("Settings")
+            .navigationSplitViewColumnWidth(190)
+        } detail: {
+            Form {
+                switch page ?? .general {
+                case .general: general
+                case .account: account
+                case .cache: cache
+                case .permissions: permissions
+                case .advanced: advanced
+                }
+                if let message { Section { Text(message).foregroundStyle(.secondary).textSelection(.enabled) } }
+                if let error = model.lastError { Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
+            }
+            .formStyle(.grouped)
+            .navigationTitle((page ?? .general).rawValue)
+        }
+        .frame(minWidth: 780, idealWidth: 860, minHeight: 560, idealHeight: 620)
+        .task { await model.refreshPermissions() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.refreshPermissions() }
+        }
+    }
+
+    private var general: some View {
+        Group {
+            Section("Make yourself at home") {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { model.loginAccess == .enabled },
+                    set: { model.setLaunchAtLogin($0) }
+                ))
+                .disabled(model.loginAccess == .checking || model.loginAccess == .unavailable)
+                if let message = model.permissionMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
+                Text("Keep Unlispace ready in your menu bar when you sign in to your Mac.").font(.caption).foregroundStyle(.secondary)
+                Picker("Appearance", selection: $appearance) {
+                    Text("System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }.pickerStyle(.segmented)
+            }
+            Section("Setup") {
+                LabeledContent("Drives in Finder") { Button("Open setup…") { AppDelegate.showOnboarding() } }
+                Text("Sign in, choose drives, and learn about macOS access permissions.").foregroundStyle(.secondary)
+            }
+            Section("Unlispace") {
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
+                if model.updates.isEnabled { Button("Check for Updates…") { model.updates.checkForUpdates() } }
+            }
+        }
+    }
+
+    private var account: some View {
+        Section("Your account") {
+            if let acct = model.account {
+                LabeledContent("Signed in as", value: acct.email)
+                if model.sessionPending { Text("Signed in. Waiting for the engine to connect.").foregroundStyle(.secondary) }
+                Button("Sign out") { model.signOut() }
+            } else {
+                Text("Sign in to access your Unlispace drives on this Mac.").foregroundStyle(.secondary)
+                Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
+                    .disabled(model.signingIn).buttonStyle(.borderedProminent)
+                if model.signingIn {
+                    Button("Open browser") { model.openSignInBrowser() }
+                    Button("Cancel sign-in") { model.cancelSignIn() }
                 }
             }
-            Section("Cache") {
+        }
+    }
+
+    private var cache: some View {
+        Group {
+            Section("Local storage") {
                 Stepper("Cache size cap: \(cacheGB) GB", value: $cacheGB, in: 1...2000, step: 5)
                     .onChange(of: cacheGB) { _, v in AppSettings.cacheCapGB = v; model.pushCacheCap() }
+                Text("Files are downloaded as you open them. This cap controls how much disk space the cache can use.").foregroundStyle(.secondary)
             }
-            Section("General") {
-                Button("Set up Unlispace…") { AppDelegate.showOnboarding() }
-                Button("Enable conflict notifications…") { Task { await model.enableConflictNotifications() } }
-                if let message = model.notificationMessage { Text(message).foregroundStyle(.secondary) }
-                Toggle("Launch at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, v in
-                        do { try LaunchAtLogin.set(v) }
-                        catch { message = error.localizedDescription; launchAtLogin = LaunchAtLogin.isEnabled }
+            Section("Available offline") {
+                Text("Use a drive’s offline options to keep files available without an internet connection.").foregroundStyle(.secondary)
+                if model.usingMock { Text("Connect the engine to see offline availability.") }
+                else if let pins = model.pins {
+                    if pins.isEmpty { Text("No files are kept offline yet.").foregroundStyle(.secondary) }
+                    ForEach(pins) { pin in
+                        VStack(alignment: .leading) {
+                            Text("\(pin.driveId) · \(pin.path)")
+                            ProgressView(value: pin.progress).accessibilityLabel("\(pin.path) cached").accessibilityValue("\(Int(pin.progress * 100)) percent")
+                            Button("Stop keeping offline") { model.setPin(driveId: pin.driveId, path: pin.path, pinned: false) }
+                        }
                     }
+                } else { Text("Offline status is unavailable from this engine.") }
+            }
+        }
+    }
+
+    private var permissions: some View {
+        PermissionsContent(model: model)
+    }
+
+    private var advanced: some View {
+        Group {
+            Section("Engine & diagnostics") {
+                LabeledContent("Connection", value: model.usingMock ? "Not connected" : "Connected")
+                if model.engineInstall == .notRegistered || model.engineInstall == .requiresApproval {
+                    Button("Enable engine…") { model.installEngine() }
+                }
+                if model.engineInstall == .notInstalled { Text("Install a build that includes the engine to mount drives.").foregroundStyle(.secondary) }
+                if case .failed(let error) = model.engineInstall {
+                    Text(error).foregroundStyle(.secondary)
+                    Button("Enable engine…") { model.installEngine() }
+                }
+                Button("Refresh status") { Task { await model.refresh() } }
                 Button("Open logs") { openLogs() }
             }
-            Section("Advanced") {
-                DisclosureGroup("Developer") {
+            Section("Developer") {
+                DisclosureGroup("Connection overrides") {
                     TextField("API endpoint", text: $apiOverride, prompt: Text(AppSettings.defaultAPIEndpoint))
                     TextField("Dev endpoint (config.set)", text: $endpoint, prompt: Text("http://127.0.0.1:8787"))
-                    SecureField("Dev token", text: $token,
-                                prompt: Text(model.hasDevToken ? "Saved (enter to replace)" : "Paste token"))
+                    SecureField("Dev token", text: $token, prompt: Text(model.hasDevToken ? "Saved (enter to replace)" : "Paste token"))
                     HStack {
                         Button("Save") { save() }
                         Button("Clear dev token") { clearDevToken() }
                     }
                 }
             }
-            if let message { Text(message).foregroundStyle(.secondary) }
         }
-        .formStyle(.grouped)
-        .frame(width: 460, height: 480)
     }
 
     private func save() {

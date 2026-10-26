@@ -9,6 +9,7 @@ public enum AuthError: Error, Equatable, Sendable {
     case providerError(String)
     case cancelled
     case exchangeFailed(Int)
+    case startFailed(Int)
     case badEndpoint
     case badResponse
 }
@@ -92,6 +93,7 @@ public enum DesktopAuthWire {
 public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContextProviding {
     private let session: URLSession
     private var webSession: ASWebAuthenticationSession?
+    private var callback: (id: UUID, state: String, startURL: URL, continuation: CheckedContinuation<URL, any Error>)?
 
     public init(session: URLSession = .shared) {
         self.session = session
@@ -102,24 +104,73 @@ public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContext
         let challenge = PKCE.challenge(forVerifier: verifier)
         let state = PKCE.makeState()
         let url = try DesktopAuthWire.startURL(api: api, challenge: challenge, state: state)
+        try await checkSignInService(url: url)
+        try Task.checkCancellation()
 
-        let callbackURL: URL = try await withCheckedThrowingContinuation { cont in
-            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "uls") { url, error in
-                if let url { cont.resume(returning: url) }
+        let callbackURL = try await waitForCallback(url: url, state: state)
+        return try await exchange(callbackURL: callbackURL, api: api, expectedState: state, verifier: verifier)
+    }
+
+    var isAwaitingCallback: Bool { callback != nil }
+
+    func waitForCallback(url: URL, state: String,
+                         start: (ASWebAuthenticationSession) -> Bool = { $0.start() }) async throws -> URL {
+        return try await withCheckedThrowingContinuation { cont in
+            let id = UUID()
+            callback = (id, state, url, cont)
+            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "uls") { [weak self] url, error in
+                let result: Result<URL, any Error>
+                if let url { result = .success(url) }
                 else if let e = error as? ASWebAuthenticationSessionError, e.code == .canceledLogin {
-                    cont.resume(throwing: AuthError.cancelled)
+                    result = .failure(AuthError.cancelled)
                 } else {
-                    cont.resume(throwing: error ?? AuthError.invalidCallback)
+                    result = .failure(error ?? AuthError.invalidCallback)
                 }
+                Task { @MainActor in self?.completeCallback(result, id: id) }
             }
             s.presentationContextProvider = self
             s.prefersEphemeralWebBrowserSession = false
             self.webSession = s
-            if !s.start() { cont.resume(throwing: AuthError.invalidCallback) }
+            if !start(s) { completeCallback(.failure(AuthError.invalidCallback), id: id) }
         }
-        webSession = nil
+    }
 
-        let cb = try CallbackParser.parse(callbackURL, expectedState: state)
+    /// Explicit fallback when the system authentication window doesn't appear.
+    public func openBrowser() -> Bool {
+        guard let pending = callback else { return false }
+        return NSWorkspace.shared.open(pending.startURL)
+    }
+
+    /// Only an outstanding, state-matched sign-in can consume a custom-scheme callback.
+    public func receiveCallback(_ url: URL) -> Bool {
+        guard let pending = callback else { return false }
+        let result: Result<URL, any Error>
+        do {
+            _ = try CallbackParser.parse(url, expectedState: pending.state)
+            result = .success(url)
+        } catch let error as AuthError {
+            guard case .providerError = error else { return false }
+            result = .failure(error)
+        } catch { return false }
+        let activeSession = webSession
+        completeCallback(result, id: pending.id)
+        activeSession?.cancel()
+        return true
+    }
+
+    /// Check the configured API and web redirect before opening a browser that could stall.
+    func checkSignInService(url: URL) async throws {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AuthError.badResponse }
+        guard (200..<400).contains(http.statusCode) else { throw AuthError.startFailed(http.statusCode) }
+    }
+
+    /// Shared by browser sign-in and the opt-in real-Worker acceptance test.
+    func exchange(callbackURL: URL, api: URL, expectedState: String, verifier: String) async throws -> Session {
+        let cb = try CallbackParser.parse(callbackURL, expectedState: expectedState)
         let req = try DesktopAuthWire.exchangeRequest(api: api, code: cb.code, verifier: verifier)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw AuthError.badResponse }
@@ -128,9 +179,18 @@ public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContext
         return result
     }
 
-    public func cancel() {
-        webSession?.cancel()
+    private func completeCallback(_ result: Result<URL, any Error>, id: UUID) {
+        guard let pending = callback, pending.id == id else { return }
+        callback = nil
         webSession = nil
+        pending.continuation.resume(with: result)
+    }
+
+    public func cancel() {
+        let activeSession = webSession
+        // ASWebAuthenticationSession.cancel() need not invoke its completion handler.
+        if let pending = callback { completeCallback(.failure(AuthError.cancelled), id: pending.id) }
+        activeSession?.cancel()
     }
 
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {

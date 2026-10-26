@@ -70,7 +70,7 @@ function requiredAccess(method: string, rest: string): Access | null {
 	if (rest === "shards/missing") return method === "POST" ? "read" : null;
 	if (/^shards\/[^/]+$/.test(rest)) return method === "GET" ? "read" : method === "PUT" ? "write" : null;
 	if (rest === "commit" || rest === "restore") return method === "POST" ? "write" : null;
-	if (method === "GET" && ["stat", "list", "manifest", "versions", "changes"].includes(rest)) return "read";
+	if (method === "GET" && ["stat", "list", "manifest", "versions", "tree-at", "changes"].includes(rest)) return "read";
 	return null;
 }
 
@@ -228,7 +228,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 	}
 
 	const need = requiredAccess(method, rest);
-	if (need === null) return rest === "" || /^(watch|commit|restore|shards\/.*|stat|list|manifest|versions|changes)$/.test(rest) ? err(405, "method_not_allowed") : err(404, "not_found");
+	if (need === null) return rest === "" || /^(watch|commit|restore|shards\/.*|stat|list|manifest|versions|tree-at|changes)$/.test(rest) ? err(405, "method_not_allowed") : err(404, "not_found");
 	// Not in the claim, or not enough access: indistinguishable from an absent drive.
 	if (principal.drives) {
 		const have = principal.drives.get(driveId);
@@ -310,8 +310,8 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 	}
 
 	// reads (method already checked by requiredAccess)
-	if (rest === "stat" || rest === "manifest" || rest === "versions" || rest === "list") {
-		const p = parsePath(url.searchParams.get("path") ?? "", rest === "stat" || rest === "list");
+	if (rest === "stat" || rest === "manifest" || rest === "versions" || rest === "tree-at" || rest === "list") {
+		const p = parsePath(url.searchParams.get("path") ?? "", rest === "stat" || rest === "tree-at" || rest === "list");
 		if (typeof p === "string") return p === BAD_UNICODE ? err(400, "bad_path", p) : err(400, "bad_request", p);
 		if (rest === "stat") {
 			const r = await stub.stat(p.key);
@@ -338,9 +338,16 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 		}
 		if (rest === "versions") {
 			// cursor is an opaque base64url of the last returned version row id
-			const r = await stub.versions(p.key, after, limit);
+			const r = await stub.versions(p.key, after, limit, url.searchParams.get("includeRenames") === "1");
 			if (!r.ok) return failResponse(r);
 			return json({ versions: r.data.versions, cursor: r.data.cursor === null ? null : btoa(r.data.cursor).replace(/\+/g, "-").replace(/\//g, "_") });
+		}
+		if (rest === "tree-at") {
+			const ts = intParam(url,"ts",-1,0,Number.MAX_SAFE_INTEGER);
+			if (ts === null || ts < 0 || (p.key !== "" && !p.isFolder)) return err(400,"bad_request","folder path and ts in milliseconds required");
+			const r = await stub.treeAt(p.key,ts,after,limit);
+			if (!r.ok) return failResponse(r);
+			return json({...r.data,cursor:r.data.cursor === null ? null : btoa(String.fromCharCode(...new TextEncoder().encode(r.data.cursor))).replace(/\+/g,"-").replace(/\//g,"_")});
 		}
 		const r = await stub.list(p.key, after, limit);
 		if (!r.ok) return failResponse(r);

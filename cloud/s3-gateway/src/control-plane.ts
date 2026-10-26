@@ -95,9 +95,9 @@ export async function control<T>(call: () => Promise<T>): Promise<T> {
         return await call();
     }
     catch (error) {
-        const code = (error as {
-            code?: string;
-        }).code;
+        // Worker RPC preserves message but drops custom Error properties such as code.
+        const rpcError = error as { code?: string; message?: string };
+        const code = rpcError?.code ?? rpcError?.message;
         const errors: Record<string, [
             number,
             string
@@ -107,7 +107,7 @@ export async function control<T>(call: () => Promise<T>): Promise<T> {
             invalid_argument: [400, "InvalidArgument"], plan_limit: [403, "AccessDenied"],
             over_quota: [403, "QuotaExceeded"], fork_depth_exceeded: [400, "ForkDepthExceeded"], slow_down: [503, "SlowDown"],
         };
-        const [status, name] = errors[code ?? ""] ?? [503, "ServiceUnavailable"];
+        const [status, name] = (code && Object.hasOwn(errors, code) ? errors[code] : undefined) ?? [503, "ServiceUnavailable"];
         throw new S3Error(status, name, undefined, name === "SlowDown" ? { "retry-after": "1" } : {});
     }
 }

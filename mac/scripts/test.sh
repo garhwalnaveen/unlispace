@@ -11,7 +11,7 @@ if [[ "${ULS_TEST_KEYCHAIN:-0}" != 1 ]]; then
   KEYCHAIN_OPTIONS=(--skip "KeychainTests|HandoffTests")
 fi
 CLT=/Library/Developer/CommandLineTools/Library/Developer
-exec swift test "${SWIFT_OPTIONS[@]}" "${KEYCHAIN_OPTIONS[@]}" \
+exec swift test "${SWIFT_OPTIONS[@]}" ${KEYCHAIN_OPTIONS[@]+"${KEYCHAIN_OPTIONS[@]}"} \
   -Xswiftc -F"$CLT/Frameworks" \
   -Xlinker -F"$CLT/Frameworks" \
   -Xlinker -rpath -Xlinker "$CLT/Frameworks" \

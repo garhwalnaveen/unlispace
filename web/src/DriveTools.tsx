@@ -135,12 +135,12 @@ export function DriveTools({ drive, canManage, onDone }: { drive: Drive; canMana
       <p>Forks: {drive.forks?.length || 0}</p>
       <ul>{drive.forks?.map((id) => <li key={id}><Link to={driveLink(id)}>{id}</Link></li>)}</ul>
     </details>
-    {canManage && <div className="actions">
+    {canManage && <details className="drive-options"><summary>Drive options</summary><div className="actions">
       <button className="text-button" aria-label={`Rename ${drive.name}`} onClick={() => setAction({ kind: "rename", drive })}>Rename / edit alias</button>
       <button className="text-button" aria-label={`Fork ${drive.name}`} onClick={() => setAction({ kind: "fork", drive })}>Fork drive…</button>
       <button className="text-button danger-text" aria-label={`Delete ${drive.name}`} onClick={() => setAction({ kind: "delete", drive })}>Delete</button>
       <button className="text-button danger-text" aria-label={`Permanently delete ${drive.name}`} onClick={() => setAction({ kind: "hard-delete", drive })}>Permanently delete</button>
-    </div>}
+    </div></details>}
     {action && <DriveDialog action={action} api={auth.api} onClose={() => setAction(null)} onDone={(created) => { setAction(null); onDone(created); }} />}
   </div>;
 }

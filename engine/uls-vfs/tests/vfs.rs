@@ -392,3 +392,20 @@ async fn budget_is_shared_across_drives_and_releases_after_publication() {
     b.write("f",2,b"6").await.unwrap();
     b.shutdown().await.unwrap();assert_eq!(budget.used(),0);
 }
+
+#[tokio::test]
+async fn prefetched_metadata_and_shards_allow_offline_read_and_reopen() {
+    let (server, client, directory, vfs) = setup(slow()).await;
+    remote_put(&client, "pinned.txt", b"available offline").await;
+    vfs.warm_metadata("pinned.txt").await.unwrap();
+    let manifest = client.manifest("drive", "pinned.txt", None).await.unwrap();
+    for shard in manifest.shards { client.fetch_shard("drive", &shard.h).await.unwrap(); }
+    drop(server);
+    assert_eq!(vfs.lookup("._pinned.txt").await, Err(FsError::NotFound));
+    let bytes = tokio::time::timeout(Duration::from_millis(500), vfs.read("pinned.txt", 0, 100)).await.unwrap().unwrap();
+    assert_eq!(bytes, &b"available offline"[..]);
+    vfs.shutdown().await.unwrap();
+    let reopened = Vfs::open(client, "drive", directory.path(), slow()).await.unwrap();
+    assert_eq!(reopened.read("pinned.txt", 0, 100).await.unwrap(), &b"available offline"[..]);
+    reopened.shutdown().await.unwrap();
+}

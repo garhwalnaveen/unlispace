@@ -15,7 +15,7 @@ import { Home } from "./Home";
 import { AccessKeys } from "./AccessKeys";
 import { Billing } from "./Billing";
 import { Settings } from "./Settings";
-import { ErrorNotice, Loading } from "./ui";
+import { ErrorNotice, Icon, Loading } from "./ui";
 function Protected() {
   const { user } = useAuth();
   const location = useLocation();
@@ -31,50 +31,69 @@ function Protected() {
 export function App() {
   const { auth, ready, user, error } = useAuth();
   const location = useLocation();
-  const [theme, setTheme] = useState(
-    () =>
-      localStorage.getItem("unlispace.theme") ||
-      (window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light"),
-  );
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("unlispace.theme");
+    return saved === "light" || saved === "dark" ? saved : "system";
+  });
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      document.documentElement.dataset.theme = theme === "system"
+        ? (media.matches ? "dark" : "light") : theme;
+    };
+    apply();
     localStorage.setItem("unlispace.theme", theme);
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
   }, [theme]);
   useEffect(() => {
     document.getElementById("main")?.focus();
   }, [location.pathname]);
   return (
-    <div className="app">
+    <div className={`app ${user ? "workspace" : "welcome"}`}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <header className="topbar">
         <Link className="brand" to="/" aria-label="Unlispace home">
-          <span className="brand-mark" aria-hidden="true">
-            u
-          </span>
-          unlispace<span className="brand-period">.</span>
+          <span className="brand-mark" aria-hidden="true">u</span>
+          <span className="brand-name">unlispace</span>
         </Link>
         <div className="topbar-right">
-          {user && (
-            <nav aria-label="Main navigation">
-              <NavLink to="/" end>
-                Drives
-              </NavLink>
-              <NavLink to="/settings">Account</NavLink>
-            </nav>
-          )}
-          <button
-            className="theme-button"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            aria-label={`Use ${theme === "dark" ? "light" : "dark"} theme`}
-          >
-            {theme === "dark" ? "☼" : "◐"}
-          </button>
+          <div className="theme-switch" role="group" aria-label="Appearance">
+            {(["system", "light", "dark"] as const).map((value) => (
+              <button
+                key={value}
+                className="theme-button"
+                onClick={() => setTheme(value)}
+                aria-label={`Use ${value} theme`}
+                aria-pressed={theme === value}
+                title={`${value[0].toUpperCase()}${value.slice(1)} theme`}
+              >
+                <Icon name={value === "system" ? "monitor" : value === "light" ? "sun" : "moon"} />
+              </button>
+            ))}
+          </div>
         </div>
       </header>
+      {user && (
+        <aside className="sidebar">
+          <p className="sidebar-label">WORKSPACE</p>
+          <nav aria-label="Main navigation">
+            <NavLink to="/" end><Icon name="drive" />Your drives</NavLink>
+            <NavLink to="/settings" end><Icon name="user" />Account</NavLink>
+            <NavLink to="/settings/access-keys"><Icon name="key" />Access keys</NavLink>
+          </nav>
+          <div className="sidebar-bottom">
+            <div className="sidebar-tip"><Icon name="monitor" /><strong>At home in Finder.</strong><p>Your cloud files, right alongside everything else.</p></div>
+            <Link className="profile-link" to="/settings">
+              <span className="profile-avatar" aria-hidden="true">{user.email.charAt(0).toUpperCase()}</span>
+              <span><strong>Your account</strong><span>{user.email}</span></span>
+              <Icon name="chevron" />
+            </Link>
+          </div>
+        </aside>
+      )}
       <main id="main" tabIndex={-1}>
         <ErrorNotice error={error} />
         {Boolean(error) && (
@@ -110,7 +129,7 @@ export function App() {
         )}
       </main>
       <footer className="footer">
-        <span>A place for every version.</span>
+        <span>Your files. Every version. One space.</span>
         <span>Unlispace</span>
       </footer>
     </div>

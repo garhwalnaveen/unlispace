@@ -214,3 +214,23 @@ describe("Drive extensions", () => {
 		expect((await ext(h, "DELETE", b, "ro", "x-uls-write")).status).toBe(405);
 	});
 });
+
+it("uses data-plane identity after a native rename for history, old-version reads, as-of and restore", async () => {
+ const h=await harness(), b=makeBucket(h), s3=await client(h.deps);
+ const first=await s3.send(new PutObjectCommand({Bucket:b,Key:"old/f",Body:"first"}));
+ const ts=new Date(h.dp.now+500).toISOString();
+ await s3.send(new PutObjectCommand({Bucket:b,Key:"old/f",Body:"second"}));
+ const native=await h.dp.fetch(new Request(`https://native/v0/drives/${b}/commit`,{method:"POST",headers:{authorization:"Bearer native"},body:JSON.stringify({ops:[{op:"rename",from:"old/",to:"new/"}]})}));
+ expect(native.status).toBe(200);
+ const history=await ext(h,"GET",b,"new/f","x-uls-versions");
+ expect(history.status).toBe(200);
+ expect(await history.json()).toMatchObject({versions:[{versionId:first.VersionId},{operation:"put"}]});
+ expect(await content(h,b,"new/f",first.VersionId)).toBe("first");
+ const asOf=await ext(h,"GET",b,"new/f","",{headers:{"x-uls-as-of":ts}});
+ expect(await asOf.text()).toBe("first");
+ const restore=await ext(h,"POST",b,"new/f",`x-uls-restore&versionId=${first.VersionId}`);
+ expect(restore.status).toBe(200);
+ expect(await content(h,b,"new/f")).toBe("first");
+ expect(await h.deps.state.get(`history:${b}:new/f`)).toBeUndefined();
+ expect(await h.deps.state.get(`archive:${b}:new/f:${first.VersionId}`)).toBeUndefined();
+});

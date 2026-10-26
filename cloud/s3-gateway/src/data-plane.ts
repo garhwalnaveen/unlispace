@@ -1,4 +1,3 @@
-import type { StateStore } from "./state";
 import type { Access, KeyRecord } from "./auth";
 import type { Shard } from "./chunker";
 import { base64url, digest, utf8 } from "./crypto";
@@ -36,7 +35,7 @@ export type CommitOp =
 
 export class DataPlane {
   private readonly tokenCache = new Map<Access, string>();
-  constructor(private readonly binding: FetchBinding, private readonly tokens: InternalTokenMinter, private readonly principal: KeyRecord, readonly drive: string, private readonly state?: StateStore) {}
+  constructor(private readonly binding: FetchBinding, private readonly tokens: InternalTokenMinter, private readonly principal: KeyRecord, readonly drive: string) {}
   private async token(access: Access): Promise<string> {
     let token = this.tokenCache.get(access);
     if (!token) { token = await this.tokens.mint(this.principal, this.drive, access); this.tokenCache.set(access, token); }
@@ -63,28 +62,23 @@ export class DataPlane {
   describe(): Promise<DriveInfo> { return this.json(""); }
   stat(path: string): Promise<Stat> { return this.json("stat", { path }); }
   async manifest(path: string, versionId?: string): Promise<Manifest> {
-    try { return await this.json("manifest", {path, ...(versionId ? {versionId} : {})}); }
-    catch (e) {
-      if (!(e instanceof S3Error) || e.code !== "NoSuchVersion" || !versionId) throw e;
-      const archived = await this.state?.get<Manifest>(`archive:${this.drive}:${path}:${versionId}`);
-      if (!archived) throw e;
-      return archived;
-    }
+    return this.json("manifest", {path, ...(versionId ? {versionId} : {})});
   }
+
   async versions(path: string): Promise<Version[]> {
     const versions: Version[] = [];
     let cursor: string | null = null;
     do {
-      const page: { versions: Version[]; cursor: string | null } = await this.json("versions", { path, limit: "1000", ...(cursor ? { cursor } : {}) });
+      const page: { versions: Version[]; cursor: string | null } = await this.json("versions", { path, includeRenames: "1", limit: "1000", ...(cursor ? { cursor } : {}) });
       versions.push(...page.versions); cursor = page.cursor;
     } while (cursor);
-    const archived = await this.state?.get<Version[]>(`history:${this.drive}:${path}`) ?? [];
-    return [...new Map([...archived, ...versions].map(v => [v.versionId, v])).values()].sort((a,b) => a.ts-b.ts || a.seq-b.seq);
+    return versions;
   }
+
   async *children(path: string): AsyncGenerator<Entry> {
     let cursor: string | null = null;
     do {
-      const page: { entries: Entry[]; cursor: string | null } = await this.json("list", { path, limit: "1000", ...(cursor ? { cursor } : {}) });
+      const page: { entries: Entry[]; cursor: string | null } = await this.json("list", { path, includeRenames: "1", limit: "1000", ...(cursor ? { cursor } : {}) });
       yield* page.entries; cursor = page.cursor;
     } while (cursor);
   }

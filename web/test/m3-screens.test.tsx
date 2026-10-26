@@ -30,6 +30,7 @@ it("forks with name and alias and shows lineage, fork point, usage and quota on 
   expect(await screen.findByText(/Usage: 1 KiB/)).toBeInTheDocument();
   expect(await screen.findByRole("alert")).toHaveTextContent("Writes are paused");
   expect(screen.getByRole("meter", { name: "Organization storage usage" })).toHaveAttribute("value", "1024");
+  await user.click(screen.getByText("Drive options"));
   await user.click(screen.getByRole("button", { name: "Fork Space" }));
   await user.type(screen.getByLabelText("Drive name"), "Branch");
   await user.type(screen.getByLabelText("Drive alias"), "branch");
@@ -49,7 +50,8 @@ it("keeps alias conflicts editable and protects hard delete with typed confirmat
     return json({ orgs: [org] });
   });
   vi.stubGlobal("fetch", fetcher); renderApp(); const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Rename Space" }));
+  await user.click(await screen.findByText("Drive options"));
+  await user.click(screen.getByRole("button", { name: "Rename Space" }));
   await user.clear(screen.getByLabelText("Drive alias")); await user.type(screen.getByLabelText("Drive alias"), "taken");
   await user.click(screen.getByRole("button", { name: "Save drive" }));
   expect(await screen.findByText(/That alias is already in use/)).toBeInTheDocument();
@@ -144,7 +146,8 @@ it("edits a drive alias from its page and hard-deletes successfully", async () =
     return json({ ...drive, alias, status: deleted ? "deleted" : "ready", usageBytes: 1024, forks: [] });
   });
   vi.stubGlobal("fetch", fetcher); renderApp(`/drives/${drive.id}/`); const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Rename Space" }));
+  await user.click(await screen.findByText("Drive options"));
+  await user.click(screen.getByRole("button", { name: "Rename Space" }));
   expect(screen.getByLabelText("Drive name")).toHaveFocus();
   await user.clear(screen.getByLabelText("Drive alias")); await user.type(screen.getByLabelText("Drive alias"), "new-alias");
   await user.click(screen.getByRole("button", { name: "Save drive" }));

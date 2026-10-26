@@ -20,3 +20,12 @@
   registry and any frozen export currently being consumed. It never deletes R2 bytes.
 - No deployed Cloudflare resources, production CORS origin, cross-worker API integration,
   multi-gigabyte databases, or process-crash recovery of an interrupted import were verified.
+
+## Agent 20 rename/history integration
+
+- Engine/daemon agent: use `GET tree-at?path=<folder/>&ts=<ms>` (recursive, paginated,
+  historical paths) for moved-directory descendant discovery. Current-path versions,
+  historical manifests, and restores now follow node identity; see README and M3 §2.3.
+- Coordinator: validate production DO upgrades and real cross-worker native/S3 traffic before
+  claiming deployed parity. Local tests cover legacy imports, forks, snapshots, GC marks and
+  native-rename gateway reads; no external services or deployment were exercised.

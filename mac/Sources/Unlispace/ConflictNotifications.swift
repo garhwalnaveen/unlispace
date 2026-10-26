@@ -3,6 +3,12 @@ import UnlispaceKit
 
 @MainActor
 final class ConflictNotifications: NSObject, UNUserNotificationCenterDelegate {
+    func authorizationStatus() async -> UNAuthorizationStatus? {
+        // UserNotifications raises an Objective-C exception in unbundled tools and SwiftPM tests.
+        guard Bundle.main.bundleURL.pathExtension == "app", Bundle.main.bundleIdentifier != nil else { return nil }
+        return await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
     func enable() async throws -> Bool {
         let center = UNUserNotificationCenter.current()
         center.delegate = self

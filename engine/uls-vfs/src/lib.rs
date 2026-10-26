@@ -88,6 +88,23 @@ impl Vfs {
         let c = self.inner.core.lock().await;
         if c.closed { Err(FsError::Busy) } else { Ok(c) }
     }
+    /// Cache the namespace and manifests as well as shard bytes before going offline.
+    pub async fn warm_metadata(&self, p: &str) -> Result<(), FsError> {
+        let p = path(p)?;
+        let mut c = self.core().await?;
+        let mut ancestor = String::new();
+        if !p.is_empty() {
+            self.inner.list(&mut c.state, "").await?;
+            for component in parent(&p).split('/').filter(|part| !part.is_empty()) {
+                if !ancestor.is_empty() { ancestor.push('/'); }
+                ancestor.push_str(component);
+                self.inner.list(&mut c.state, &ancestor).await?;
+            }
+        }
+        self.inner.load(&mut c.state, &p).await?;
+        self.inner.tree(&mut c.state, &p).await?;
+        c.persist()
+    }
     pub async fn lookup(&self, p: &str) -> Result<Attr, FsError> {
         let p = path(p)?; let mut c = self.core().await?;
         self.inner.load(&mut c.state, &p).await?;
@@ -290,6 +307,8 @@ impl Inner {
     async fn load(&self, s: &mut State, p: &str) -> Result<(), FsError> {
         if s.hidden.iter().any(|h| within(p, h)) { return Err(FsError::NotFound); }
         if s.nodes.get(p).is_some_and(|n| n.valid) { return Ok(()); }
+        // A complete listing also caches absence (including macOS metadata probes).
+        if !p.is_empty() && s.listings.contains(parent(p)) { return Err(FsError::NotFound); }
         let stat = match self.client.stat(&self.drive, p).await {
             Err(uls_client::Error::NotFound { .. }) if !p.is_empty() => self.client.stat(&self.drive, &format!("{p}/")).await?,
             other => other?,

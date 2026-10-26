@@ -60,6 +60,7 @@ it("shows the trial, explains plan limits, and requires exact drive-name confirm
     "Individual plan includes one drive",
   );
   await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(screen.getByText("Drive options"));
   await user.click(screen.getByRole("button", { name: "Delete Space" }));
   const deletion = screen.getByRole("button", { name: "Delete drive" });
   expect(deletion).toBeDisabled();

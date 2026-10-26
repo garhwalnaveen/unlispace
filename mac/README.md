@@ -41,7 +41,7 @@ Menu or Settings -> "Sign in to Unlispace". Flow (`docs/design/m1-contract.md` 5
    only long-term holder of the refresh token. The app keeps no copy once the daemon acks, and
    deletes the old M0 `refresh-token` Keychain item on launch.
 
-API base defaults to `https://api.unlispace.com`; set `ULS_WORKERS_DOMAIN` when running
+No production API base is assumed. Set `ULS_WORKERS_DOMAIN` when running
 `scripts/bundle.sh` to embed the production API URL, or set `ULS_API_URL` to embed a specific
 base. Override under Settings -> Advanced -> Developer (e.g. `http://127.0.0.1:8788`).
 
@@ -119,7 +119,7 @@ Protocol: see `DAEMON-PROTOCOL.md`.
 
 `bash mac/scripts/release.sh` tests, bundles, signs inside-out, creates a compressed read-only
 DMG with an Applications shortcut, and verifies the mounted copy before detaching. It never
-launches the app. Default signing is ad-hoc with hardened runtime; no credentials are needed.
+launches the app. Default signing is ad-hoc for local development; no credentials are needed. Developer ID builds enable hardened runtime.
 `ULSD_BIN` optionally embeds an existing daemon binary. `ULS_VERSION` (default `0.2.0`) and
 `ULS_BUILD` (default `1`) set bundle versions and the versioned DMG name.
 
@@ -141,3 +141,57 @@ Keep offline menu pins the whole drive and lists paths with live `pin` progress 
 
 The default test gate skips `KeychainTests` and `HandoffTests` to avoid Keychain access.
 Run with `ULS_TEST_KEYCHAIN=1` only when explicitly authorized to exercise Keychain storage.
+
+
+## Desktop workspace (Space UX review)
+
+The native app opens a resizable drive workspace on launch and reopen. My drives provides
+name filtering, inline Mount/Open in Finder/Eject actions and offline options. Transfers
+shows the existing live progress and upload queue. The menu-bar popover still provides quick
+access and an Open app action. Settings uses General, Account, Cache, Permissions and Advanced
+sidebar pages with persisted System/Light/Dark appearance. Setup retains the authenticated
+three-stage flow with a visible step indicator.
+
+See `../docs/design/space-desktop-comparison.md` for the observed comparison, scope and remaining
+acceptance work. `WorkspaceRenderTests` renders signed-out, fixture drives, settings and
+transfers in both appearances to the system temporary directory under `unlispace-ui-review/`.
+These fixtures do not authenticate or mount drives.
+
+Ad hoc development signing omits hardened runtime so the embedded ad hoc Sparkle framework
+can load without a team identity. Developer ID signing retains hardened runtime and timestamping.
+The bundle is for local review; this does not establish notarization or cloud-flow acceptance.
+
+
+## Completed desktop acceptance (26 October 2026)
+
+The review build is configured for `https://unlispace-api.naveen-f3d.workers.dev` and includes
+the SMB-enabled engine. An unconfigured build shows an endpoint setup message rather than
+silently using an unavailable hostname. Sign-in checks the service with a 15-second deadline;
+Open browser offers a state-checked custom-scheme fallback when the system sheet is unavailable.
+Cancellation also stops service preparation.
+
+`Unlispace.app/Contents/MacOS/Unlispace --engine-status`, `--enable-engine`, and
+`--disable-engine` provide ServiceManagement operations for installation/support tools.
+`bash mac/scripts/check-installation.sh` validates the actual shipped helper signature in a
+separate temporary app, registering an isolated memory-store daemon and unregistering it.
+For installed updates, replace the app bundle with fresh files rather than overwriting executable
+inodes in place; macOS can retain invalid code-signing state for an overwritten helper.
+
+The installed app's LaunchAgent was confirmed running with the hosted account restored,
+the Space drive remounted, and zero pending writes. The hosted browser and native kernel SMB
+mount exchanged a generated test file. See `../docs/design/desktop-acceptance.md` for exact
+checks, the approved production CORS repair, and remaining evidence limits.
+
+## Access & permissions dashboard
+
+Setup's final step and Settings → Permissions share one dashboard for background engine,
+per-app network-volume access, optional conflict notifications and optional launch at login.
+Status is refreshed on appearance, app activation and manual refresh; permissions are requested
+only from the corresponding action. Denied notification access links to System Settings.
+Skipping optional access does not block setup. See `../docs/design/permissions-experience.md`.
+
+The workspace also includes an Offline files page showing live per-selection cached bytes
+and progress, with Finder and stop-offline actions. Drive filters combine name search with
+All/Mounted/Not mounted/Needs attention and offer Clear filters recovery. Keyboard shortcuts:
+⌘1 My drives, ⌘2 Transfers, ⌘3 Offline files, ⌘F focus the drive filter, ⌘R refresh.
+Drive operations reject duplicate in-flight requests and mock connections.

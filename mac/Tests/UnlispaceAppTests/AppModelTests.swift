@@ -98,3 +98,39 @@ import UnlispaceKit
         #expect(await updater.prepareForInstallation() == false)
     }
 }
+
+@Suite @MainActor struct DriveWorkspaceTests {
+    private var drives: [DriveInfo] {
+        [DriveInfo(driveId: "design", name: "Design & brand", mountState: .mounted),
+         DriveInfo(driveId: "archive", name: "Archive", mountState: .unmounted),
+         DriveInfo(driveId: "busy", name: "Work", mountState: .mounting),
+         DriveInfo(driveId: "broken", name: "Design backup", mountState: .error)]
+    }
+
+    @Test func filtersCombineNameAndMountStateWithoutReordering() {
+        #expect(DriveFilter.all.apply(to: drives, query: " DESIGN ").map(\.driveId) == ["design", "broken"])
+        #expect(DriveFilter.mounted.apply(to: drives, query: "design").map(\.driveId) == ["design"])
+        #expect(DriveFilter.unmounted.apply(to: drives, query: "").map(\.driveId) == ["archive"])
+        #expect(DriveFilter.attention.apply(to: drives, query: "").map(\.driveId) == ["broken"])
+        #expect(DriveFilter.all.apply(to: drives, query: "   ") == drives)
+        #expect(DriveFilter.mounted.apply(to: drives, query: "archive").isEmpty)
+    }
+
+    @Test func driveActionsRejectMocksAndDuplicateRequests() async {
+        let model = AppModel()
+        let drive = drives[0]
+        model.drives = drives
+        model.unmount(drive)
+        #expect(model.pendingDriveActions.isEmpty)
+        model.usingMock = false
+        model.unmount(drive)
+        #expect(model.pendingDriveActions == [drive.driveId])
+        model.mount(drive)
+        #expect(model.pendingDriveActions == [drive.driveId])
+        // The default mock has no design drive: failure must release the action lock.
+        for _ in 0..<100 where !model.pendingDriveActions.isEmpty { await Task.yield() }
+        #expect(model.pendingDriveActions.isEmpty)
+        #expect(model.lastError != nil)
+        #expect(model.isDriveBusy(drives[2]))
+    }
+}

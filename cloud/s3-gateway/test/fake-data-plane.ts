@@ -2,7 +2,7 @@
 // It models the semantics the gateway relies on: versions, preconditions, parents, rename, restore and the change log.
 import type { FetchBinding } from "../src/data-plane";
 
-interface Version { id: string; path: string; op: string; size: number | null; ts: number; actor: string; shards: { h: string; n: number }[] | null; ctype: string | null; mtime: number | null }
+interface Version { nodeId: string; id: string; path: string; op: string; size: number | null; ts: number; actor: string; shards: { h: string; n: number }[] | null; ctype: string | null; mtime: number | null }
 interface Node { type: "file" | "folder"; head: string }
 interface Drive { nodes: Map<string, Node>; versions: Version[]; log: { ev: number; path: string; op: string; versionId: string | null }[]; seq: number }
 
@@ -75,7 +75,7 @@ export class FakeDataPlane implements FetchBinding {
     if (rest === "manifest") {
       const k = key(p("path")), vid = p("versionId");
       let v: Version | undefined;
-      if (vid) { v = drive.versions.find(x => x.id === vid); if (!v || v.path !== k) return fail(404, "no_such_version"); }
+      if (vid) { v = drive.versions.find(x => x.id === vid); if (!v || v.nodeId !== this.identity(drive,k)) return fail(404, "no_such_version"); }
       else {
         const n = drive.nodes.get(k);
         if (!n) return fail(404, "no_such_path");
@@ -87,7 +87,7 @@ export class FakeDataPlane implements FetchBinding {
     }
     if (rest === "versions") {
       const k = key(p("path")), limit = Number(p("limit") || 1000), skip = Number(p("cursor") ? atob(p("cursor")) : 0);
-      const all = drive.versions.filter(v => v.path === k);
+      const all = drive.versions.filter(v => v.nodeId === this.identity(drive,k) && (p("includeRenames") === "1" || v.op !== "rename"));
       const page = all.slice(skip, skip + limit);
       return json({ versions: page.map(v => ({ versionId: v.id, op: v.op, size: v.size, seq: 0, ts: v.ts, actor: v.actor })), cursor: skip + limit < all.length ? btoa(String(skip + limit)) : null });
     }
@@ -100,11 +100,12 @@ export class FakeDataPlane implements FetchBinding {
     if (rest === "restore" && method === "POST") {
       const b = await request.json() as { path: string; versionId: string; ifVersion?: string };
       const v = drive.versions.find(x => x.id === b.versionId);
-      if (!v || v.path !== b.path) return fail(404, "no_such_version");
+      if (!v || v.nodeId !== this.identity(drive,b.path)) return fail(404, "no_such_version");
       if (!v.shards) return fail(400, "not_restorable");
       const cur = drive.nodes.get(b.path);
       if (b.ifVersion && cur?.head !== b.ifVersion) return fail(412, "precondition_failed", { currentVersionId: cur?.head ?? null });
       const row = this.addVersion(drive, b.path, "restore", v.size, v.shards, v.ctype, v.mtime);
+      row.nodeId = v.nodeId;
       drive.nodes.set(b.path, { type: "file", head: row.id });
       drive.seq++;
       return json({ seq: drive.seq, results: [{ path: b.path, versionId: row.id, size: v.size }] });
@@ -112,12 +113,16 @@ export class FakeDataPlane implements FetchBinding {
     return fail(404, "not_found");
   }
 
+  private identity(drive: Drive, path: string): string | undefined {
+    const head = drive.nodes.get(path)?.head;
+    return head ? drive.versions.find(v=>v.id===head)?.nodeId : drive.versions.filter(v=>v.path===path).at(-1)?.nodeId;
+  }
   private nodeJson(drive: Drive, k: string, n: Node) {
     const v = drive.versions.find(x => x.id === n.head);
     return { path: n.type === "folder" ? `${k}/` : k, type: n.type, versionId: n.head, size: v?.size ?? 0, contentType: v?.ctype ?? null, mtimeMs: v?.mtime ?? this.now, seq: 0 };
   }
   private addVersion(drive: Drive, path: string, op: string, size: number | null, shards: Version["shards"], ctype: string | null, mtime: number | null): Version {
-    const row: Version = { id: ulid(), path, op, size, ts: this.tick(), actor: "test", shards, ctype, mtime };
+    const row: Version = { nodeId: (drive.nodes.has(path) ? this.identity(drive,path) : undefined) ?? crypto.randomUUID(), id: ulid(), path, op, size, ts: this.tick(), actor: "test", shards, ctype, mtime };
     drive.versions.push(row);
     drive.log.push({ ev: drive.log.length + 1, path, op, versionId: row.id });
     return row;
@@ -176,8 +181,8 @@ export class FakeDataPlane implements FetchBinding {
           for (const x of [...drive.nodes.keys()].sort()) {
             if (x !== from && !x.startsWith(`${from}/`)) continue;
             const node = drive.nodes.get(x)!, v = drive.versions.find(y => y.id === node.head)!, dest = k + x.slice(from.length);
-            this.addVersion(drive, x, "delete", null, null, null, null);
-            const row = this.addVersion(drive, dest, node.type === "folder" ? "mkdir" : "rename", v.size, v.shards, v.ctype, v.mtime);
+            const row = x === from ? this.addVersion(drive, dest, "rename", v.size, v.shards, v.ctype, v.mtime) : v;
+            row.nodeId = v.nodeId;
             drive.nodes.delete(x); drive.nodes.set(dest, { type: node.type, head: row.id });
             if (x === from) last = row.id;
           }

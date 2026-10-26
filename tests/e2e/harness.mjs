@@ -9,17 +9,22 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { otpFromLog, uploadResult, watchHas, fixture } from './helpers.mjs';
 import { DaemonSocket, smbEnabled } from './daemon-socket.mjs';
+import { m3Checks } from './m3.mjs';
+import { desktopChecks } from './desktop.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const work = process.argv[2];
 assert(work?.startsWith('/private/tmp/unlispace-e2e.') || work?.startsWith('/tmp/unlispace-e2e.'), 'run through tests/e2e/run.sh');
 const apiPort = Number(process.env.E2E_API_PORT ?? 8788);
 const dpPort = Number(process.env.E2E_DATA_PORT ?? 8787);
+const m3Enabled = process.env.E2E_M3 !== '0';
+const s3Port = Number(process.env.E2E_S3_PORT ?? 8789);
+const s3 = `http://127.0.0.1:${s3Port}`;
 const inspectorPort = Number(process.env.E2E_INSPECTOR_PORT ?? 9230);
 const api = `http://127.0.0.1:${apiPort}`;
 const endpoint = `http://127.0.0.1:${dpPort}`;
 const mountpoint = join(work, 'mount');
-const builtBinary = join(root, 'engine/target/debug/ulsd');
+const builtBinary = resolve(process.env.E2E_ENGINE_BIN ?? join(root, 'engine/target/debug/ulsd'));
 // Other agents build the shared target; pin the executable for this run.
 const binary = join(work, 'ulsd');
 const wrangler = join(root, 'cloud/api/node_modules/wrangler/bin/wrangler.js');
@@ -40,6 +45,8 @@ for (const key of Object.keys(env)) {
 }
 env.CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV = 'false';
 env.CLOUDFLARE_CF_FETCH_ENABLED = 'false';
+// Raw-token fixture commands must never resolve names through the user's signed-in daemon.
+env.ULS_SOCKET = join(work, 'must-not-use-user-daemon.sock');
 let writeToken, readToken, session, drive, code, apiWorker, dpWorker, watcher, nfs;
 let original, initial, duplicate, edited, restored;
 let cacheSandbox = [];
@@ -48,7 +55,7 @@ let smbDaemon, control, smbMountpoint;
 const smbRoot = join(work, 'smb-state/mnt');
 
 function safe(message) {
-  let result = String(message);
+  let result = String(message).replace(/\u001b\[[0-9;]*m/g, '');
   for (const secret of secrets) if (secret) result = result.replaceAll(secret, '[redacted]');
   return result.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted JWT]').replaceAll('\n', ' ').slice(0, 400);
 }
@@ -118,7 +125,7 @@ async function cli(args, { token = writeToken, allowFailure = false, timeout = 3
 }
 
 async function request(base, path, { token, body, method = body === undefined ? 'GET' : 'POST' } = {}) {
-  assert(base === api || base === endpoint, 'only local Worker requests are allowed');
+  assert(base === api || base === endpoint || base === s3, 'only local Worker requests are allowed');
   const headers = {};
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined && !Buffer.isBuffer(body)) headers['content-type'] = 'application/json';
@@ -166,14 +173,15 @@ async function freePort(port) {
 }
 
 async function setup() {
-  assert.equal(new Set([apiPort, dpPort, inspectorPort, inspectorPort + 1]).size, 4, 'HTTP and inspector ports must be distinct');
-  for (const port of [apiPort, dpPort, inspectorPort, inspectorPort + 1]) await freePort(port);
+  const ports = [apiPort, dpPort, inspectorPort, inspectorPort + 1, ...(m3Enabled ? [s3Port, inspectorPort + 2] : [])];
+  assert.equal(new Set(ports).size, ports.length, 'HTTP and inspector ports must be distinct');
+  for (const port of ports) await freePort(port);
   await copyFile(builtBinary, binary);
   const require = createRequire(join(root, 'cloud/api/package.json'));
   const installed = require('wrangler/package.json').version;
   assert(installed.startsWith('4.'), 'install the pinned cloud/api Wrangler v4 dependency first');
   const ts = require('typescript');
-  for (const service of ['api', 'data-plane']) {
+  for (const service of ['api', 'data-plane', ...(m3Enabled ? ['s3-gateway'] : [])]) {
     const path = join(root, 'cloud', service, 'wrangler.jsonc');
     const parsed = ts.parseConfigFileTextToJson(path, await readFile(path, 'utf8'));
     assert(!parsed.error, `cannot parse ${service} Wrangler config`);
@@ -184,7 +192,7 @@ async function setup() {
     config.main = resolve(dirname(path), config.main);
     delete config.$schema;
     delete config.observability;
-    config.dev = { ip: '127.0.0.1', port: service === 'api' ? apiPort : dpPort, inspector_port: service === 'api' ? inspectorPort + 1 : inspectorPort };
+    config.dev = { ip: '127.0.0.1', port: service === 'api' ? apiPort : service === 'data-plane' ? dpPort : s3Port, inspector_port: service === 'api' ? inspectorPort + 1 : service === 'data-plane' ? inspectorPort : inspectorPort + 2 };
     for (const bindings of [config.r2_buckets, config.d1_databases, config.kv_namespaces, config.services]) {
       for (const binding of bindings ?? []) {
         assert(binding.remote !== true, 'remote bindings are forbidden');
@@ -193,8 +201,12 @@ async function setup() {
     }
     assert(!config.ai && !config.vectorize && !config.browser && !config.hyperdrive, 'external service binding is forbidden');
     config.vars = { ...config.vars, ULS_ISSUER: api };
-    if (service === 'api') Object.assign(config.vars, { ULS_DEV_LOG_OTP: '1', ULS_DATA_ENDPOINT: endpoint });
-    else config.vars.ULS_ALLOW_DEV_TOKEN = '0';
+    if (service === 'api') {
+      if (process.env.E2E_DESKTOP === '1') config.vars.ULS_WEB_ORIGIN = `http://127.0.0.1:${Number(process.env.E2E_WEB_PORT ?? 21773)}`;
+      Object.assign(config.vars, { ULS_DEV_LOG_OTP: '1', ULS_DATA_ENDPOINT: endpoint });
+      if (m3Enabled) config.secrets.required.push('ULS_ACCESS_KEY_MASTERS');
+    }
+    else if (service === 'data-plane') config.vars.ULS_ALLOW_DEV_TOKEN = '0';
     await mkdir(join(work, service));
     await writeFile(join(work, service, 'wrangler.json'), JSON.stringify(config));
   }
@@ -204,7 +216,10 @@ async function setup() {
   const blockKey = randomBytes(32).toString('hex');
   secrets.push(privateJwk, blockKey);
   const jwks = JSON.stringify({ keys: [{ ...publicKey.export({ format: 'jwk' }), ...attributes }] });
-  await writeFile(join(work, 'api/.dev.vars'), `ULS_JWT_PRIVATE_JWK=${privateJwk}\nULS_JWT_PUBLIC_JWKS=${jwks}\n`, { mode: 0o600 });
+  const keyMaster = randomBytes(32).toString('base64');
+  secrets.push(keyMaster);
+  if (m3Enabled) await writeFile(join(work, 's3-gateway/.dev.vars'), `ULS_JWT_PRIVATE_JWK=${privateJwk}\n`, { mode: 0o600 });
+  await writeFile(join(work, 'api/.dev.vars'), `ULS_JWT_PRIVATE_JWK=${privateJwk}\nULS_JWT_PUBLIC_JWKS=${jwks}\nULS_ACCESS_KEY_MASTERS={"1":"${keyMaster}"}\n`, { mode: 0o600 });
   await writeFile(join(work, 'data-plane/.dev.vars'), `ULS_JWT_PUBLIC_JWKS=${jwks}\nULS_BLOCK_KEY=${blockKey}\n`, { mode: 0o600 });
   await mkdir(mountpoint);
   // On an ordinary Mac, prevent the CLI from writing its hard-coded per-user cache.
@@ -219,14 +234,26 @@ async function setup() {
   console.log('SETUP applying local D1 migrations (120 s deadline)');
   const migrate = await command(process.execPath, [wrangler, 'd1', 'migrations', 'apply', 'DB', '--local', '--persist-to', join(work, 'api-state'), ...configArgs('api')], {}, 120000);
   assert.equal(migrate.code, 0, `D1 migrations failed: ${safe(migrate.stderr)}`);
+  if (m3Enabled) assert(migrate.stdout.includes('0003_m3.sql'), 'M3 migration 0003 was not applied');
   console.log('SETUP starting isolated local Workers (45 s deadline)');
-  dpWorker = start(process.execPath, [wrangler, 'dev', '--local', '--port', String(dpPort), '--inspector-port', String(inspectorPort), '--persist-to', join(work, 'dp-state'), ...configArgs('data-plane')]);
-  apiWorker = start(process.execPath, [wrangler, 'dev', '--local', '--port', String(apiPort), '--inspector-port', String(inspectorPort + 1), '--persist-to', join(work, 'api-state'), ...configArgs('api')]);
-  for (const base of [endpoint, api]) await until(async () => {
-    for (const worker of [apiWorker, dpWorker]) assert(worker.child.exitCode === null, `Worker exited: ${safe(worker.stderr)}`);
-    try { return (await request(base, '/healthz')).status === 200; } catch { return false; }
-  }, 45000, `Worker startup timed out at ${base}`);
-  return `Wrangler ${installed}; api :${apiPort}, data :${dpPort}, inspector :${inspectorPort}; D1 migrated`;
+  const workers = [];
+  async function launch(service, port, inspector, state) {
+    const worker = start(process.execPath, [wrangler, 'dev', '--local', '--port', String(port), '--inspector-port', String(inspector), '--persist-to', join(work, state), ...configArgs(service)]);
+    workers.push(worker);
+    // Publish each provider before starting consumers; healthz alone does not imply registry readiness.
+    await until(async () => {
+      for (const record of workers) assert(record.child.exitCode === null, `Worker exited: ${safe(record.stderr)}`);
+      try {
+        await access(join(work, 'registry', service === 's3-gateway' ? 'unlispace-s3' : `unlispace-${service}`));
+        return (await request(`http://127.0.0.1:${port}`, '/healthz')).status === 200;
+      } catch { return false; }
+    }, 45000, `${service} health/registry startup timed out`);
+    return worker;
+  }
+  dpWorker = await launch('data-plane', dpPort, inspectorPort, 'dp-state');
+  apiWorker = await launch('api', apiPort, inspectorPort + 1, 'api-state');
+  if (m3Enabled) await launch('s3-gateway', s3Port, inspectorPort + 2, 's3-state');
+  return `Wrangler ${installed}; api :${apiPort}, data :${dpPort}, inspector :${inspectorPort}${m3Enabled ? `; s3 :${s3Port}, inspector :${inspectorPort + 2}; migration 0003 applied` : ''}; D1 migrated`;
 }
 
 async function cloudChecks() {
@@ -250,8 +277,15 @@ async function cloudChecks() {
   });
   await check('cloud 05 My Space + ready drive via service binding', async () => {
     assert(session, 'requires session');
-    const orgs = await json(api, '/orgs', { token: session.accessToken });
-    const org = orgs.orgs[0];
+    let org;
+    // Local registry proxies can become ready just after healthz; /orgs retries provisioning.
+    await until(async () => {
+      org = (await json(api, '/orgs', { token: session.accessToken })).orgs[0];
+      return org.drives[0]?.status === 'ready';
+    }, 10000, 'drive provisioning did not become ready through DataPlaneAdmin').catch(error => {
+      const detail = (apiWorker.stdout + apiWorker.stderr).split('\n').filter(line => line.includes('createDrive failed')).at(-1);
+      throw new Error(`${error.message}: ${safe(detail ?? 'no RPC detail logged')}`);
+    });
     assert.equal(org.name, 'My Space');
     assert.equal(org.role, 'owner');
     assert.equal(org.drives[0].status, 'ready');
@@ -574,6 +608,43 @@ async function smbChecks() {
     assert(copies.stdout.includes(event.data.copy.slice(1)), 'conflict copy missing from independent listing');
     return 'conflict event captured; remote head retained; local copy byte-identical';
   });
+  await check('smb offline pin survives cache pressure and data-plane outage', async () => {
+    assert(smbMountpoint && control, 'requires mounted daemon');
+    const path = '/smb-safe.txt';
+    await control.call('drive.pin', { driveId: drive, path, pinned: true });
+    const pin = (await control.call('pins.list', { driveId: drive })).pins.find(item => item.path === path);
+    assert(pin && pin.bytes > 0 && pin.cachedBytes === pin.bytes, 'pin must finish prefetching');
+    const expected = join(work, 'offline-expected.txt');
+    await writeFile(expected, replacement);
+    try {
+      await control.call('config.set', { cacheCapBytes: 1 });
+      const cached = (await control.call('pins.list', { driveId: drive })).pins.find(item => item.path === path);
+      assert.equal(cached?.cachedBytes, pin.bytes, 'cache pressure evicted pinned bytes');
+      signal(dpWorker, 'SIGSTOP');
+      // Resume independently: a killed cmp can stay in kernel I/O until the service returns.
+      const resume = setTimeout(() => signal(dpWorker, 'SIGCONT'), 2500);
+      try {
+        const compared = await command('/usr/bin/cmp', [expected, join(smbMountpoint, path.slice(1))], {}, 2000);
+        assert.equal(compared.code, 0, 'pinned mounted file was unavailable with data-plane processes suspended');
+      } finally { clearTimeout(resume); signal(dpWorker, 'SIGCONT'); }
+    } finally {
+      await control.call('config.set', { cacheCapBytes: 20_000_000_000 });
+      await control.call('drive.pin', { driveId: drive, path, pinned: false });
+    }
+    return 'real prefetch; 1-byte cache cap; kernel SMB bytes matched while data-plane process group was suspended';
+  });
+  await check('smb journal cap rejects upload without partial remote data', async () => {
+    assert(control && smbMountpoint, 'requires mounted daemon');
+    await until(async () => (await control.call('uploads')).pending.length === 0, 10000, 'prior uploads did not drain');
+    const source = join(work, 'over-cap.txt');
+    await writeFile(source, 'exceeds the one-byte journal cap');
+    try {
+      await control.call('config.set', { journalCapBytes: 1 });
+      await assert.rejects(control.call('upload.queue', { driveId: drive, files: [{ local: source, path: 'must-not-upload.txt' }] }), /journal_full/);
+      assert(!(await control.call('uploads')).pending.some(item => item.path === '/must-not-upload.txt'));
+      assert(await gone('must-not-upload.txt'), 'rejected upload published partial data');
+    } finally { await control.call('config.set', { journalCapBytes: 10 * 1024 * 1024 * 1024 }); }
+  });
   await check('smb drive.unmount + daemon shutdown leaves no mounts', async () => {
     assert(smbMountpoint && control, 'requires SMB mount');
     await control.call('drive.unmount', { driveId: drive });
@@ -622,9 +693,20 @@ for (const signalName of ['SIGINT', 'SIGTERM']) process.once(signalName, () => {
 try {
   await check('setup local Workers + D1', setup);
   if (rows[0].status === 'PASS') {
+    if (process.env.E2E_DESKTOP === '1') {
+      if (process.env.E2E_DESKTOP_BROWSER === '1') {
+        const port = Number(process.env.E2E_WEB_PORT ?? 21773);
+        await freePort(port);
+        start(process.execPath, [join(root, 'web/node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--config', join(root, 'web/vite.config.ts'), join(root, 'web')], { VITE_API_URL: api });
+        await until(async () => { try { return (await fetch(`http://127.0.0.1:${port}`)).ok; } catch { return false; } }, 15000, 'desktop web UI did not start');
+      }
+      await desktopChecks({ root, work, api, endpoint, apiWorker, binary, check, json, until, start, stop, command, secrets });
+    }
     await cloudChecks();
     await engineChecks();
     await smbChecks();
+    if (m3Enabled) await m3Checks({ root, work, api, endpoint, s3, drive, session, apiWorker, binary, cacheSandbox, wrangler, check, command, request, json, until, secrets });
+    else console.log('M3 phase disabled (E2E_M3=0)');
   }
 } catch (error) {
   rows.push({ status: 'FAIL', check: 'harness', detail: safe(error.message) });
@@ -633,7 +715,7 @@ try {
 }
 console.log('\nSTATUS | CHECK | DETAIL');
 console.log('-------|-------|-------');
-for (const row of rows) console.log(`${row.status} | ${row.check} | ${row.detail}`);
+for (const row of rows) console.log(`${row.status} | ${row.check} | ${row.detail}`.trimEnd());
 const passed = rows.filter(row => row.status === 'PASS').length;
 const failed = rows.length - passed;
 console.log(`RESULT: ${passed} passed, ${failed} failed`);

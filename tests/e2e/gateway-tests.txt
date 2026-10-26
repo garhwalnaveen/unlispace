@@ -1,0 +1,50 @@
+
+> unlispace-s3@0.0.0 test
+> vitest run --maxWorkers=1
+
+
+ RUN  v4.1.12 /Users/naveen/unlispace/cloud/s3-gateway
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+console warning; message = Called .text() on an HTTP body which does not appear to be text. The body's Content-Type is "application/octet-stream". The result will probably be corrupted. Consider checking the Content-Type header before interpreting entities as text.
+console warning; message = Called .text() on an HTTP body which does not appear to be text. The body's Content-Type is "application/octet-stream". The result will probably be corrupted. Consider checking the Content-Type header before interpreting entities as text.
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+console warning; message = Called .text() on an HTTP body which does not appear to be text. The body's Content-Type is "application/octet-stream". The result will probably be corrupted. Consider checking the Content-Type header before interpreting entities as text.
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+console warning; message = Called .text() on an HTTP body which does not appear to be text. The body's Content-Type is "application/octet-stream". The result will probably be corrupted. Consider checking the Content-Type header before interpreting entities as text.
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+
+ Test Files  11 passed (11)
+      Tests  87 passed (87)
+   Start at  00:36:06
+   Duration  99.48s (transform 6.32s, setup 0ms, import 70.22s, tests 15.22s, environment 5ms)
+

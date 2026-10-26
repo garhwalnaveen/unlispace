@@ -511,6 +511,10 @@ impl Engine {
             cached += n;
             self.emit(&Event::Pin(PinEvent {drive_id:id.clone(),path:slashed(&path),cached_bytes:cached,bytes}));
         }
+        let mounted = self.mounts().get(&id).and_then(|entry| entry.vfs.clone());
+        if let Some(vfs) = mounted {
+            vfs.warm_metadata(&path).await.map_err(|_| ErrorBody::new(code::OFFLINE,"pin metadata prefetch failed; retry to resume"))?;
+        }
         Ok(json!({}))
     }
 

@@ -32,6 +32,8 @@ export function migrateNodes(sql: SqlStorage): void {
  CASE WHEN parent='' THEN path ELSE substr(path,length(parent)+2) END,
  type,head,size,ctype,mtime,seq FROM nodes_m0`);
 		sql.exec("DROP TABLE nodes_m0");
+		if (sql.exec<{name:string}>("PRAGMA table_info(versions)").toArray().some(c => c.name === "node_id"))
+			sql.exec("UPDATE versions SET node_id=NULL");
 	}
 }
 
@@ -50,14 +52,15 @@ export class NodeTree {
 		return node && { ...node, path };
 	}
 
-	put(path: string, data: { type: string; head: string; size: number; ctype: string | null; mtime: number; seq: number }): void {
+	put(path: string, data: { type: string; head: string; size: number; ctype: string | null; mtime: number; seq: number }, id = crypto.randomUUID()): void {
 		const at = path.lastIndexOf("/");
 		const parent = at < 0 ? "" : this.get(path.slice(0, at))!.id;
 		const name = path.slice(at + 1);
 		this.sql.exec(`INSERT INTO nodes(id,parent_id,name,type,head,size,ctype,mtime,seq) VALUES(?,?,?,?,?,?,?,?,?)
+ ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,name=excluded.name,type=excluded.type,head=excluded.head,size=excluded.size,ctype=excluded.ctype,mtime=excluded.mtime,seq=excluded.seq
  ON CONFLICT(parent_id,name) DO UPDATE SET type=excluded.type,head=excluded.head,size=excluded.size,
  ctype=excluded.ctype,mtime=excluded.mtime,seq=excluded.seq`,
-			crypto.randomUUID(), parent, name, data.type, data.head, data.size, data.ctype, data.mtime, data.seq);
+			id, parent, name, data.type, data.head, data.size, data.ctype, data.mtime, data.seq);
 	}
 
 	detach(id: string): void {
@@ -77,7 +80,7 @@ export class NodeTree {
 			.map((n) => ({ ...n, path: path ? path + "/" + n.name : n.name }));
 	}
 
-	/** Only reads descendants; rename/delete never write one row per child. */
+	/** Bounded subtree validation; path history writes are set-based. */
 	descendants(id: string): SqlStorageCursor<NodeRow> {
 		return this.sql.exec<NodeRow>(`WITH RECURSIVE sub AS (
  SELECT *,name AS path FROM nodes WHERE parent_id=?

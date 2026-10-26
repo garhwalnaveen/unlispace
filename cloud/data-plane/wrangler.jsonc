@@ -41,7 +41,7 @@
         "ULS_ALLOW_DEV_TOKEN": "0",
         "ULS_GC_DELETE": "0",
         // Fill the exact deployed web origin; no wildcard or unresolved domain is allowed.
-        "ULS_WEB_ORIGINS": ""
+        "ULS_WEB_ORIGINS": "https://unlispace-web.__WORKERS_DOMAIN__"
       }
     }
   }

@@ -16,10 +16,10 @@ export function Home() {
     <>
       <header className="page-heading">
         <div>
-          <p className="eyebrow">YOUR WORK, WITH ROOM TO GROW</p>
+          <p className="eyebrow">WORKSPACE / OVERVIEW</p>
           <h1>Your drives</h1>
           <p className="muted">
-            A familiar place for everything you’re working on.
+            Everything you’re working on, with room to grow.
           </p>
         </div>
       </header>
@@ -63,7 +63,7 @@ export function Home() {
               </div>
               <div className="actions"><Link to={`/orgs/${encodeURIComponent(org.id)}/billing`}>Billing</Link>
               {canManage && (
-                <button onClick={() => setAction({ kind: "create", org })}>
+                <button className="primary" onClick={() => setAction({ kind: "create", org })}>
                   + New drive
                 </button>
               )}</div>

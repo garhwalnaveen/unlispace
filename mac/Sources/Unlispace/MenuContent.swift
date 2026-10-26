@@ -10,10 +10,20 @@ struct MenuContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Unlispace", systemImage: "square.stack.3d.up.fill").font(.headline)
+                Spacer()
+                Button("Open app") { AppDelegate.showWorkspace() }
+            }
+            Divider()
             if !showsSignedInUI {
-                Text("Signed out")
+                Text("Your cloud drives, right in Finder.").foregroundStyle(.secondary)
                 Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
                     .disabled(model.signingIn)
+                if model.signingIn {
+                    Button("Open browser") { model.openSignInBrowser() }
+                    Button("Cancel sign-in") { model.cancelSignIn() }
+                }
                 if let err = model.lastError { Text(err).lineLimit(3) }
             } else {
                 if let acct = model.account { Text(acct.email) }
@@ -26,7 +36,7 @@ struct MenuContent: View {
                 Button(model.transferLine ?? "Transfers") { showingTransfers.toggle() }
                     .accessibilityLabel("Show transfers")
                     .accessibilityValue(model.transferLine ?? "No transfers in progress")
-                    .popover(isPresented: $showingTransfers) { TransfersView(transfers: model.transfers, uploads: model.uploads) }
+                    .popover(isPresented: $showingTransfers) { TransfersView(transfers: model.transfers, uploads: model.uploads, available: !model.usingMock) }
                 if let conflict = model.lastConflict {
                     Label("Conflicting edit: \(conflict.path). Saved as \(conflict.copy).", systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -65,6 +75,7 @@ struct MenuContent: View {
                                 .disabled(d.mountState == .mounting || d.mountState == .unmounting)
                         }
                     }
+                    .disabled(model.usingMock || model.isDriveBusy(d))
                     .accessibilityLabel("\(d.name), \(d.mountState.rawValue), drive actions")
                 }
             }
@@ -89,7 +100,7 @@ struct MenuContent: View {
         }
         .buttonStyle(.borderless)
         .padding(16)
-        .frame(width: 320)
+        .frame(width: 360)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Unlispace menu")
     }

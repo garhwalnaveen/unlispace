@@ -52,3 +52,36 @@ import Foundation
         }
     }
 }
+
+@Suite @MainActor struct BrowserFallbackTests {
+    @Test func onlyPendingStateMatchedCallbackCompletesFallback() async throws {
+        let auth = DesktopAuth()
+        let url = URL(string: "uls://auth/callback#code=one-time&state=expected")!
+        #expect(!auth.receiveCallback(url))
+        let waiting = Task { try await auth.waitForCallback(url: URL(string: "https://example.invalid/start")!, state: "expected", start: { _ in true }) }
+        await Task.yield()
+        try #require(auth.isAwaitingCallback)
+        #expect(!auth.receiveCallback(URL(string: "uls://auth/callback#code=forged&state=wrong")!))
+        #expect(auth.isAwaitingCallback)
+        #expect(auth.receiveCallback(url))
+        #expect(try await waiting.value == url)
+        #expect(!auth.receiveCallback(url))
+    }
+    @Test func providerDenialCompletesThePendingFallback() async throws {
+        let auth = DesktopAuth()
+        let waiting = Task { try await auth.waitForCallback(url: URL(string: "https://example.invalid/start")!, state: "expected", start: { _ in true }) }
+        await Task.yield()
+        try #require(auth.isAwaitingCallback)
+        #expect(auth.receiveCallback(URL(string: "uls://auth/callback#state=expected&error=access_denied")!))
+        await #expect(throws: AuthError.providerError("access_denied")) { try await waiting.value }
+    }
+    @Test func cancelledFallbackRejectsLateCallback() async throws {
+        let auth = DesktopAuth()
+        let waiting = Task { try await auth.waitForCallback(url: URL(string: "https://example.invalid/start")!, state: "expected", start: { _ in true }) }
+        await Task.yield()
+        try #require(auth.isAwaitingCallback)
+        auth.cancel()
+        await #expect(throws: AuthError.cancelled) { try await waiting.value }
+        #expect(!auth.receiveCallback(URL(string: "uls://auth/callback#code=late&state=expected")!))
+    }
+}

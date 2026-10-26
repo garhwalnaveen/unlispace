@@ -1,0 +1,197 @@
+{
+  "fixture": {
+    "bytes": 50000000,
+    "sha256": "85d955e73778e989dbdbb58b65e2c24ab91a0766ac9f347568ce254509033b1d",
+    "seconds": 0.3345283330127131,
+    "data": "os.urandom; incompressible; not sparse"
+  },
+  "apps": {
+    "space": {
+      "write": {
+        "utc": "2026-10-26T07:40:22.106005+00:00",
+        "elapsed_seconds": 0.764993290998973,
+        "write_seconds": 0.014066624993574806,
+        "fsync_seconds": 0.7499855830101296,
+        "bytes": 50000000,
+        "mb_per_second": 65.40360677568029,
+        "write_error": null,
+        "sync_error": null,
+        "close_error": null,
+        "error": null
+      },
+      "upload": {
+        "last_pending_seconds": 37.33684825897217,
+        "first_empty_seconds": 39.39758324623108,
+        "MB_s": 1.2691133790492894,
+        "sample_gap_max_s": 2.103066921234131,
+        "engine": {
+          "pid": 76192,
+          "cpu_seconds": 3.579999999999984,
+          "average_cpu_percent_one_core": 9.075279710517094,
+          "sampled_peak_rss_MiB": 683.84375,
+          "sampled_min_rss_MiB": 32.296875
+        }
+      },
+      "cold_read": {
+        "utc": "2026-10-26T07:41:07.756107+00:00",
+        "elapsed_seconds": 10.51345112499257,
+        "bytes": 50000000,
+        "sha256": "85d955e73778e989dbdbb58b65e2c24ab91a0766ac9f347568ce254509033b1d",
+        "integrity": true,
+        "mb_per_second": 4.7563295509481245,
+        "first_block_seconds": 2.7526306670042686,
+        "close_error": null,
+        "read_error": null,
+        "method": "Fresh read-only retained-v1 SMB peer; empty independent state and cache"
+      },
+      "cold_engine": {
+        "pid": 1990,
+        "cpu_seconds": 1.3699999999999999,
+        "average_cpu_percent_one_core": 12.756972792611883,
+        "sampled_peak_rss_MiB": 167.734375,
+        "sampled_min_rss_MiB": 29.421875
+      },
+      "warm_reads": {
+        "times_s": [
+          0.2676046660053544,
+          0.052709000010509044,
+          0.05522545799612999
+        ],
+        "MB_s": [
+          187.37925749114981,
+          956.8553902053717,
+          913.8742098122553
+        ],
+        "median_s": 0.05522545799612999,
+        "median_MB_s": 913.8742098122553,
+        "all_sha256_pass": true
+      },
+      "preparation": {
+        "seconds": 6.030419957998674,
+        "pid": 1990,
+        "fresh_state": true,
+        "fresh_cache": true,
+        "read_only": true,
+        "signing_override": false
+      }
+    },
+    "unlispace": {
+      "write": {
+        "utc": "2026-10-26T07:41:20.415932+00:00",
+        "elapsed_seconds": 37.17058462499699,
+        "write_seconds": 0.08334312499209773,
+        "fsync_seconds": 37.07369145800476,
+        "bytes": 50000000,
+        "mb_per_second": 1.3451650026540367,
+        "write_error": null,
+        "sync_error": null,
+        "close_error": null,
+        "error": null
+      },
+      "upload": {
+        "last_pending_seconds": 94.18482089042664,
+        "first_empty_seconds": 96.2364490032196,
+        "MB_s": 0.5195536672215249,
+        "sample_gap_max_s": 3.2485530376434326,
+        "engine": {
+          "pid": 94738,
+          "cpu_seconds": 38.05,
+          "average_cpu_percent_one_core": 39.51950270561409,
+          "sampled_peak_rss_MiB": 75.203125,
+          "sampled_min_rss_MiB": 31.078125
+        }
+      },
+      "cold_read": {
+        "utc": "2026-10-26T07:42:59.415395+00:00",
+        "elapsed_seconds": 66.60380508299568,
+        "bytes": 50000000,
+        "sha256": "85d955e73778e989dbdbb58b65e2c24ab91a0766ac9f347568ce254509033b1d",
+        "integrity": true,
+        "mb_per_second": 0.7507158375836275,
+        "first_block_seconds": 7.413854457990965,
+        "close_error": null,
+        "read_error": null,
+        "method": "Fresh SMB remount; exact benchmark manifest shards temporarily removed from disk cache; original signing retained"
+      },
+      "cold_engine": {
+        "pid": 94738,
+        "cpu_seconds": 47.42,
+        "average_cpu_percent_one_core": 71.14128985055693,
+        "sampled_peak_rss_MiB": 101.109375,
+        "sampled_min_rss_MiB": 41.140625
+      },
+      "warm_reads": {
+        "times_s": [
+          7.662750290997792,
+          0.049211292003747076,
+          0.043235250006546266
+        ],
+        "MB_s": [
+          6.525469181393927,
+          1020.7544906099986,
+          1162.043017738971
+        ],
+        "median_s": 0.049211292003747076,
+        "median_MB_s": 1020.7544906099986,
+        "all_sha256_pass": true
+      },
+      "preparation": {
+        "seconds": 2.464489791993401,
+        "source_shards_moved": 0,
+        "manifest_shards": 20,
+        "all_manifest_shards_absent_before_mount": true,
+        "original_mount_path_restored": true,
+        "security_settings_unchanged": true
+      }
+    }
+  },
+  "conditions": {
+    "power": "Battery Power, 69 percent at start; battery Low Power Mode configured on",
+    "idle_sleep_prevention": "caffeinate -di for duration of benchmark",
+    "order": [
+      "space",
+      "unlispace"
+    ],
+    "size_bytes": 50000000,
+    "unlispace_engine_pid": 94738,
+    "space_engine_pid": 76192,
+    "earlier_sleep_interrupted_50mb_run_excluded": true,
+    "end_battery_percent": 67,
+    "history_note": "Space engine remained running through the earlier stress run; Unlispace engine was restarted to cancel the earlier CLI download. RSS peaks are observations, not a matched-lifecycle memory ranking."
+  },
+  "space_speedup": {
+    "local_save": 48.58942563595227,
+    "upload": 2.442699299643613,
+    "cold_read": 6.3351038865501685
+  },
+  "cleanup": {
+    "at": 1793000982.653399,
+    "temporary_peer_mounts_removed": true,
+    "cache_backups_restored": true,
+    "local_generated_payload_cleanup": [
+      {
+        "path": "mac/.build/performance-2026-10-26/space-readonly-peer",
+        "logical_bytes_removed": 1000114688
+      },
+      {
+        "path": "mac/.build/performance-2026-10-26/.unlispace-cloud-retrieved.bin.uls-part",
+        "logical_bytes_removed": 956111375
+      },
+      {
+        "path": "mac/.build/performance-50mb-2026-10-26/space-readonly-peer",
+        "logical_bytes_removed": 50118784
+      },
+      {
+        "path": "mac/.build/performance-50mb-awake-2026-10-26/space-readonly-peer",
+        "logical_bytes_removed": 50155648
+      }
+    ],
+    "remote_benchmark_files_retained": true,
+    "original_space_mount_restored": "unmounted; GUI showed 0 mounted",
+    "original_unlispace_mount_restored": "mounted; engine idle, pendingOps 0, uploads empty"
+  },
+  "binary_sha256": {
+    "space_engine": "4df2aeda9f45b3c12c50985c0ab8e27ccb245dce90e73fe8a8f621d46b4edc93",
+    "unlispace_engine": "6fcbc595f484099bd259d4ac1e2a127b55fad8b43e8cacf088c65161643107b6"
+  }
+}

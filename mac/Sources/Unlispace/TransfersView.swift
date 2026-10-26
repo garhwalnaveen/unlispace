@@ -5,10 +5,16 @@ struct TransfersView: View {
     var transfers: [TransferInfo]
     var uploads: UploadsSnapshot? = nil
 
+    var embedded = false
+    var available = true
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Transfers").font(.headline).accessibilityAddTraits(.isHeader)
+                if !embedded { Text("Transfers").font(.headline).accessibilityAddTraits(.isHeader) }
+                if !available {
+                    ContentUnavailableView("Connect to see transfers", systemImage: "arrow.up.arrow.down", description: Text("Sign in and connect the engine to follow your file transfers."))
+                }
                 if let uploads {
                     let used = ByteCountFormatter.string(fromByteCount: uploads.journalBytes, countStyle: .file)
                     let cap = ByteCountFormatter.string(fromByteCount: uploads.journalCapBytes, countStyle: .file)
@@ -21,8 +27,8 @@ struct TransfersView: View {
                             .font(.caption)
                     }
                 }
-                if transfers.isEmpty && (uploads?.pending.isEmpty ?? true) {
-                    Text("No transfers in progress.").foregroundStyle(.secondary)
+                if available && transfers.isEmpty && (uploads?.pending.isEmpty ?? true) {
+                    ContentUnavailableView("All caught up", systemImage: "checkmark.circle", description: Text("No transfers in progress. Add files to a mounted drive in Finder to upload them."))
                 } else {
                     VStack(alignment: .leading, spacing: 16) {
                         ForEach(transfers) { transfer in
@@ -45,8 +51,9 @@ struct TransfersView: View {
             }
         }
         .padding(16)
-        .frame(width: 340)
-        .frame(maxHeight: 400)
+        .frame(width: embedded ? nil : 340)
+        .frame(maxWidth: embedded ? .infinity : nil)
+        .frame(minHeight: embedded ? 280 : nil, maxHeight: embedded ? nil : 400)
     }
 
     private func progressText(_ transfer: TransferInfo) -> String {

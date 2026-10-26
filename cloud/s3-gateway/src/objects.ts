@@ -68,14 +68,7 @@ export async function getObject(c: ObjectContext): Promise<Response> {
     if (!selected || selected.op === "delete") throw new S3Error(404, "NoSuchVersion");
     versionId = selected.versionId;
   }
-  const saved = versionId ? await c.state.get<VersionAnnotation>(`version:${c.dp.drive}:${versionId}`) : undefined;
-  let manifest: Manifest;
-  try { manifest = versionId ? await c.dp.manifest(c.key, versionId) : await head(c.dp, c.key); }
-  catch (e) {
-    // A rename can move a historical version's path. Only use an annotation after checking current ownership.
-    if (!saved || !notFound(e, "NoSuchVersion") || saved.manifest.path !== c.key) throw e;
-    manifest = saved.manifest;
-  }
+  const manifest = versionId ? await c.dp.manifest(c.key, versionId) : await head(c.dp, c.key);
   await preconditions(c.request, manifest, true);
   let start = 0, end = manifest.size, status = 200;
   const headers = new Headers(await mutationHeaders(manifest));
@@ -194,20 +187,7 @@ export async function renameObject(c: ObjectContext): Promise<Response> {
   if (!from || from.startsWith("/") || new TextEncoder().encode(from).length > 1024 || (from.endsWith("/") && c.key.startsWith(from)) || from === c.key || from.endsWith("/") !== c.key.endsWith("/")) throw new S3Error(400, "InvalidArgument");
   const original = await head(c.dp, from);
   const conditions = await preconditions(c.request, original);
-  const paths = [from];
-  if (from.endsWith("/")) for await (const entry of c.dp.walk(from)) if (entry.type === "file") paths.push(entry.path);
-  const history = [];
-  for (const path of paths.filter(p => !p.endsWith("/"))) {
-    const dest = c.key + path.slice(from.length);
-    const versions = (await c.dp.versions(path)).filter(v => !["rename", "delete", "mkdir"].includes(v.op));
-    const manifests = await Promise.all(versions.map(async v => ({...await c.dp.manifest(path, v.versionId), path:dest})));
-    history.push({dest, versions, manifests});
-  }
   const result = await c.dp.commit([{ op: "rename", from, to: c.key, ifVersion: conditions.ifVersion ?? original.versionId }]);
-  for (const {dest, versions, manifests} of history) {
-    await c.state.put(`history:${c.dp.drive}:${dest}`, versions);
-    for (const manifest of manifests) await c.state.put(`archive:${c.dp.drive}:${dest}:${manifest.versionId}`, manifest);
-  }
   const manifest = await annotate(c, result, { ...original, path: c.key }, "rename");
   return new Response(null, { headers: await mutationHeaders(manifest) });
 }
@@ -218,11 +198,7 @@ export async function restoreObject(c: ObjectContext): Promise<Response> {
   const current = await optionalHead(c.dp, c.key);
   const conditions = await preconditions(c.request, current);
   const base = await c.dp.manifest(c.key, versionId);
-  // Archived content may retain its old data-plane path after a rename.
-  const archived = await c.state.get<Manifest>(`archive:${c.dp.drive}:${c.key}:${versionId}`);
-  const result = archived
-    ? await c.dp.commit([{op:"put", path:c.key, size:base.size, contentType:base.contentType ?? "application/octet-stream", mtimeMs:c.now(), shards:base.shards, ...conditions}])
-    : await c.dp.restore(c.key, versionId, conditions.ifVersion);
+  const result = await c.dp.restore(c.key, versionId, conditions.ifVersion);
   const manifest = await annotate(c, result, { ...base, mtimeMs: c.now() }, "restore", versionId);
   return new Response(null, { headers: { ...await mutationHeaders(manifest), "x-uls-restored-from": versionId } });
 }

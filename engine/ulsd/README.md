@@ -122,3 +122,13 @@ than file mtime. Subtree rollback follows the complete change feed and commits o
 subtree descendant history for rollback across directory renames; see `NEEDS.md`.
 
 Protocol handoff: `PROTOCOL-ADDITIONS.md`. Exact gate output summaries: `GATE-RESULTS.md`.
+
+
+For an explicitly daemon-less control-plane command, set `ULS_API` and `ULS_ACCESS_TOKEN`
+(a session access token, never a drive token): `uls fork DRIVE_ID NAME --json` then calls that
+API directly. Keys commands use the same explicit control-plane environment. This does not
+read or rotate a refresh token. Legacy `ULS_DEV_TOKEN` data commands use their supplied endpoint
+and raw drive ID without consulting another signed-in daemon's name resolver.
+
+Keeping a mounted path offline prefetches namespace/manifest metadata as well as shard bytes.
+Completed listings also cache missing metadata probes; remote changes invalidate those listings.

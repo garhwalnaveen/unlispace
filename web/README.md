@@ -88,7 +88,7 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
   annual checkout, paginated invoices, and the Dodo customer portal. Management controls and invoice
   requests are limited to owners/admins. Checkout honors the catalog's availability flag. Final
   prices are displayed by Dodo; the catalog currently provides no prices. Redirects require HTTPS.
-- Light/dark theme follows the OS initially, with a persistent manual toggle. Mobile layouts
+- System/light/dark appearance selector follows OS changes in System mode and persists a manual choice. Mobile layouts
   support 360 px. Native modal dialogs contain focus and Escape closes them. Inputs have labels,
   errors use live alerts, and status/progress updates are announced.
 
@@ -141,5 +141,6 @@ read-only controls, one-time key reveal/copy/revoke, checkout/portal requests, i
 cross-tab auth. The test suite uses one worker to limit shared-machine load. A 15-second test deadline
 accommodates existing UI tests under that load; golden fixtures have a 30-second deadline.
 
-No live Worker/R2 upload, Dodo checkout/portal, cookie migration, deployed CORS, or visual browser
-verification is claimed. No deployment is performed.
+UI styling was checked in desktop Chrome and at 360 px for sign-in, drive overview and folder listing; authenticated previews used temporary fixture data. The workspace uses a navigation rail on desktop and a compact navigation row on mobile. Drive management actions expand under Drive options.
+
+No live Worker/R2 upload, Dodo checkout/portal, cookie migration, or deployed CORS verification is claimed. No deployment is performed.

@@ -206,11 +206,12 @@ fn run_inner(cli: Cli) -> std::pin::Pin<Box<dyn std::future::Future<Output = Res
     Box::pin(async move {
     let json = cli.json;
     let mut cmd = cli.cmd.unwrap_or(Cmd::Daemon { action: None, socket: None, state_dir: None, secret_store: SecretStoreKind::Keychain, read_only: false });
+    let direct_control = std::env::var_os("ULS_ACCESS_TOKEN").is_some() && matches!(&cmd, Cmd::Fork { .. });
     let drive = match &mut cmd {
         Cmd::Put {drive,..} | Cmd::Get {drive,..} | Cmd::Ls {drive,..} | Cmd::Stat {drive,..} | Cmd::Versions {drive,..} | Cmd::History {drive,..} | Cmd::Restore {drive,..} | Cmd::Show {drive,..} | Cmd::Mkdir {drive,..} | Cmd::Rm {drive,..} | Cmd::Mv {drive,..} | Cmd::Watch {drive,..} | Cmd::Mount {drive,..} | Cmd::Pin {drive,..} | Cmd::Unpin {drive,..} | Cmd::Fork {drive,..} | Cmd::Drive {cmd: DriveCmd::Info {drive}} => Some(drive),
         _ => None,
     };
-    if let Some(drive) = drive && REQUEST_CLIENT.try_with(|_|()).is_err() && crate::control::socket()?.exists() {
+    if let Some(drive) = drive && !direct_control && std::env::var_os("ULS_DEV_TOKEN").is_none() && REQUEST_CLIENT.try_with(|_|()).is_err() && crate::control::socket()?.exists() {
         let value = crate::control::call("drive.resolve", serde_json::json!({"driveId":drive})).await?;
         *drive = value["driveId"].as_str().context("missing driveId")?.to_string();
     }
@@ -442,6 +443,12 @@ fn print_value(value: serde_json::Value, json: bool) -> Result<()> {
 }
 
 async fn api(method: &str, path: String, body: serde_json::Value) -> Result<serde_json::Value> {
+    if let Ok(token) = std::env::var("ULS_ACCESS_TOKEN") {
+        anyhow::ensure!(!token.trim().is_empty(), "ULS_ACCESS_TOKEN is empty");
+        let endpoint = std::env::var("ULS_API").context("ULS_API is required with ULS_ACCESS_TOKEN")?;
+        let client = Client::builder(endpoint, token).build()?;
+        return Ok(client.control_request(method, &path, Some(&body)).await?);
+    }
     crate::control::call("api.request",serde_json::json!({"method":method,"path":path,"body":body})).await
 }
 
