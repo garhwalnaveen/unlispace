@@ -48,7 +48,7 @@ function parseIfVersion(v: unknown): string | null | Fail {
 	return v;
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Validates the commit body and normalizes ops. */
 export function parseOps(body: unknown): NormOp[] | Fail {
@@ -61,29 +61,50 @@ export function parseOps(body: unknown): NormOp[] | Fail {
 		const ifVersion = parseIfVersion(raw.ifVersion);
 		if (typeof ifVersion === "object" && ifVersion !== null) return ifVersion;
 		const ifAbsent = raw.ifAbsent === true;
+		if (raw.ifAbsent !== undefined && typeof raw.ifAbsent !== "boolean") return bad(`ops[${i}]: ifAbsent must be a boolean`);
 		switch (raw.op) {
 			case "put": {
 				const p = parsePath(raw.path);
 				if (typeof p === "string") return bad(`ops[${i}]: ${p}`);
 				if (p.isFolder) return bad(`ops[${i}]: put path must not end with '/'`);
 				const size = raw.size;
-				if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) return bad(`ops[${i}]: size must be a non-negative integer`);
+				if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || size > 5 * 1024 ** 4) return bad(`ops[${i}]: size must be an integer from zero to 5 TiB`);
 				if (!Array.isArray(raw.shards)) return bad(`ops[${i}]: shards must be an array`);
+				const manifestRef = raw.manifestRef;
+				if (manifestRef !== undefined && (typeof manifestRef !== "string" || !/^tree:[a-f0-9]{64}$/.test(manifestRef) || raw.shards.length !== 0)) return bad("invalid paged manifest reference");
 				const shards: [string, number][] = [];
 				let sum = 0;
 				for (const s of raw.shards as unknown[]) {
-					if (!isObj(s) || typeof s.h !== "string" || !HASH_RE.test(s.h) || typeof s.n !== "number" || !Number.isSafeInteger(s.n) || s.n < 1) {
+					if (!isObj(s) || typeof s.h !== "string" || !HASH_RE.test(s.h) || typeof s.n !== "number" || !Number.isSafeInteger(s.n) || s.n < 1 || s.n > MAX_SHARD_BYTES) {
 						return bad(`ops[${i}]: each shard must be {h:<64 hex>, n:<positive integer>}`);
 					}
 					shards.push([s.h, s.n]);
 					sum += s.n;
 				}
-				if (sum !== size) return fail(400, "bad_manifest", { message: `ops[${i}]: sum(shards.n)=${sum} != size=${size}`, path: raw.path });
+				if (manifestRef === undefined && sum !== size) return fail(400, "bad_manifest", { message: `ops[${i}]: sum(shards.n)=${sum} != size=${size}`, path: raw.path });
 				const ctype = raw.contentType === undefined || raw.contentType === null ? "application/octet-stream" : raw.contentType;
 				if (typeof ctype !== "string") return bad(`ops[${i}]: contentType must be a string`);
 				const mtimeMs = raw.mtimeMs === undefined || raw.mtimeMs === null ? Date.now() : raw.mtimeMs;
 				if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs)) return bad(`ops[${i}]: mtimeMs must be a number`);
-				out.push({ op: "put", key: p.key, ifVersion, ifAbsent, size, ctype, mtimeMs: Math.trunc(mtimeMs), manifest: JSON.stringify(shards), shards });
+				let xattrs: string | undefined;
+                const attributeShards: [string, number][] = [];
+                if (raw.xattrs !== undefined) {
+                    if (!isObj(raw.xattrs) || Object.keys(raw.xattrs).length > 64) return bad("xattrs must contain at most 64 attributes");
+                    const attrs: Record<string, [string, number][]> = Object.create(null);
+                    let bytes = 0;
+                    for (const [name, value] of Object.entries(raw.xattrs)) {
+                        if (!name || name.includes("\0") || LONE_SURROGATE_RE.test(name) || enc.encode(name).length > 255 || !Array.isArray(value)) return bad("invalid xattr");
+                        attrs[name] = [];
+                        for (const shard of value) {
+                            if (!isObj(shard) || typeof shard.h !== "string" || !HASH_RE.test(shard.h) || typeof shard.n !== "number" || !Number.isSafeInteger(shard.n) || shard.n < 1 || shard.n > MAX_SHARD_BYTES) return bad("invalid xattr shard");
+                            bytes += shard.n;
+                            if (bytes > 50 * 1024 * 1024) return bad("xattrs exceed 50 MiB");
+                            attrs[name]!.push([shard.h, shard.n]); attributeShards.push([shard.h, shard.n]);
+                        }
+                    }
+                    xattrs = JSON.stringify(attrs);
+                }
+                out.push({ op: "put", key: p.key, ifVersion, ifAbsent, size, ctype, mtimeMs: Math.trunc(mtimeMs), ...(raw.mtimeMs === undefined || raw.mtimeMs === null ? {generatedMtime: true} : {}), manifest: manifestRef as string | undefined ?? JSON.stringify(shards), shards, ...(xattrs !== undefined ? {xattrs, attributeShards} : {}) });
 				break;
 			}
 			case "mkdir": {
@@ -116,7 +137,7 @@ export function parseOps(body: unknown): NormOp[] | Fail {
 	return out;
 }
 
-export function parseRestore(body: unknown): { key: string; versionId: string; ifVersion: string | null } | Fail {
+export function parseRestore(body: unknown): { key: string; versionId: string; ifVersion: string | null; ifAbsent: boolean } | Fail {
 	if (!isObj(body)) return bad("body must be an object");
 	const p = parsePath(body.path);
 	if (typeof p === "string") return bad(p);
@@ -124,5 +145,6 @@ export function parseRestore(body: unknown): { key: string; versionId: string; i
 	if (typeof body.versionId !== "string" || !VERSION_RE.test(body.versionId)) return bad("versionId must be a version id");
 	const ifVersion = parseIfVersion(body.ifVersion);
 	if (typeof ifVersion === "object" && ifVersion !== null) return ifVersion;
-	return { key: p.key, versionId: body.versionId, ifVersion };
+	if (body.ifAbsent !== undefined && typeof body.ifAbsent !== "boolean") return bad("ifAbsent must be a boolean");
+	return { key: p.key, versionId: body.versionId, ifVersion, ifAbsent: body.ifAbsent === true };
 }

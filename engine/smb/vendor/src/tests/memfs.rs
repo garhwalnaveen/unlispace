@@ -29,6 +29,13 @@ struct MemInner {
     read_only: std::collections::HashSet<String>,
     /// Handles opened and not yet closed.
     open_handles: usize,
+    /// Time every read takes, standing in for a backend that fetches data.
+    read_delay: std::time::Duration,
+    /// Time every write takes, standing in for a slow durable journal.
+    write_delay: std::time::Duration,
+    metadata_delay: std::time::Duration,
+    /// "write" and "flush" in the order the backend finished them.
+    completions: Vec<&'static str>,
 }
 
 impl Default for MemFsBackend {
@@ -49,6 +56,29 @@ impl MemFsBackend {
     /// Handles opened and not yet closed.
     pub fn open_handles(&self) -> usize {
         self.inner.lock().unwrap().open_handles
+    }
+
+    /// Makes every read take `delay` first.
+    pub fn with_read_delay(self, delay: std::time::Duration) -> Self {
+        self.inner.lock().unwrap().read_delay = delay;
+        self
+    }
+
+    /// Makes every write take `delay` first.
+    pub fn with_write_delay(self, delay: std::time::Duration) -> Self {
+        self.inner.lock().unwrap().write_delay = delay;
+        self
+    }
+
+    /// Stands in for uncached cloud metadata.
+    pub fn with_metadata_delay(self, delay: std::time::Duration) -> Self {
+        self.inner.lock().unwrap().metadata_delay = delay;
+        self
+    }
+
+    /// Writes and flushes in the order they completed.
+    pub fn completions(&self) -> Vec<&'static str> {
+        self.inner.lock().unwrap().completions.clone()
     }
 
     pub fn with_file(self, path: &str, contents: &[u8]) -> Self {
@@ -234,6 +264,10 @@ impl Handle for MemHandle {
         if self.is_dir {
             return Err(SmbError::IsDirectory);
         }
+        let delay = self.inner.lock().unwrap().read_delay;
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         let g = self.inner.lock().unwrap();
         let data = g.files.get(&self.key).ok_or(SmbError::NotFound)?;
         let start = offset as usize;
@@ -248,6 +282,10 @@ impl Handle for MemHandle {
         if self.is_dir {
             return Err(SmbError::IsDirectory);
         }
+        let delay = self.inner.lock().unwrap().write_delay;
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         let mut g = self.inner.lock().unwrap();
         let buf = g.files.get_mut(&self.key).ok_or(SmbError::NotFound)?;
         let needed = (offset as usize) + data.len();
@@ -255,14 +293,20 @@ impl Handle for MemHandle {
             buf.resize(needed, 0);
         }
         buf[offset as usize..offset as usize + data.len()].copy_from_slice(data);
+        g.completions.push("write");
         Ok(data.len() as u32)
     }
 
     async fn flush(&self) -> SmbResult<()> {
+        self.inner.lock().unwrap().completions.push("flush");
         Ok(())
     }
 
     async fn stat(&self) -> SmbResult<FileInfo> {
+        let delay = self.inner.lock().unwrap().metadata_delay;
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         let g = self.inner.lock().unwrap();
         let size = if self.is_dir {
             0
@@ -345,6 +389,10 @@ impl Handle for MemHandle {
     }
 
     async fn list_dir(&self, _pattern: Option<&str>) -> SmbResult<Vec<DirEntry>> {
+        let delay = self.inner.lock().unwrap().metadata_delay;
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         if !self.is_dir {
             return Err(SmbError::NotADirectory);
         }

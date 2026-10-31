@@ -82,8 +82,9 @@ export async function listKeys(ctx: Ctx, a: Authed): Promise<Response> {
 export async function createKey(ctx: Ctx, a: Authed): Promise<Response> {
 	const b = await readJson(ctx.req);
 	const orgId = str(b.workspaceId, 100);
-	if (!orgId || typeof b.access !== "string" || !Object.hasOwn(rank, b.access)) throw new HttpError(400, "bad_request", "workspaceId and access (read/write/admin) required");
-	const access = b.access as Access;
+	const requestedAccess = b.access === undefined ? "write" : b.access;
+	if (!orgId || typeof requestedAccess !== "string" || !Object.hasOwn(rank, requestedAccess)) throw new HttpError(400, "bad_request", "workspaceId required; access must be read/write/admin");
+	const access = requestedAccess as Access;
 	const max = await membership(ctx, a.userId, orgId);
 	if (rank[access] > rank[max]) throw new HttpError(403, "forbidden");
 	const drives = b.drives === undefined || b.drives === null ? null : b.drives;

@@ -219,3 +219,11 @@ async fn explicit_dev_token_never_resolves_through_an_existing_daemon_socket() {
     let stat: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(stat["size"], 7);
 }
+
+#[test]
+fn workspace_proxy_is_limited_to_known_routes_and_methods() {
+    use ulsd::engine::allowed_api_request as allowed;
+    for (method,path) in [("GET","/orgs"),("GET","/client-config"),("POST","/orgs/o_1/drives"),("GET","/orgs/o_1/members"),("POST","/orgs/o_1/billing/portal")] { assert!(allowed(method,path)); }
+    for path in ["//evil.example/orgs","/orgs/../keys","/orgs/o%2f1/drives","/orgs/o_1/drives?x=1","https://evil.example/orgs","/auth/refresh","/orgs/o_1/unknown"] { assert!(!allowed("GET",path)); }
+    assert!(!allowed("DELETE","/orgs")); assert!(!allowed("POST","/client-config"));
+}

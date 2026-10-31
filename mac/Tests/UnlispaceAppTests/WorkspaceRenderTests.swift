@@ -27,9 +27,23 @@ import UnlispaceKit
             ]
             model.pins = []
             try render(WorkspaceView(model: model).preferredColorScheme(scheme), name: "drives-\(suffix)", output: output, scheme: scheme)
+            try render(WorkspaceView(model: model).preferredColorScheme(scheme), name: "drives-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 800, height: 580))
+            try render(OnboardingView(model: AppModel(), finish: {}).preferredColorScheme(scheme), name: "setup-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 1100, height: 760))
+            model.engineInstall = .enabled
+            model.notificationAccess = .notRequested
+            model.loginAccess = .notEnabled
+            for step in OnboardingStep.allCases {
+                try render(OnboardingView(model: model, finish: {}, step: step).preferredColorScheme(scheme), name: "onboarding-\(step.label)-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 1100, height: 760))
+                try render(OnboardingView(model: model, finish: {}, step: step).preferredColorScheme(scheme), name: "onboarding-\(step.label)-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 800, height: 640))
+            }
+            try render(MenuContent(model: model).preferredColorScheme(scheme), name: "menu-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 360, height: 680))
             try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-empty-\(suffix)", output: output, scheme: scheme)
             model.pins = [OfflinePin(driveId: "design", path: "/", bytes: 1000, cachedBytes: 500)]
             try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-progress-\(suffix)", output: output, scheme: scheme)
+            try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 520, height: 580))
+            try render(FileSearchView(model: model).preferredColorScheme(scheme), name: "search-\(suffix)", output: output, scheme: scheme)
+            try render(WorkspaceAccountView(model: AppModel()).preferredColorScheme(scheme), name: "workspace-\(suffix)", output: output, scheme: scheme)
+            try render(AIView().preferredColorScheme(scheme), name: "ai-\(suffix)", output: output, scheme: scheme)
             try render(SettingsView(model: model).preferredColorScheme(scheme), name: "settings-\(suffix)", output: output, scheme: scheme)
             model.engineInstall = .enabled
             model.notificationAccess = .denied
@@ -39,22 +53,38 @@ import UnlispaceKit
                                         bytesDone: 50, bytesTotal: 100, status: .active)
             try render(TransfersView(transfers: [transfer], embedded: true).preferredColorScheme(scheme), name: "transfers-\(suffix)", output: output, scheme: scheme)
         }
-        for name in ["signed-out", "service-unavailable", "drives", "settings", "permissions", "transfers", "offline-empty", "offline-progress"] {
+        for name in ["signed-out", "service-unavailable", "drives", "settings", "permissions", "transfers", "offline-empty", "offline-progress", "search", "workspace", "ai", "setup", "menu", "drives-compact", "offline-compact"] {
             let light = try Data(contentsOf: output.appendingPathComponent("\(name)-light.png"))
             let dark = try Data(contentsOf: output.appendingPathComponent("\(name)-dark.png"))
             #expect(light != dark, "Light and dark fixtures must have different appearances")
         }
     }
 
-    private func render(_ view: some View, name: String, output: URL, scheme: ColorScheme) throws {
-        let host = NSHostingView(rootView: view.environment(\.colorScheme, scheme))
+    private func render(_ view: some View, name: String, output: URL, scheme: ColorScheme, size: NSSize = NSSize(width: 1000, height: 680)) throws {
+        let previousAppearance = NSApplication.shared.appearance
+        NSApplication.shared.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        defer { NSApplication.shared.appearance = previousAppearance }
+        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading).appStyle().environment(\.colorScheme, scheme))
+        host.sizingOptions = []
         host.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        host.frame = NSRect(x: 0, y: 0, width: 1000, height: 680)
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = host.appearance
+        window.contentView = host
+        window.setContentSize(size)
+        window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+        window.orderFront(nil)
+        defer { window.close() }
+        window.layoutIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         host.layoutSubtreeIfNeeded()
         let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
-        #expect(bitmap.pixelsWide >= 1000)
-        #expect(bitmap.pixelsHigh >= 680)
+        #expect(host.bounds.size == size, "The fixture must retain its requested window size")
+        #expect(bitmap.pixelsWide >= Int(size.width))
+        #expect(bitmap.pixelsHigh >= Int(size.height))
         let png = try #require(bitmap.representation(using: .png, properties: [:]))
         #expect(png.count > 1000)
         try png.write(to: output.appendingPathComponent("\(name).png"))

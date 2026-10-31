@@ -1,150 +1,330 @@
 import SwiftUI
 import UnlispaceKit
 
+enum OnboardingStep: Int, CaseIterable {
+    case welcome, storage, search, features, ai, access, ready
+
+    var label: String {
+        switch self {
+        case .welcome: "Welcome"
+        case .storage: "Your files"
+        case .search: "Search"
+        case .features: "Features"
+        case .ai: "Ask AI"
+        case .access: "Drive access"
+        case .ready: "Ready"
+        }
+    }
+    var next: Self { Self(rawValue: rawValue + 1) ?? self }
+    var previous: Self { Self(rawValue: rawValue - 1) ?? self }
+}
+
 struct OnboardingView: View {
     var model: AppModel
     var finish: () -> Void
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("onboardingCompleted") private var completed = false
-    @State private var step = Step.signIn
+    @State var step = OnboardingStep.welcome
     @State private var selected: Set<String> = []
+    @State private var selectedDefault = false
     @State private var mounting = false
     @State private var error: String?
+    @State private var recordingShortcut = false
 
-    private enum Step: Equatable { case signIn, drives, privacy }
+    private var connected: Bool { model.isSignedIn && !model.usingMock && !model.sessionPending }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 8) {
-                Label("1  Sign in", systemImage: step == .signIn ? "circle.fill" : "checkmark.circle.fill")
-                Image(systemName: "chevron.right")
-                Text("2  Choose drives")
-                Image(systemName: "chevron.right")
-                Text("3  Access & permissions")
-            }.font(.caption).foregroundStyle(.secondary)
-            Text(title).font(.largeTitle).accessibilityAddTraits(.isHeader)
-            switch step {
-            case .signIn: signInStep
-            case .drives: driveStep
-            case .privacy: privacyStep
-            }
-            if let notice = model.notice { Text(notice).foregroundStyle(.secondary) }
-            if let message = error ?? model.lastError {
-                Text(message).accessibilityLabel("Error: \(message)")
-            }
-            Spacer(minLength: 0)
+        VStack(spacing: 0) {
             HStack {
-                if step != .signIn {
-                    Button("Back") { error = nil; step = step == .privacy ? .drives : .signIn }
-                        .disabled(mounting)
-                }
+                Label("Unlispace", systemImage: "externaldrive.fill")
+                    .font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Button("Set up later") { finish() }.disabled(mounting)
-            }
-        }
-        .padding(28)
-        .frame(width: 640, height: 660)
-        .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
-        .task(id: step) { if step == .privacy { await model.refreshPermissions() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            if step == .privacy { Task { await model.refreshPermissions() } }
-        }
-        .onChange(of: model.isSignedIn) { _, signedIn in
-            if signedIn, step == .signIn { step = .drives }
-            if !signedIn { step = .signIn; selected = [] }
-        }
-        .onChange(of: Set(model.drives.map(\.driveId))) { _, ids in selected.formIntersection(ids) }
-    }
-
-    private var signInStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Sign in to bring your Unlispace drives to Finder.")
-            if let account = model.account {
-                Text("Signed in as \(account.email)")
-                Button("Choose drives") { step = .drives }
-                    .keyboardShortcut(.defaultAction)
-            } else {
-                Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
-                    .disabled(model.signingIn)
-                    .keyboardShortcut(.defaultAction)
-                if model.signingIn {
-                    Button("Open browser") { model.openSignInBrowser() }
-                    Button("Cancel sign-in") { model.cancelSignIn() }
+                if let account = model.account {
+                    Text(account.email).font(.system(size: 12)).foregroundStyle(AppDesign.muted)
                 }
-            }
-        }
-    }
-
-    private var driveStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose the drives you want to mount. You can change this from the menu later.")
-            if model.usingMock || model.sessionPending {
-                Text("Waiting for the engine. Your drives will appear when it connects.")
-                if model.engineInstall == .notRegistered || model.engineInstall == .requiresApproval {
-                    Button("Enable engine…") { model.installEngine() }
-                } else if case .failed(let message) = model.engineInstall {
-                    Text(message).foregroundStyle(.secondary)
-                    Button("Try enabling engine…") { model.installEngine() }
-                } else if model.engineInstall == .notInstalled {
-                    Text("The engine is not installed. Install a bundle that includes ulsd to continue.")
-                }
-            } else if model.drives.isEmpty {
-                Text("No drives are available yet. You can finish setup and mount a drive later.")
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(model.drives) { drive in
-                            Toggle(drive.name, isOn: selection(for: drive.driveId))
-                                .accessibilityLabel("Mount \(drive.name)")
-                        }
+            }.padding(.horizontal, 36).padding(.top, 22)
+            ScrollView {
+                Group {
+                    switch step {
+                    case .welcome: welcome
+                    case .storage: storage
+                    case .search: search
+                    case .features: features
+                    case .ai: ai
+                    case .access: access
+                    case .ready: ready
                     }
                 }
-                .frame(maxHeight: 150)
+                .frame(maxWidth: 960, minHeight: 490)
+                .padding(.horizontal, 48).padding(.vertical, 28)
+                if let message = error ?? model.lastError {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                        .accessibilityLabel("Error: \(message)")
+                        .padding(.horizontal, 48).padding(.bottom, 12)
+                }
             }
-            Button("Continue") { step = .privacy }
-                .disabled(model.usingMock || model.sessionPending || !model.isSignedIn)
-                .keyboardShortcut(.defaultAction)
+            .id(step)
+            footer.padding(.horizontal, 36).padding(.bottom, 24).padding(.top, 12)
+        }
+        .frame(minWidth: 800, idealWidth: 1100, minHeight: 640, idealHeight: 760)
+        .appStyle()
+        .background(AppDesign.surface)
+        .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+        .task(id: step) {
+            if step == .access { selectDefaultDrive(); await model.refreshPermissions() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if step == .access { Task { await model.refreshPermissions() } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .workspaceShortcutPressed)) { _ in
+            if step == .ready && !recordingShortcut { advance() }
+        }
+        .onChange(of: recordingShortcut) { _, recording in
+            if recording { model.stopWorkspaceShortcut() }
+            else { model.resumeWorkspaceShortcut() }
+        }
+        .onDisappear {
+            if recordingShortcut { model.resumeWorkspaceShortcut() }
+        }
+        .onChange(of: model.account?.id) { old, new in
+            selected = []; selectedDefault = false; error = nil
+            if new == nil { step = .welcome }
+            else if old == nil && step == .welcome { step = .storage }
+        }
+        .onChange(of: Set(model.drives.map(\.driveId))) { _, ids in
+            selected.formIntersection(ids)
+            if step == .access { selectDefaultDrive() }
         }
     }
 
-    private var privacyStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Your drives appear as network volumes. When an app first opens them, macOS may ask you to allow access. Review the details and optional features below.")
-                .font(.callout).foregroundStyle(.secondary)
-            Form { PermissionsContent(model: model) }
-                .formStyle(.grouped)
-                .accessibilityLabel("Review access and optional features")
-            Button(mounting ? "Mounting drives…" : "Finish setup", action: finishSetup)
-                .disabled(mounting || model.usingMock || !model.isSignedIn)
-                .keyboardShortcut(.defaultAction)
+    private var welcome: some View {
+        VStack(spacing: 22) {
+            Image(systemName: "externaldrive.fill")
+                .font(.system(size: 72, weight: .light)).padding(.bottom, 12).accessibilityHidden(true)
+            heading("Welcome to Unlispace", "Your cloud files, right at home on your Mac.")
+            if let account = model.account {
+                Text("Signed in as \(account.email)").foregroundStyle(AppDesign.muted)
+                Button("Use a different account…") { model.useDifferentAccount() }.disabled(model.signingIn)
+            } else {
+                Text("Sign in securely in your browser, then return here to finish setup.")
+                    .foregroundStyle(AppDesign.muted)
+                if model.canRetrySignIn {
+                    Button("Retry saved sign-in") { model.retrySavedSignIn() }.disabled(model.retryingSavedSignIn)
+                }
+                if let message = model.stateMessage { Text(message).font(.callout).foregroundStyle(AppDesign.muted) }
+            }
+                if model.signingIn {
+                    ProgressView("Waiting for your browser…").controlSize(.small)
+                    HStack(spacing: 16) {
+                        Button("Open browser again") { model.openSignInBrowser() }
+                        Button("Cancel sign-in") { model.cancelSignIn() }
+                    }
+                }
+        }.frame(maxWidth: .infinity)
+    }
+
+    private var storage: some View {
+        VStack(spacing: 30) {
+            heading("Your files. More room on your Mac.", "Work with cloud files in Finder, just like the files already on your computer.")
+            OnboardingPreview(kind: .storage)
+            Text("Files download as you use them. Cache and files you keep offline use space on your Mac.")
+                .font(.callout).foregroundStyle(AppDesign.muted)
         }
     }
 
-    private func selection(for driveId: String) -> Binding<Bool> {
-        Binding(
-            get: { selected.contains(driveId) },
-            set: { if $0 { selected.insert(driveId) } else { selected.remove(driveId) } }
-        )
-    }
-
-    private func finishSetup() {
-        mounting = true
-        error = nil
-        Task {
-            defer { mounting = false }
-            do {
-                try await model.mountSelectedDrives(selected)
-                completed = true
-                finish()
-            } catch { self.error = "Could not finish setup: \(LogFormat.describe(error))" }
+    private var search: some View {
+        VStack(spacing: 30) {
+            heading("Find the file you’re looking for", "Search filenames across a chosen Unlispace drive, then open them in Finder.")
+            OnboardingPreview(kind: .search)
+            Text("Type at least three characters. Search uses your cloud drive; it needs an internet connection.")
+                .font(.callout).foregroundStyle(AppDesign.muted)
         }
     }
 
-    private var title: String {
+    private var features: some View {
+        HStack(spacing: 48) {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("More than\na place for files").font(.system(size: 38, weight: .semibold)).tracking(-1)
+                    .accessibilityAddTraits(.isHeader)
+                Text("The tools you need to keep work moving, together in Unlispace.")
+                    .font(.system(size: 17)).foregroundStyle(AppDesign.muted).lineSpacing(5)
+            }.frame(maxWidth: 275, alignment: .leading)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                feature("Your drives", "Keep projects together in Finder.", "externaldrive.fill")
+                feature("Search files", "Find files by name in a drive.", "magnifyingglass")
+                feature("Transfers", "Follow uploads and retry failures.", "arrow.up.arrow.down")
+                feature("Offline files", "Keep chosen files on this Mac.", "checkmark.icloud")
+                feature("File history", "Browse and restore past versions in the browser.", "clock.arrow.circlepath")
+                feature("Your workspace", "Manage your plan and team.", "person.2")
+            }
+        }
+    }
+
+    private var ai: some View {
+        VStack(spacing: 30) {
+            heading("Ask AI, with your files", "Get help with the text you choose to share.")
+            OnboardingPreview(kind: .ai)
+            Text("Optional. Connect a provider in Ask AI. Review the selected text and destination before sending.")
+                .font(.callout).foregroundStyle(AppDesign.muted)
+        }
+    }
+
+    private var access: some View {
+        HStack(alignment: .top, spacing: 40) {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Bring your drives\nto Finder").font(.system(size: 36, weight: .semibold)).tracking(-1)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Choose what to connect. You can change these settings later.")
+                    .font(.system(size: 17)).foregroundStyle(AppDesign.muted).lineSpacing(4)
+                if !connected {
+                    Label("Mac connection pending", systemImage: "circle.dashed").font(.callout)
+                    Button("Refresh connection") { Task { await model.refresh() } }
+                } else if model.drives.isEmpty {
+                    Text("No drives are available yet. Refresh to check again, or finish without a drive.")
+                        .font(.callout).foregroundStyle(AppDesign.muted)
+                    Button("Refresh drives") { Task { await model.refresh() } }
+                }
+                ForEach(model.drives) { drive in
+                    Toggle(isOn: Binding(
+                        get: { selected.contains(drive.driveId) },
+                        set: { if $0 { selected.insert(drive.driveId) } else { selected.remove(drive.driveId) } }
+                    )) { Label(drive.name, systemImage: "externaldrive") }
+                    .toggleStyle(.checkbox)
+                    .accessibilityLabel("Mount \(drive.name) in Finder")
+                    .disabled(mounting || !connected)
+                }
+                Text("macOS may ask each app for network volume access when it opens a drive.")
+                    .font(.callout).foregroundStyle(AppDesign.muted)
+            }.frame(width: 275, alignment: .leading)
+            VStack(alignment: .leading, spacing: 12) {
+                PermissionsContent(model: model, onboarding: true)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+                .disabled(mounting)
+        }
+    }
+
+    private var ready: some View {
+        VStack(spacing: 30) {
+            heading("You’re ready for Unlispace", "One shortcut to your drives, transfers, and files.")
+            HStack(spacing: 18) {
+                keycap(model.workspaceShortcut.modifierLabel, width: 120)
+                keycap("space", width: 340)
+            }.padding(.vertical, 18).accessibilityElement(children: .ignore)
+                .accessibilityLabel("Workspace shortcut: \(model.workspaceShortcut.label)")
+            if recordingShortcut {
+                Text("Press Option–Space, Control–Option–Space, or Command–Option–Space. Escape cancels.").foregroundStyle(AppDesign.muted)
+                ShortcutRecorder { shortcut in
+                    recordingShortcut = false
+                    if let shortcut { model.setWorkspaceShortcut(shortcut) }
+                }.frame(width: 1, height: 1)
+            }
+            HStack(spacing: 14) {
+                Button(recordingShortcut ? "Cancel" : "Change shortcut") { recordingShortcut.toggle() }
+                if let drive = model.drives.first(where: { $0.mountState == .mounted && $0.mountPath != nil }) {
+                    Button("Open \(drive.name) in Finder") { model.openInFinder(drive) }
+                }
+            }
+            if let message = model.shortcutMessage { Text(message).font(.callout).foregroundStyle(AppDesign.muted) }
+            Text("Find Unlispace in your menu bar anytime. Add your first file from My drives or Finder.")
+                .font(.callout).foregroundStyle(AppDesign.muted)
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Button { error = nil; recordingShortcut = false; step = step.previous } label: {
+                Image(systemName: "chevron.left").frame(width: 20, height: 24)
+            }
+            .clipShape(Circle()).accessibilityLabel("Back")
+            .disabled(step == .welcome || mounting)
+            Spacer()
+            Button(action: advance) {
+                HStack(spacing: 16) {
+                    Text(primaryTitle)
+                    Image(systemName: "return").font(.system(size: 12))
+                }.padding(.horizontal, 12).padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(.large)
+            .disabled(mounting || (step == .welcome && model.signingIn) || (step == .access && !connected) || recordingShortcut)
+            .keyboardShortcut(.defaultAction)
+        }
+        .overlay {
+            HStack(spacing: 7) {
+                ForEach(OnboardingStep.allCases, id: \.rawValue) { item in
+                    Capsule().fill(item == step ? AppDesign.foreground : AppDesign.border)
+                        .frame(width: item == step ? 30 : 10, height: 4)
+                }
+            }.accessibilityElement(children: .ignore)
+                .accessibilityLabel("Step \(step.rawValue + 1) of \(OnboardingStep.allCases.count): \(step.label)")
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var primaryTitle: String {
+        if mounting { return "Connecting drives…" }
         switch step {
-        case .signIn: "Welcome to Unlispace"
-        case .drives: "Choose your drives"
-        case .privacy: "Access & permissions"
+        case .welcome: return model.isSignedIn ? "Continue" : "Sign in with browser"
+        case .ready: return "Open Unlispace"
+        default: return "Continue"
         }
+    }
+
+    private func advance() {
+        error = nil
+        if step == .welcome && !model.isSignedIn { model.signIn(); return }
+        if step == .access {
+            guard connected, !mounting else { return }
+            mounting = true
+            let accountID = model.account?.id
+            Task {
+                defer { mounting = false }
+                do {
+                    try await model.mountSelectedDrives(selected)
+                    guard connected, model.account?.id == accountID else { throw DaemonClientError.notConnected }
+                    guard Self.mountsReady(selected, drives: model.drives) else {
+                        throw DaemonClientError.remote(DaemonError(code: "mount_pending", message: "Your drive has not appeared in Finder yet."))
+                    }
+                    step = .ready
+                } catch { self.error = "Could not connect your drives: \(LogFormat.describe(error)). Try again." }
+            }
+        } else if step == .ready {
+            completed = true
+            finish()
+        } else { step = step.next }
+    }
+
+    static func mountsReady(_ selected: Set<String>, drives: [DriveInfo]) -> Bool {
+        selected.isSubset(of: Set(drives.filter { $0.mountState == .mounted && $0.mountPath != nil }.map(\.driveId)))
+    }
+
+    private func selectDefaultDrive() {
+        guard !selectedDefault, let first = model.drives.first else { return }
+        selected = [first.driveId]
+        selectedDefault = true
+    }
+
+    private func heading(_ title: String, _ subtitle: String) -> some View {
+        VStack(spacing: 16) {
+            Text(title).font(.system(size: 36, weight: .semibold)).tracking(-1).accessibilityAddTraits(.isHeader)
+            Text(subtitle).font(.system(size: 17)).foregroundStyle(AppDesign.muted).lineSpacing(4)
+        }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
+    }
+
+    private func feature(_ title: String, _ detail: String, _ symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 28, weight: .light)).padding(.bottom, 6)
+            Text(title).font(.system(size: 15, weight: .semibold))
+            Text(detail).font(.system(size: 12)).foregroundStyle(AppDesign.muted).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+            .padding(18).background(AppDesign.subtle, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func keycap(_ label: String, width: CGFloat) -> some View {
+        Text(label).font(.system(size: 26, weight: .medium)).foregroundStyle(AppDesign.muted)
+            .frame(width: width, height: 110, alignment: .bottomLeading).padding(20)
+            .background(AppDesign.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(AppDesign.border))
+            .shadow(color: .black.opacity(0.05), radius: 12, y: 8)
     }
 }

@@ -137,12 +137,13 @@ describe("M2 signed zone-cache block delivery", () => {
 		const url = m.blockUrls[m.shards[0]!.h]!;
 		const response = await selfFetch(new Request(url));
 		expect(response.status).toBe(200);
-		expect(response.headers.get("Cache-Control")).toContain("immutable");
+		expect(response.headers.get("Cache-Control")).toBe("private, no-store");
 		expect(await response.text()).toBe("abcdef");
 		const canonical = new URL(url); canonical.search = "";
 		// waitUntil is drained by the test runner request context.
 		await vi.waitFor(async () => expect(await caches.default.match(canonical.toString())).toBeDefined());
 		const ranged = await selfFetch(new Request(url, { headers: { Range: "bytes=1-3" } }));
+		expect(ranged.headers.get("Cache-Control")).toBe("private, no-store");
 		expect(ranged.status).toBe(206);
 		expect(await ranged.text()).toBe("bcd");
 		for (const [name, value] of [["d", "another-drive"], ["exp", String(m.blockUrlsExpireAt + 1)], ["exp", "1"], ["sig", "0".repeat(64)]]) {
@@ -152,6 +153,23 @@ describe("M2 signed zone-cache block delivery", () => {
 		expect((await selfFetch(new Request(canonical))).status).toBe(401);
 		const changedPath = new URL(url); changedPath.pathname = changedPath.pathname.replace(m.shards[0]!.h, "0".repeat(64));
 		expect((await selfFetch(new Request(changedPath))).status).toBe(401);
+		await stubFor(drive).delete();
+		expect((await selfFetch(new Request(url))).status).toBe(404);
+	});
+
+	it("serves a block URL with no bearer token, revalidating the drive on every hit so deletion is immediate", async () => {
+		const drive = await newDrive();
+		await putFile(drive, "file", "abcdef");
+		const m = await manifest(drive, "file");
+		const url = m.blockUrls[m.shards[0]!.h]!;
+		expect(new URL(url).searchParams.get("exp")).toBe(String(m.blockUrlsExpireAt));
+		// Two hits (miss then cache hit) both succeed without an Authorization header.
+		for (let i = 0; i < 2; i++) {
+			const r = await selfFetch(new Request(url));
+			expect(r.status).toBe(200);
+			expect(await r.text()).toBe("abcdef");
+		}
+		// A cached shard must not outlive its drive: the next hit is refused even though bytes are cached.
 		await stubFor(drive).delete();
 		expect((await selfFetch(new Request(url))).status).toBe(404);
 	});

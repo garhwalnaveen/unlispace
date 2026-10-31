@@ -6,6 +6,7 @@ import Darwin
 public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
     private let path: String
     private let lock = NSLock()
+    private let writeLock = NSLock()
     private var fd: Int32 = -1
     private var nextId = 1
     private var pending: [Int: CheckedContinuation<DaemonResponse, Error>] = [:]
@@ -61,6 +62,7 @@ public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
     }
 
     private func closeSocket() {
+        writeLock.lock()
         lock.lock()
         let s = fd
         fd = -1
@@ -70,6 +72,7 @@ public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
         subscribers = [:]
         lock.unlock()
         if s >= 0 { shutdown(s, SHUT_RDWR); close(s) }
+        writeLock.unlock()
         for (_, c) in waiting { c.resume(throwing: DaemonClientError.disconnected) }
         for (_, c) in subs { c.finish() }
     }
@@ -111,35 +114,40 @@ public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
     }
 
     private func call<P: Encodable>(_ method: String, params: P?) async throws -> JSONValue {
-        let response: DaemonResponse = try await withCheckedThrowingContinuation { cont in
-            lock.lock()
-            guard fd >= 0 else {
-                lock.unlock()
-                cont.resume(throwing: DaemonClientError.notConnected)
-                return
-            }
-            let id = nextId
-            nextId += 1
-            let s = fd
-            pending[id] = cont
-            lock.unlock()
-
-            do {
-                var data = try DaemonCodec.encodeRequest(id: id, method: method, params: params)
-                data.append(0x0A)
-                try writeAll(data, to: s)
-            } catch {
+        let id = lock.withLock { let id = nextId; nextId += 1; return id }
+        let response: DaemonResponse = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
                 lock.lock()
-                let c = pending.removeValue(forKey: id)
+                guard !Task.isCancelled else {
+                    lock.unlock(); cont.resume(throwing: CancellationError()); return
+                }
+                guard fd >= 0 else {
+                    lock.unlock(); cont.resume(throwing: DaemonClientError.notConnected); return
+                }
+                let s = fd
+                pending[id] = cont
                 lock.unlock()
-                c?.resume(throwing: error)
+                do {
+                    var data = try DaemonCodec.encodeRequest(id: id, method: method, params: params)
+                    data.append(0x0A)
+                    try writeAll(data, to: s)
+                } catch {
+                    let c = lock.withLock { pending.removeValue(forKey: id) }
+                    c?.resume(throwing: error)
+                }
             }
+        } onCancel: {
+            let c = self.lock.withLock { self.pending.removeValue(forKey: id) }
+            c?.resume(throwing: CancellationError())
         }
         if let err = response.error { throw DaemonClientError.remote(err) }
         return response.result ?? .null
     }
 
     private func writeAll(_ data: Data, to s: Int32) throws {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        guard lock.withLock({ fd == s && fd >= 0 }) else { throw DaemonClientError.disconnected }
         try data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
             var off = 0
             while off < buf.count {
@@ -151,6 +159,15 @@ public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
                 off += n
             }
         }
+    }
+
+    private struct APIParams: Encodable { var method: String; var path: String; var body: JSONValue? }
+    private struct SearchParams: Encodable { var driveId: String; var query: String; var cursor: String? }
+    public func apiRequest(method: String, path: String, body: JSONValue?) async throws -> JSONValue {
+        try await call("api.request", params: APIParams(method: method, path: path, body: body))
+    }
+    public func searchFiles(driveId: String, query: String, cursor: String?) async throws -> FileSearchPage {
+        try await call("files.search", params: SearchParams(driveId: driveId, query: query, cursor: cursor)).decode(FileSearchPage.self)
     }
 
     private struct DriveParams: Encodable { var driveId: String }
@@ -208,6 +225,9 @@ public final class UnixSocketDaemonClient: DaemonClient, @unchecked Sendable {
     }
     public func authStatus() async throws -> AuthStatus {
         try await call("auth.status", params: Nothing?.none).decode(AuthStatus.self)
+    }
+    public func authRetryRestore() async throws {
+        _ = try await call("auth.retryRestore", params: Nothing?.none)
     }
     public func authSignOut() async throws {
         _ = try await call("auth.signOut", params: Nothing?.none)

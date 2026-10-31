@@ -260,7 +260,7 @@ socket for the CLI, checked with `SO_PEERCRED`.
   data-plane request carries a scope `{org, drives[], access}` checked at the gateway. The DO
   re-checks the `authorization_generation` so a stale grant can't keep working.
 - **Plans** (to be decided):
-  - Individual: 1 TB, 1 seat.
+  - Individual: 500 GB, 1 seat.
   - Teams: 1 TB per seat, pooled, shared drives.
   - 500 GB storage add-ons.
   - 7-day trial without a card.
@@ -317,7 +317,7 @@ write-heavy users, so batched commits from the desktop matter.
 | D1 | Product name and domain | **Locked 2026-10-25:** Unlispace, bundle id `com.unlispace.app`, URL scheme `uls://` (final domain still to be registered) |
 | D2 | Default Mac adapter | **Locked:** loopback SMB in v1, FSKit opt-in later. NFSv3 is the M0/M1 prototype adapter |
 | D3 | Payments | **Locked:** Dodo Payments (merchant of record) for seats, storage add-ons and trials |
-| D4 | Web app stack | **Locked:** a fresh app on Cloudflare, talking to `api.`. The existing Next.js + Supabase starter is left in place until the new web app replaces it; only the Dodo/UI pieces carry over |
+| D4 | Web app stack | **Locked:** the Vite/React app in `web/`, hosted on Cloudflare and talking to `api.`. The obsolete Next.js/Supabase starter has been removed. |
 | D5 | Control DB | **Locked:** D1 (10 GB cap per DB, so shard by org later) |
 | D6 | Cloudflare plan | Open: Workers Paid + a Business zone (200 MB body limit) |
 

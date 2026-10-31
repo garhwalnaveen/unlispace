@@ -48,7 +48,7 @@ describe("shards", () => {
 
 		const g = await api(`/v0/drives/${d}/shards/${h}`);
 		expect(g.status).toBe(200);
-		expect(g.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+		expect(g.headers.get("Cache-Control")).toBe("private, no-store");
 		expect(g.headers.get("ETag")).toBe(`"${h}"`);
 		expect(new Uint8Array(await g.arrayBuffer())).toEqual(data);
 
@@ -101,7 +101,7 @@ describe("shards", () => {
 		expect(r.status).toBe(404);
 	});
 
-	it("/missing reports unknown hashes, and finds shards present in R2 only", async () => {
+	it("/missing reports only drive-authorized shards as present", async () => {
 		const d = await newDrive();
 		const a = await upload(d, bytes("alpha"));
 		const unknownHash = "c".repeat(64);
@@ -109,12 +109,12 @@ describe("shards", () => {
 		expect(r.status).toBe(200);
 		expect(await r.json()).toEqual({ missing: [unknownHash] });
 
-		// present in R2 but never recorded in shards_known (e.g. written before the DO learned of it)
+		// Raw physical presence cannot grant drive-scoped access.
 		const raw = bytes("written straight to r2");
 		const h = await sha256Hex(raw);
 		await env.SHARDS.put(`shards/${d}/${h}`, raw);
 		const r2 = await api(`/v0/drives/${d}/shards/missing`, { json: { hashes: [h] } });
-		expect(await r2.json()).toEqual({ missing: [] });
+		expect(await r2.json()).toEqual({ missing: [h] });
 
 		const tooMany = Array.from({ length: 1001 }, (_, i) => i.toString(16).padStart(64, "0"));
 		expect((await api(`/v0/drives/${d}/shards/missing`, { json: { hashes: tooMany } })).status).toBe(400);
@@ -296,13 +296,15 @@ describe("commit", () => {
 		expect((await api(`/v0/drives/${d}/stat?path=x`)).status).toBe(404);
 	});
 
-	it("accepts shards found in R2 by HEAD but not yet in shards_known", async () => {
+	it("requires a verified upload before referencing a physically present shard", async () => {
 		const d = await newDrive();
 		const raw = bytes("only in r2");
 		const h = await sha256Hex(raw);
 		await env.SHARDS.put(`shards/${d}/${h}`, raw);
 		const r = await commit(d, [{ op: "put", path: "viaR2", size: raw.byteLength, shards: [{ h, n: raw.byteLength }] }]);
-		expect(r.status).toBe(200);
+		expect(r.status).toBe(409);
+        await upload(d, raw);
+        expect((await commit(d, [{op:"put",path:"viaR2",size:raw.byteLength,shards:[{h,n:raw.byteLength}]}])).status).toBe(200);
 		const missing = await (await api(`/v0/drives/${d}/shards/missing`, { json: { hashes: [h] } })).json();
 		expect(missing).toEqual({ missing: [] });
 	});

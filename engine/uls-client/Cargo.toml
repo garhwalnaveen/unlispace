@@ -22,6 +22,8 @@ dirs.workspace = true
 mime_guess.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
+ring = "=0.17.14"
+httpdate = "=1.0.3"
 
 [dev-dependencies]
 uls-mock.workspace = true

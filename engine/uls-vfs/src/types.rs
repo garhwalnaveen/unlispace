@@ -24,7 +24,8 @@ pub enum SyncState { Online, Offline }
 pub enum VfsEvent {
     JournalFull,
     Changed { paths: Vec<String> },
-    Transfer { paths: Vec<String>, bytes: u64 },
+    /// A publication committed. `files` lists each uploaded file (final path, size).
+    Transfer { paths: Vec<String>, bytes: u64, files: Vec<(String, u64)> },
     Conflict { path: String, copy: String },
     State(SyncState),
 }
@@ -56,6 +57,16 @@ pub struct PendingSummary {
     pub metadata_ops: usize,
     pub bytes: u64,
     pub state: SyncState,
+}
+/// One not-yet-published item, with how far its current publication attempt has got.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingItem {
+    pub path: String,
+    pub bytes: u64,
+    /// True while a publication batch containing this item is in flight.
+    pub uploading: bool,
+    /// Bytes of shards PUT so far in the current attempt.
+    pub bytes_sent: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FsError {
@@ -103,7 +114,8 @@ impl From<uls_client::Error> for FsError {
         match e {
             uls_client::Error::NotFound { .. } => Self::NotFound,
             uls_client::Error::PreconditionFailed { .. } => Self::Stale,
-            uls_client::Error::Unauthorized => Self::ReadOnly,
+            uls_client::Error::Unauthorized | uls_client::Error::WriteDenied => Self::ReadOnly,
+            uls_client::Error::Api { status: 403, body } if matches!(body.error.as_str(), "over_quota" | "unauthorized" | "forbidden") => Self::ReadOnly,
             uls_client::Error::InvalidPath(_) => Self::Invalid,
             other => Self::Io(other.to_string()),
         }

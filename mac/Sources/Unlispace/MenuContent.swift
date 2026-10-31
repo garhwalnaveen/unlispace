@@ -11,14 +11,19 @@ struct MenuContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Unlispace", systemImage: "square.stack.3d.up.fill").font(.headline)
+                Label("Unlispace", systemImage: "square.stack.3d.up").font(.headline)
                 Spacer()
                 Button("Open app") { AppDelegate.showWorkspace() }
             }
             Divider()
             if !showsSignedInUI {
-                Text("Your cloud drives, right in Finder.").foregroundStyle(.secondary)
+                Text("Your cloud drives, right in Finder.").foregroundStyle(AppDesign.muted)
+                if let message = model.stateMessage { Text(message).font(.caption) }
+                if model.canRetrySignIn {
+                    Button("Retry saved sign-in") { model.retrySavedSignIn() }.disabled(model.retryingSavedSignIn)
+                }
                 Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
+                    .buttonStyle(.borderedProminent)
                     .disabled(model.signingIn)
                 if model.signingIn {
                     Button("Open browser") { model.openSignInBrowser() }
@@ -27,7 +32,7 @@ struct MenuContent: View {
                 if let err = model.lastError { Text(err).lineLimit(3) }
             } else {
                 if let acct = model.account { Text(acct.email) }
-                Text(model.status.title)
+                Text(model.connectionTitle)
                 if model.usingMock { Text("Engine not running") }
                 if model.status == .engineMissing || model.engineInstall == .notInstalled && !model.usingMock {
                     Text("Engine not installed")
@@ -36,7 +41,7 @@ struct MenuContent: View {
                 Button(model.transferLine ?? "Transfers") { showingTransfers.toggle() }
                     .accessibilityLabel("Show transfers")
                     .accessibilityValue(model.transferLine ?? "No transfers in progress")
-                    .popover(isPresented: $showingTransfers) { TransfersView(transfers: model.transfers, uploads: model.uploads, available: !model.usingMock) }
+                    .popover(isPresented: $showingTransfers) { TransfersView(transfers: model.transfers, uploads: model.uploads, recentUploads: model.recentUploads, state: model.status, available: !model.usingMock) }
                 if let conflict = model.lastConflict {
                     Label("Conflicting edit: \(conflict.path). Saved as \(conflict.copy).", systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -90,7 +95,7 @@ struct MenuContent: View {
             }
             .keyboardShortcut(",")
             if showsSignedInUI {
-                Button("Sign out") { model.signOut() }
+                Button("Sign out") { model.signOut() }.disabled(model.copyingFile)
             }
             if model.updates.isEnabled {
                 Button("Check for Updates…") { model.updates.checkForUpdates() }
@@ -99,7 +104,8 @@ struct MenuContent: View {
                 .keyboardShortcut("q")
         }
         .buttonStyle(.borderless)
-        .padding(16)
+        .appStyle()
+        .padding(20)
         .frame(width: 360)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Unlispace menu")

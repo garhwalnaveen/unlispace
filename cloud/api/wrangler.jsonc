@@ -31,6 +31,7 @@
   "env": {
     "production": {
       "name": "unlispace-api",
+      "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] },
       "workers_dev": true,
       "triggers": { "crons": ["17 * * * *"] },
       "preview_urls": false,
@@ -49,7 +50,7 @@
         "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
         "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.__WORKERS_DOMAIN__",
         "ULS_WEB_ORIGIN": "https://unlispace-web.__WORKERS_DOMAIN__",
-        "DODO_PAYMENTS_ENVIRONMENT": "test_mode"
+        "DODO_PAYMENTS_ENVIRONMENT": "live_mode"
       }
     }
   }

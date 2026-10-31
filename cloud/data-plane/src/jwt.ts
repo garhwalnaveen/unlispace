@@ -15,9 +15,11 @@ export interface DriveGrant {
 	access: Access;
 }
 export interface DriveClaims {
+	org: string;
 	sub: string;
 	exp: number; // seconds since epoch
 	drives: DriveGrant[];
+	upload?: {hash: string; length: number};
 }
 
 export const LEEWAY_SECONDS = 30;
@@ -118,6 +120,7 @@ export async function verifyDriveToken(token: string, opts: VerifyOptions): Prom
 	if (c.iss !== opts.issuer || c.typ !== "drive") return null;
 	if (typeof c.exp !== "number" || !Number.isFinite(c.exp) || c.exp + LEEWAY_SECONDS <= nowSec) return null;
 	if (typeof c.nbf === "number" && c.nbf - LEEWAY_SECONDS > nowSec) return null;
+	if (typeof c.org !== "string" || !c.org || c.org.length > 128) return null;
 	if (typeof c.sub !== "string" || c.sub === "" || c.sub.length > 128) return null;
 	if (!Array.isArray(c.drives)) return null;
 	const drives: DriveGrant[] = [];
@@ -127,5 +130,10 @@ export async function verifyDriveToken(token: string, opts: VerifyOptions): Prom
 			drives.push({ id: g.id, access: g.access });
 		}
 	}
-	return { sub: c.sub, exp: c.exp, drives };
+	if (c.upload !== undefined) {
+		const upload = c.upload as {hash?: unknown; length?: unknown} | null;
+		if (!upload || typeof upload.hash !== "string" || !/^[a-f0-9]{64}$/.test(upload.hash) || !Number.isSafeInteger(upload.length) || (upload.length as number) < 1 || (upload.length as number) > 16 * 1024 * 1024 || drives.length !== 1 || drives[0]!.access !== "write" || c.exp <= nowSec) return null;
+		return { sub: c.sub, org: c.org, exp: c.exp, drives, upload: {hash: upload.hash, length: upload.length as number} };
+	}
+	return { sub: c.sub, org: c.org, exp: c.exp, drives };
 }

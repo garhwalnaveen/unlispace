@@ -5,6 +5,11 @@ Reference behaviour is Space's public protocol v1 (`docs.spacefs.com/llms-full.t
 keep its semantics under our own prefix: every `x-s3sdk-*` name becomes `x-uls-*`, `/_s3sdk/` becomes
 `/_uls/`. Where we deliberately differ it says **Differs**.
 
+Compatibility addition (31 October 2026): the gateway also accepts the original `x-s3sdk-*` names and `/_s3sdk/keys`, after
+verifying the original signature. Responses expose both extension header prefixes. The compatible child-key route returns
+flat credentials and revoke returns 204; native key response shapes remain unchanged. `x-s3sdk-mount` returns 501 because
+native drive tokens do not satisfy the provider-storage credential contract. See `docs/research/spacefs-api-gap-2026-10-31.md`.
+
 ## 1. Identity of a drive
 
 - `driveId` = `d-` + lowercase ULID (unchanged). Always accepted wherever a bucket is named.

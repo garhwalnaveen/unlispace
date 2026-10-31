@@ -1,3 +1,4 @@
+import { buttonVariants } from "./components/ui/button";
 import { useRef, useState, type ReactNode } from "react";
 import { type DriveApi } from "./api";
 import { uploadFile, type UploadProgress } from "./upload";
@@ -30,8 +31,8 @@ export function Upload({ api, path, onDone, children }: { api: DriveApi; path: s
     onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }}
     onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
     onDrop={(event) => { event.preventDefault(); setDragging(false); void upload(Array.from(event.dataTransfer.files)); }}>
-    <div className="upload-toolbar"><div><strong>Upload to this folder</strong><p className="muted small">Drop files here or choose files. Matching names create a new version.</p></div>
-      <label className="button upload-picker">Choose files<input type="file" multiple disabled={busy} aria-label="Choose files to upload" onChange={(event) => { void upload(Array.from(event.target.files || [])); event.target.value = ""; }} /></label>
+    <div className="upload-toolbar"><div><strong>Upload to this folder</strong><p className="muted small">Drop files up to 3 GiB here or choose files. Matching names create a new version. Use the desktop app for larger transfers.</p></div>
+      <label className={buttonVariants({ className: "upload-picker" })}>Choose files<input type="file" multiple disabled={busy} aria-label="Choose files to upload" onChange={(event) => { void upload(Array.from(event.target.files || [])); event.target.value = ""; }} /></label>
     </div>
     <ErrorNotice error={error} />
     {progress && <div role="status" className="upload-progress">

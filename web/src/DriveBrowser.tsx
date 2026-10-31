@@ -1,3 +1,5 @@
+import { Input } from "./components/ui/input";
+import { Button } from "./components/ui/button";
 import { useCallback, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { DriveApi, type Drive, type FileStat, type Version } from "./api";
@@ -53,13 +55,13 @@ function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | n
           {listing.entries.length} item{listing.entries.length === 1 ? "" : "s"}
           {listing.cursor ? " loaded" : ""}
         </p>
-        <button disabled={listing.loading} onClick={listing.reload}>
+        <Button disabled={listing.loading} onClick={listing.reload}>
           Refresh folder
-        </button>
+        </Button>
       </div>
       <ErrorNotice error={listing.error} />
       {Boolean(listing.error) && !listing.entries.length && (
-        <button onClick={listing.reload}>Try again</button>
+        <Button onClick={listing.reload}>Try again</Button>
       )}
       <div className="file-table">
         <div className="file-row file-table-head" aria-hidden="true">
@@ -98,20 +100,20 @@ function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | n
         {!listing.loading && !listing.error && !listing.entries.length && (
           <div className="empty">
             <FileIcon folder />
-            <h2>A little breathing room.</h2>
+            <h2>No files yet</h2>
             <p>{writeApi ? "This folder is empty. Drop files here to get started." : "This folder is empty."}</p>
           </div>
         )}
       </div>
       {listing.loading && <Loading>Reading folder…</Loading>}
       {listing.cursor && (
-        <button
+        <Button
           className="load-more"
           disabled={listing.loading}
           onClick={() => void listing.loadMore()}
         >
           {listing.loading ? "Loading…" : "Load more"}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -166,8 +168,8 @@ function Versions({
         setSelectionError(head ? "" : "This file did not exist at that time.");
       }}>
         <label htmlFor="history-as-of">View as of…</label>
-        <input id="history-as-of" type="datetime-local" step="1" required value={asOf} onChange={(event) => { setAsOf(event.target.value); setSelected(null); setSelectionError(""); }} />
-        <button disabled={loading || Boolean(cursor) || Boolean(error) || !asOf}>View as of</button>
+        <Input id="history-as-of" type="datetime-local" step="1" required value={asOf} onChange={(event) => { setAsOf(event.target.value); setSelected(null); setSelectionError(""); }} />
+        <Button disabled={loading || Boolean(cursor) || Boolean(error) || !asOf}>View as of</Button>
         {cursor && <p className="muted small">Load all versions before choosing a time.</p>}
       </form>
       {selectionError && <p role="status">{selectionError}</p>}
@@ -175,13 +177,13 @@ function Versions({
         <h3>Head at {formatDate(new Date(asOf).getTime())}</h3>
         {selected.op === "delete" ? <p>This file was deleted at that time.</p> : <>
           <p><code>{selected.versionId}</code> · {formatDate(selected.ts)} · {formatBytes(selected.size)}</p>
-          {selected.size <= MAX_WEB_DOWNLOAD ? <button disabled={downloading} onClick={() => onDownload(selected.versionId)}>Download selected version</button> : <p>Use the desktop app for versions above 512 MiB.</p>}
-          {writeApi && <button disabled={busy} onClick={() => { setRestoreError(undefined); setRestoreVersion(selected); }}>Restore selected version</button>}
+          {selected.size <= MAX_WEB_DOWNLOAD ? <Button disabled={downloading} onClick={() => onDownload(selected.versionId)}>Download selected version</Button> : <p>Use the desktop app for versions above 512 MiB.</p>}
+          {writeApi && <Button disabled={busy} onClick={() => { setRestoreError(undefined); setRestoreVersion(selected); }}>Restore selected version</Button>}
         </>}
       </section>}
       {restored && <p role="status">Version restored as the new head.</p>}
       <ErrorNotice error={error} />
-      {Boolean(error) && <button onClick={reload}>Try again</button>}
+      {Boolean(error) && <Button onClick={reload}>Try again</Button>}
       {loading && <Loading>Reading versions…</Loading>}
       {!loading && !error && !versions.length && (
         <p className="muted">No versions recorded.</p>
@@ -198,7 +200,7 @@ function Versions({
             </p>
             <code>{version.versionId}</code>
             <p className="small muted">By {version.actor || "Unknown actor"}</p>
-            {writeApi && version.op !== "delete" && version.op !== "rename" && <button disabled={busy} aria-label={`Restore version ${version.versionId}`} onClick={() => { setRestoreError(undefined); setRestoreVersion(version); }}>Restore this version</button>}
+            {writeApi && version.op !== "delete" && version.op !== "rename" && <Button disabled={busy} aria-label={`Restore version ${version.versionId}`} onClick={() => { setRestoreError(undefined); setRestoreVersion(version); }}>Restore this version</Button>}
             {version.op !== "delete" &&
               version.op !== "rename" &&
               (version.size > MAX_WEB_DOWNLOAD ? (
@@ -206,25 +208,25 @@ function Versions({
                   Use the desktop app for versions above 512 MiB.
                 </p>
               ) : (
-                <button
+                <Button
                   disabled={downloading}
                   onClick={() => onDownload(version.versionId)}
                 >
                   Download this version
-                </button>
+                </Button>
               ))}
           </li>
         ))}
       </ol>
       {cursor && (
-        <button disabled={loading} onClick={() => void loadMore()}>
+        <Button disabled={loading} onClick={() => void loadMore()}>
           {loading ? "Loading…" : "Load more versions"}
-        </button>
+        </Button>
       )}
       {restoreVersion && <Modal title="Restore version" onClose={() => { if (!busy) setRestoreVersion(null); }}>
         <p>Restore {restoreVersion.versionId} as the current version of {path}? Existing history is kept.</p>
         <ErrorNotice error={restoreError} />
-        <div className="actions"><button disabled={busy} onClick={() => setRestoreVersion(null)}>Cancel</button><button className="primary" disabled={busy} onClick={() => void restore()}>{busy ? "Restoring…" : "Confirm restore"}</button></div>
+        <div className="actions"><Button disabled={busy} onClick={() => setRestoreVersion(null)}>Cancel</Button><Button variant="default" disabled={busy} onClick={() => void restore()}>{busy ? "Restoring…" : "Confirm restore"}</Button></div>
       </Modal>}
     </section>
   );
@@ -298,21 +300,21 @@ function FileDetails({
             Finder.
           </p>
         ) : (
-          <button
-            className="primary"
+          <Button
+            variant="default"
             disabled={downloading}
             onClick={() => void download()}
           >
             {downloading ? "Downloading…" : "Download file"}
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           aria-expanded={showVersions}
           aria-controls="history-panel"
           onClick={() => setParams(showVersions ? {} : { panel: "versions" })}
         >
           {showVersions ? "Close version history" : "Version history"}
-        </button>
+        </Button>
         <ErrorNotice error={error} />
         {downloading && (
           <div role="status">
@@ -376,15 +378,14 @@ function DriveContents({
       <Breadcrumbs drive={drive} path={path} />
       <header className="page-heading browser-heading">
         <div>
-          <p className="eyebrow">{path ? drive.name : "YOUR CLOUD DRIVE"}</p>
           <h1>{title}</h1>
         </div>
-        <a className="button" href={finderLink(drive.id, path)}>
-          Show in Finder ↗
-        </a>
+        <Button asChild><a href={finderLink(drive.id, path)}>
+          Show in Finder
+        </a></Button>
       </header>
       <ErrorNotice error={error} />
-      {Boolean(error) && <button onClick={reload}>Try again</button>}
+      {Boolean(error) && <Button onClick={reload}>Try again</Button>}
       {!path && <DriveTools drive={drive} canManage={drive.access === "admin"} onDone={onDriveChanged} />}
       {loading && !file ? (
         <Loading>Opening drive…</Loading>
@@ -413,7 +414,7 @@ export function DriveBrowser() {
   return (
     <>
       <ErrorNotice error={error} />
-      {Boolean(error) && <button onClick={reload}>Try again</button>}
+      {Boolean(error) && <Button onClick={reload}>Try again</Button>}
       {fork && <ForkNotice drive={fork} />}
       {loading && <Loading>Finding your drive…</Loading>}
       {drive &&

@@ -183,3 +183,31 @@ async fn token_never_appears_in_debug_output() {
     let c = Client::builder("http://x", "super-secret-token").build().unwrap();
     assert!(!format!("{c:?}").contains("super-secret-token"));
 }
+
+#[tokio::test]
+async fn large_manifests_use_ndjson_and_keep_request_id() {
+    use uls_client::proto::{Op, ShardRef};
+    let srv = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v0/drives/demo/commit"))
+        .and(header("content-type", "application/x-ndjson"))
+        .and(header("x-uls-request-id", "native:large:1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"seq":1,"results":[]})))
+        .expect(1).mount(&srv).await;
+    let op = Op::Put { path:"large".into(), if_version:None, if_absent:true, size:15_000,
+        content_type:"application/octet-stream".into(), mtime_ms:0,
+        shards: vec![ShardRef {h:"a".repeat(64),n:1};15_000], xattrs:None };
+    client(&srv.uri()).commit_with_id("demo", vec![op.clone()], Some("native:large:1")).await.unwrap();
+    let requests = srv.received_requests().await.unwrap();
+    assert!(requests[0].body.len() > 1024*1024);
+    assert_eq!(serde_json::from_slice::<Op>(&requests[0].body).unwrap(),op);
+}
+
+#[test]
+fn oversized_manifest_is_rejected_before_network_upload() {
+    use uls_client::proto::{Op, ShardRef};
+    let op = Op::Put {path:"huge".into(),if_version:None,if_absent:true,size:110_000,
+        content_type:"application/octet-stream".into(),mtime_ms:0,
+        shards:vec![ShardRef {h:"a".repeat(64),n:1};110_000],xattrs:None};
+    assert!(Client::preflight_commit(&[op]).unwrap_err().to_string().contains("8 MiB"));
+}

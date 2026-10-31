@@ -102,6 +102,11 @@ pub struct Connection {
     /// The change notification watches of this connection's opens and the
     /// bytes they buffer.
     pub(crate) notify_budget: Arc<NotifyBudget>,
+
+    /// One FIFO gate per FileId for mutating requests (WRITE, FLUSH, CLOSE)
+    /// that run beside the reader: a FLUSH or CLOSE must not complete before
+    /// a WRITE to the same open that arrived earlier.
+    pub(crate) file_gates: Mutex<HashMap<FileId, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Connection {
@@ -130,6 +135,7 @@ impl Connection {
             pending: PendingOps::default(),
             pipe_budget: Arc::default(),
             notify_budget: Arc::default(),
+            file_gates: Mutex::new(HashMap::new()),
         }
     }
 

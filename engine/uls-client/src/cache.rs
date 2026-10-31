@@ -89,12 +89,18 @@ impl ShardCache {
 
     /// Store a shard atomically. The bytes must hash to `hash`.
     pub fn put(&self, hash: &str, data: &[u8]) -> io::Result<()> {
-        let final_path = self
-            .path_for(hash)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bad shard hash"))?;
         if sha256_hex(data) != hash {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "data does not match hash"));
         }
+        self.put_verified(hash, data)
+    }
+
+    /// `put` for bytes the caller has just verified against `hash`; skips the second SHA-256.
+    /// `get` still verifies every entry, so a torn or corrupt file is a miss, never bad data.
+    pub(crate) fn put_verified(&self, hash: &str, data: &[u8]) -> io::Result<()> {
+        let final_path = self
+            .path_for(hash)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bad shard hash"))?;
         if final_path.is_file() {
             return Ok(());
         }

@@ -122,7 +122,7 @@ async fn permissions_connect_and_status() {
     let first = c.recv().await;
     assert_eq!(first, json!({"event":"state","data":{"state":"signed_out"}}));
     let r = c.call(1, "status", json!(null)).await;
-    assert_eq!(r, json!({"id":1,"result":{"version":"0.1.0","state":"signed_out","pendingOps":0}}));
+    assert_eq!(r, json!({"id":1,"result":{"version":"0.1.0","state":"signed_out","pendingOps":0,"uploadBandwidthBps":0}}));
 }
 
 #[tokio::test]
@@ -349,4 +349,187 @@ async fn graceful_shutdown_unmounts_but_remembers_and_restart_restores() {
     let r = e2.handle(req(3, "auth.status", json!({}))).await;
     assert_eq!(r.result.unwrap()["signedIn"], true);
     assert_eq!(serde_json::from_str::<Value>(&e2.state_event_line()).unwrap(), json!({"event":"state","data":{"state":"idle"}}));
+}
+
+struct RestoreStore {
+    inner: uls_auth::MemoryStore,
+    mode: std::sync::atomic::AtomicU8,
+    entered: std::sync::atomic::AtomicBool,
+    released: (Mutex<bool>, std::sync::Condvar),
+}
+impl RestoreStore {
+    fn new(mode: u8) -> Arc<Self> {
+        Arc::new(Self {inner:uls_auth::MemoryStore::new(),mode:mode.into(),entered:false.into(),released:(Mutex::new(false),std::sync::Condvar::new())})
+    }
+    fn release(&self) { *self.released.0.lock().unwrap()=true; self.released.1.notify_all(); }
+}
+impl uls_auth::SecretStore for RestoreStore {
+    fn get(&self, account: &str) -> Result<Option<String>, uls_auth::StoreError> {
+        let value=uls_auth::SecretStore::get(&self.inner,account)?;
+        match self.mode.load(std::sync::atomic::Ordering::SeqCst) {
+            1=>Err(uls_auth::StoreError("test authorization denied".into())),
+            2=>{
+                self.entered.store(true,std::sync::atomic::Ordering::SeqCst);
+                let mut released=self.released.0.lock().unwrap();
+                while !*released { released=self.released.1.wait(released).unwrap(); }
+                Ok(value)
+            }
+            _=>Ok(value),
+        }
+    }
+    fn set(&self, account:&str, secret:&str)->Result<(),uls_auth::StoreError> {uls_auth::SecretStore::set(&self.inner,account,secret)}
+    fn delete(&self, account:&str)->Result<(),uls_auth::StoreError> {
+        if self.mode.load(std::sync::atomic::Ordering::SeqCst)==3 { return Err(uls_auth::StoreError("test deletion denied".into())); }
+        uls_auth::SecretStore::delete(&self.inner,account)
+    }
+}
+struct ReleaseRestore(Arc<RestoreStore>);
+impl Drop for ReleaseRestore {fn drop(&mut self){self.0.release();}}
+fn request(id:i64,method:&str,params:Value)->ulsd::protocol::Request {
+    ulsd::protocol::parse_request(&json!({"id":id,"method":method,"params":params}).to_string()).unwrap()
+}
+fn saved_engine(dir:&tempfile::TempDir,store:Arc<RestoreStore>,api:&str)->(Arc<Engine>,Arc<Mutex<Vec<String>>>) {
+    let path=dir.path().join("state.json");
+    let state=ulsd::state::StateStore::load(path.clone());
+    state.try_update(|p|p.auth=Some(ulsd::state::PersistedAuth{api_endpoint:api.into(),user:ulsd::protocol::User{id:"u_1".into(),email:"a@b.c".into()}})).unwrap();
+    let mounted=Arc::new(Mutex::new(Vec::new()));
+    let engine=Engine::new(EngineConfig{version:"test".into(),state_path:path,mount_root:dir.path().join("mnt"),cache_dir:Some(dir.path().join("cache")),secrets:store,default_endpoint:"http://127.0.0.1:1".into()},Arc::new(FakeAdapter{mounted:mounted.clone()}));
+    (engine,mounted)
+}
+async fn wait_retry(engine:&Arc<Engine>)->Value {
+    for _ in 0..100 {
+        let status=engine.handle(request(1,"status",json!({}))).await.result.unwrap();
+        if status["canRetrySignIn"]==true {return status;}
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("saved sign-in failure was not reported");
+}
+
+#[tokio::test]
+async fn denied_saved_credentials_require_explicit_retry_then_restore_remembered_mounts() {
+    use uls_auth::SecretStore;
+    let api=MockServer::start().await;
+    Mock::given(method("POST")).and(path("/auth/refresh")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"accessToken":jwt(now_s()+900),"refreshToken":"rotated","user":{"id":"u_1","email":"a@b.c"}}))).mount(&api).await;
+    Mock::given(method("POST")).and(path("/drives/d-abc/token")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"token":"dt","expiresAt":(now_s()+600)*1000,"endpoint":"http://127.0.0.1:1","driveId":"d-abc"}))).mount(&api).await;
+    let dir=tempfile::tempdir().unwrap();let store=RestoreStore::new(1);store.set("u_1","refresh").unwrap();
+    let state=ulsd::state::StateStore::load(dir.path().join("state.json"));
+    state.try_update(|p|p.mounts.push(ulsd::state::MountRecord{drive_id:"d-abc".into(),name:"Space".into(),mount_path:None,read_only:true})).unwrap();
+    let (engine,mounted)=saved_engine(&dir,store.clone(),&api.uri());
+    engine.start().await;
+    let status=wait_retry(&engine).await;assert_eq!(status["state"],"error");assert!(status["message"].as_str().unwrap().contains("Keychain"));
+    assert_eq!(engine.handle(request(2,"auth.status",json!({}))).await.result.unwrap()["signedIn"],false);
+    store.mode.store(0,std::sync::atomic::Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(engine.handle(request(3,"auth.status",json!({}))).await.result.unwrap()["signedIn"],false,"no automatic authorization prompt loop");
+    assert!(engine.handle(request(4,"auth.retryRestore",json!({}))).await.error.is_none());
+    for _ in 0..200 {if !mounted.lock().unwrap().is_empty(){break;}tokio::time::sleep(Duration::from_millis(10)).await;}
+    assert_eq!(*mounted.lock().unwrap(),vec!["d-abc"]);
+    assert_eq!(engine.handle(request(5,"auth.status",json!({}))).await.result.unwrap()["signedIn"],true);
+    assert!(engine.handle(request(6,"auth.retryRestore",json!({}))).await.error.is_some());
+    engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn blocked_keychain_restore_keeps_socket_responsive_and_cannot_replace_new_sign_in() {
+    use uls_auth::SecretStore;
+    let dir=tempfile::tempdir().unwrap();let store=RestoreStore::new(2);store.set("u_1","old").unwrap();let _release=ReleaseRestore(store.clone());
+    let remembered=ulsd::state::StateStore::load(dir.path().join("state.json"));
+    remembered.try_update(|p| {
+        p.mounts.push(ulsd::state::MountRecord{drive_id:"old-drive".into(),name:"Old account".into(),mount_path:None,read_only:true});
+        p.pins.push(ulsd::state::PinRecord{drive_id:"old-drive".into(),path:"/private-old-file".into(),shards:Default::default()});
+        p.workspace=Some("old-workspace".into());
+    }).unwrap();
+    let (engine,_)=saved_engine(&dir,store.clone(),"http://127.0.0.1:1");
+    engine.start().await;
+    for _ in 0..100 {if store.entered.load(std::sync::atomic::Ordering::SeqCst){break;}tokio::time::sleep(Duration::from_millis(10)).await;}
+    assert!(store.entered.load(std::sync::atomic::Ordering::SeqCst));
+    let sock=dir.path().join("ulsd.sock");let (listener,uid)=server::bind(&sock).unwrap();let task=tokio::spawn(server::serve(listener,uid,engine.clone()));
+    let mut conn=Conn::open(&sock).await;
+    let status=tokio::time::timeout(Duration::from_millis(500),conn.call(1,"status",json!({}))).await.unwrap();assert!(status["result"]["message"].as_str().unwrap().contains("Restoring"));
+    let newer=format!("{}.{}.sig",URL_SAFE_NO_PAD.encode(br#"{"alg":"EdDSA"}"#),URL_SAFE_NO_PAD.encode(serde_json::to_vec(&json!({"sub":"u_2","email":"new@example.invalid","exp":now_s()+900})).unwrap()));
+    assert!(engine.handle(request(2,"auth.set",json!({"apiEndpoint":"http://127.0.0.1:1","accessToken":newer,"refreshToken":"new"}))).await.error.is_none());
+    store.release();tokio::time::sleep(Duration::from_millis(40)).await;
+    assert_eq!(engine.handle(request(3,"auth.status",json!({}))).await.result.unwrap()["user"]["id"],"u_2");
+    assert_eq!(store.inner.get("u_2").unwrap().as_deref(),Some("new"));
+    let persisted=ulsd::state::StateStore::load(dir.path().join("state.json")).get();
+    assert_eq!(persisted.auth.unwrap().user.id,"u_2");assert!(persisted.mounts.is_empty());
+    assert!(persisted.pins.is_empty());assert!(persisted.workspace.is_none());
+    assert!(engine.handle(request(30,"pins.list",json!({}))).await.result.unwrap()["pins"].as_array().unwrap().is_empty());
+    assert_eq!(engine.handle(request(4,"status",json!({}))).await.result.unwrap()["state"],"idle");
+    task.abort();engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_auth_state_save_does_not_acknowledge_or_publish_a_session() {
+    let dir=tempfile::tempdir().unwrap();let store=RestoreStore::new(0);
+    let (engine,_)=saved_engine(&dir,store,"http://127.0.0.1:1");
+    std::fs::remove_file(dir.path().join("state.json")).unwrap();std::fs::create_dir(dir.path().join("state.json")).unwrap();
+    let result=engine.handle(request(1,"auth.set",json!({"apiEndpoint":"http://127.0.0.1:1","accessToken":jwt(now_s()+900),"refreshToken":"new"}))).await;
+    assert_eq!(result.error.unwrap().code,"internal");
+    assert_eq!(engine.handle(request(2,"auth.status",json!({}))).await.result.unwrap()["signedIn"],false);
+}
+
+#[tokio::test]
+async fn late_keychain_restore_cannot_undo_explicit_sign_out() {
+    use uls_auth::SecretStore;
+    let dir=tempfile::tempdir().unwrap();let store=RestoreStore::new(2);store.set("u_1","old").unwrap();let _release=ReleaseRestore(store.clone());
+    let (engine,_)=saved_engine(&dir,store.clone(),"http://127.0.0.1:1");engine.start().await;
+    for _ in 0..100 {if store.entered.load(std::sync::atomic::Ordering::SeqCst){break;}tokio::time::sleep(Duration::from_millis(10)).await;}
+    assert!(engine.handle(request(1,"auth.signOut",json!({}))).await.error.is_none());
+    store.release();tokio::time::sleep(Duration::from_millis(40)).await;
+    assert_eq!(engine.handle(request(2,"auth.status",json!({}))).await.result.unwrap()["signedIn"],false);
+    assert!(store.inner.get("u_1").unwrap().is_none());
+    assert!(ulsd::state::StateStore::load(dir.path().join("state.json")).get().auth.is_none());
+}
+
+#[tokio::test]
+async fn mount_and_config_report_state_save_failure_and_undo_the_mount() {
+    let dir=tempfile::tempdir().unwrap();let store=RestoreStore::new(0);let (engine,mounted)=saved_engine(&dir,store,"http://127.0.0.1:1");
+    assert!(engine.handle(request(1,"config.set",json!({"token":"dev","endpoint":"http://127.0.0.1:1"}))).await.error.is_none());
+    std::fs::remove_file(dir.path().join("state.json")).unwrap();std::fs::create_dir(dir.path().join("state.json")).unwrap();
+    assert_eq!(engine.handle(request(2,"drive.mount",json!({"driveId":"drive"}))).await.error.unwrap().code,"internal");
+    assert!(mounted.lock().unwrap().is_empty());
+    assert!(engine.handle(request(3,"mounts.list",json!({}))).await.result.unwrap()["mounts"].as_array().unwrap().is_empty());
+    assert_eq!(engine.handle(request(4,"config.set",json!({"cacheCapBytes":1}))).await.error.unwrap().code,"internal");
+    engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn credential_cleanup_failure_is_reported_without_showing_a_live_account() {
+    let api=MockServer::start().await;
+    Mock::given(method("POST")).and(path("/auth/logout")).respond_with(ResponseTemplate::new(200)).expect(1).mount(&api).await;
+    let dir=tempfile::tempdir().unwrap();let store=RestoreStore::new(3);let (engine,_)=saved_engine(&dir,store,&api.uri());
+    assert!(engine.handle(request(1,"auth.set",json!({"apiEndpoint":api.uri(),"accessToken":jwt(now_s()+900),"refreshToken":"new"}))).await.error.is_none());
+    let response=engine.handle(request(2,"auth.signOut",json!({}))).await;assert_eq!(response.error.unwrap().code,"internal");
+    assert_eq!(engine.handle(request(3,"auth.status",json!({}))).await.result.unwrap()["signedIn"],false);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let status=engine.handle(request(4,"status",json!({}))).await.result.unwrap();
+    assert_eq!(status["state"],"signed_out");assert!(status["message"].as_str().unwrap().contains("Keychain"));
+    assert!(ulsd::state::StateStore::load(dir.path().join("state.json")).get().auth.is_none());
+}
+
+
+#[tokio::test]
+async fn account_switch_refuses_to_publish_new_credentials_when_an_old_mount_cannot_disconnect() {
+    struct RefuseUnmount;
+    #[async_trait]
+    impl MountAdapter for RefuseUnmount {
+        fn access(&self)->NeedAccess { NeedAccess::Read }
+        async fn mount(&self,_:MountRequest)->Result<Arc<dyn MountHandle>,MountError> { Ok(Arc::new(RefuseUnmount)) }
+    }
+    #[async_trait]
+    impl MountHandle for RefuseUnmount {
+        async fn unmount(&self)->Result<(),MountError> { Err(MountError(ulsd::protocol::ErrorBody::internal("test: busy mount"))) }
+    }
+    let dir=tempfile::tempdir().unwrap();let store=Arc::new(uls_auth::MemoryStore::new());
+    let engine=Engine::new(EngineConfig{version:"test".into(),state_path:dir.path().join("state.json"),mount_root:dir.path().join("mnt"),cache_dir:None,secrets:store.clone(),default_endpoint:"http://127.0.0.1:1".into()},Arc::new(RefuseUnmount));
+    assert!(engine.handle(request(1,"config.set",json!({"token":"dev"}))).await.error.is_none());
+    assert!(engine.handle(request(2,"drive.mount",json!({"driveId":"old-drive"}))).await.error.is_none());
+    assert!(engine.handle(request(3,"auth.set",json!({"apiEndpoint":"http://127.0.0.1:1","accessToken":jwt(now_s()+900),"refreshToken":"old"}))).await.error.is_none());
+    let new_token=format!("e30.{}.sig",URL_SAFE_NO_PAD.encode(json!({"sub":"u_2","email":"new@example.invalid","exp":now_s()+900}).to_string()));
+    let result=engine.handle(request(4,"auth.set",json!({"apiEndpoint":"http://127.0.0.1:1","accessToken":new_token,"refreshToken":"new"}))).await;
+    assert!(result.error.unwrap().message.contains("previous account"));
+    assert_eq!(engine.handle(request(5,"auth.status",json!({}))).await.result.unwrap()["user"]["id"],"u_1");
+    assert_eq!(ulsd::state::StateStore::load(dir.path().join("state.json")).get().auth.unwrap().user.id,"u_1");
+    assert!(uls_auth::SecretStore::get(&*store,"u_2").unwrap().is_none());
 }

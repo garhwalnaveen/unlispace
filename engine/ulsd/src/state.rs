@@ -51,6 +51,9 @@ pub struct Persisted {
     pub workspace: Option<String>,
     #[serde(default)]
     pub upload_drives: Vec<String>,
+    /// Upload bandwidth limit in bytes per second; absent or 0 = unlimited.
+    #[serde(default)]
+    pub upload_bandwidth_bps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,16 +90,21 @@ impl StateStore {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Publish memory only after its durable snapshot is installed; serialize the whole write.
+    pub fn try_update(&self, f: impl FnOnce(&mut Persisted)) -> std::io::Result<()> {
+        let mut current = self.lock();
+        let mut snapshot = current.clone();
+        f(&mut snapshot);
+        snapshot.version = 1;
+        write_atomic(&self.path, &snapshot)?;
+        *current = snapshot;
+        // Rename committed the new snapshot; retain it in memory even if directory sync fails.
+        std::fs::File::open(self.path.parent().ok_or_else(|| std::io::Error::other("state path has no parent"))?)?.sync_all()
+    }
+
+    /// Best effort is reserved for replayable progress, such as change-feed cursors.
     pub fn update(&self, f: impl FnOnce(&mut Persisted)) {
-        let snapshot = {
-            let mut g = self.lock();
-            f(&mut g);
-            g.version = 1;
-            g.clone()
-        };
-        if let Err(e) = write_atomic(&self.path, &snapshot) {
-            tracing::warn!("could not save state: {e}");
-        }
+        if let Err(e) = self.try_update(f) { tracing::warn!("could not save state: {e}"); }
     }
 
     pub fn cursor(&self, drive: &str) -> Option<i64> {
@@ -134,5 +142,27 @@ mod tests {
         assert_eq!(s2.cursor("d-1"), Some(42));
         std::fs::write(&path, b"{nope").unwrap();
         assert_eq!(StateStore::load(path).get(), Persisted::default());
+    }
+}
+
+#[cfg(test)]
+mod persistence_regressions {
+    use super::*;
+    #[test]
+    fn concurrent_updates_keep_memory_and_disk_in_the_same_order() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("state.json");let store=std::sync::Arc::new(StateStore::load(path.clone()));
+        std::thread::scope(|scope| {
+            for worker in 0..8 {
+                let store=store.clone();scope.spawn(move || {
+                    for change in 0..25 {store.try_update(|p| {p.cursors.insert(format!("{worker}:{change}"),change);}).unwrap();}
+                });
+            }
+        });
+        let disk=StateStore::load(path).get();assert_eq!(disk.cursors.len(),200);assert_eq!(store.get(),disk);
+    }
+    #[test]
+    fn failed_snapshot_install_preserves_previous_memory_and_reports_error() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("state.json");std::fs::create_dir(&path).unwrap();let store=StateStore::load(path);
+        assert!(store.try_update(|p|p.workspace=Some("must-not-acknowledge".into())).is_err());assert_eq!(store.get(),Persisted::default());
     }
 }

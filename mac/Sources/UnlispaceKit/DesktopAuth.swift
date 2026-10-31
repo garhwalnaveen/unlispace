@@ -52,7 +52,8 @@ public enum CallbackParser {
 /// Pure request/response pieces of the contract §5.1 desktop flow (unit-tested).
 public enum DesktopAuthWire {
     /// `GET {api}/auth/desktop/start?state&code_challenge&code_challenge_method=S256`
-    public static func startURL(api: URL, challenge: String, state: String) throws -> URL {
+    /// `switchAccount` adds `switch=1` so the web signs out its own session first and the user can pick another account.
+    public static func startURL(api: URL, challenge: String, state: String, switchAccount: Bool = false) throws -> URL {
         guard var c = URLComponents(url: api.appendingPathComponent("auth/desktop/start"), resolvingAgainstBaseURL: false) else {
             throw AuthError.badEndpoint
         }
@@ -61,6 +62,7 @@ public enum DesktopAuthWire {
             URLQueryItem(name: "code_challenge", value: challenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
         ]
+        if switchAccount { c.queryItems?.append(URLQueryItem(name: "switch", value: "1")) }
         guard let u = c.url else { throw AuthError.badEndpoint }
         return u
     }
@@ -99,11 +101,11 @@ public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContext
         self.session = session
     }
 
-    public func signIn(api: URL) async throws -> Session {
+    public func signIn(api: URL, switchAccount: Bool = false) async throws -> Session {
         let verifier = PKCE.makeVerifier()
         let challenge = PKCE.challenge(forVerifier: verifier)
         let state = PKCE.makeState()
-        let url = try DesktopAuthWire.startURL(api: api, challenge: challenge, state: state)
+        let url = try DesktopAuthWire.startURL(api: api, challenge: challenge, state: state, switchAccount: switchAccount)
         try await checkSignInService(url: url)
         try Task.checkCancellation()
 

@@ -1,3 +1,4 @@
+import {parseOps} from "../src/validate";
 // Regression tests for the Codex review of the data plane (findings #1-#12).
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -227,17 +228,21 @@ describe("review #9: failed commits leave no shard registrations", () => {
 		const h = await sha256Hex(data);
 		await env.SHARDS.put(`shards/${d}/${h}`, data); // present in R2, unknown to the DO
 		await putFile(d, "exists", "e");
-		const r = await commit(d, [
+		const ops = parseOps({ops:[
 			{ op: "put", path: "p", size: data.length, shards: [{ h, n: data.length }], ifAbsent: false },
 			{ op: "put", path: "exists", size: data.length, shards: [{ h, n: data.length }], ifAbsent: true },
-		]);
-		expect(r.status).toBe(412);
-		const ns = env.DRIVE_AUTHORITY as unknown as DurableObjectNamespace<import("../src/drive").DriveAuthority>;
+        ]});
+        if (!Array.isArray(ops)) throw new Error("fixture");
+        const ns = env.DRIVE_AUTHORITY as unknown as DurableObjectNamespace<import("../src/drive").DriveAuthority>;
+        // Trusted confirmation RPC remains atomic; HTTP cannot discover/grant a sibling's hash.
+        const r = await ns.get(ns.idFromName(d)).commit(ops, [[h,data.length]], "test");
+		expect(r).toMatchObject({ok:false,status:412});
 		const unknown = await ns.get(ns.idFromName(d)).filterUnknown([h]);
 		expect(unknown.ok && unknown.data).toEqual([h]);
 		const head = ((await (await api(`/v0/drives/${d}`)).json()) as { headSeq: number }).headSeq;
 		expect(head).toBe(1);
-		// and a successful commit does register it
+		// and a verified upload grants it before successful publication
+        await upload(d,data);
 		expect((await commit(d, [{ op: "put", path: "p", size: data.length, shards: [{ h, n: data.length }] }])).status).toBe(200);
 		const after = await ns.get(ns.idFromName(d)).filterUnknown([h]);
 		expect(after.ok && after.data).toEqual([]);

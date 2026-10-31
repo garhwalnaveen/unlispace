@@ -14,12 +14,14 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["S3State"] }],
   "vars": {
     "ULS_ISSUER": "http://127.0.0.1:8788",
-    "ULS_S3_HOST": "s3.unlispace.com"
+    "ULS_S3_HOST": "s3.unlispace.com",
+    "ULS_DATA_ENDPOINT": "http://127.0.0.1:8787"
   },
   "secrets": { "required": ["ULS_JWT_PRIVATE_JWK"] },
   "env": {
     "production": {
       "name": "unlispace-s3",
+      "secrets": { "required": ["ULS_JWT_PRIVATE_JWK"] },
       "workers_dev": true,
       "preview_urls": false,
       "services": [
@@ -31,7 +33,8 @@
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["S3State"] }],
       "vars": {
         "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
-        "ULS_S3_HOST": "unlispace-s3.__WORKERS_DOMAIN__"
+        "ULS_S3_HOST": "unlispace-s3.__WORKERS_DOMAIN__",
+        "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.__WORKERS_DOMAIN__"
       }
     }
   }

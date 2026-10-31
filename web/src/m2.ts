@@ -18,11 +18,16 @@ export interface NewKey {
   drives: string[] | null;
 }
 export interface KeySecret extends AccessKey { secretAccessKey: string }
+export interface Price { amount: number; currency: string }
 export interface BillingCatalog {
   plans: { id: "individual" | "teams"; name: string; bytesPerSeat: number; minSeats: number; maxSeats: number }[];
   storageAddon: { bytes: number; maxQuantity: number };
   checkoutAvailable: boolean;
+  /** Minor currency units per product, present only when the operator configured them. */
+  prices?: Record<"individual" | "teams" | "storage", Record<"monthly" | "annual", Price>> | null;
   trialDays: number;
+  checkoutStartsImmediately?: boolean;
+  checkoutEndsTrial?: boolean;
 }
 export interface BillingSummary {
   orgId: string;
@@ -33,7 +38,8 @@ export interface BillingSummary {
   storageAddons: number;
   quotaBytes: number;
   writable: boolean;
-  state: "paid" | "trial_active" | "expired";
+  state: "paid" | "trial_active" | "provisioning" | "expired";
+  trialPending?: boolean;
   usedBytes: number;
 }
 export interface Invoice {

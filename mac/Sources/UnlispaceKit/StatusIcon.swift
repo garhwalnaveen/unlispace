@@ -33,7 +33,7 @@ public enum AppStatus: Sendable, Equatable {
     public var title: String {
         switch self {
         case .signedOut: return "Signed out"
-        case .idle: return "Up to date"
+        case .idle: return "Connected"
         case .syncing: return "Syncing"
         case .offline: return "Offline"
         case .error: return "Error"
@@ -43,6 +43,31 @@ public enum AppStatus: Sendable, Equatable {
 }
 
 public enum TransferSummary {
+    public static func phase(for transfer: TransferInfo) -> String {
+        switch (transfer.direction, transfer.status) {
+        case (.upload, .queued): "Saved locally · Queued"
+        case (.upload, .active): "Uploading"
+        case (.upload, .done): "Saved to cloud"
+        case (.upload, .failed): "Upload failed"
+        case (.download, .queued): "Download queued"
+        case (.download, .active): "Downloading"
+        case (.download, .done): "Downloaded"
+        case (.download, .failed): "Download failed"
+        }
+    }
+
+    public static func uploadTitle(uploads: UploadsSnapshot?, transfers: [TransferInfo], state: AppStatus, available: Bool, recentUploads: [TransferInfo] = []) -> String {
+        guard available else { return "Connect to see transfers" }
+        if state == .offline { return "Offline · Cloud save not confirmed" }
+        if state == .error || state == .signedOut || state == .engineMissing { return "Check your connection" }
+        if (transfers + recentUploads).contains(where: { $0.direction == .upload && $0.status == .failed }) { return "A recent upload failed" }
+        if transfers.contains(where: { $0.direction == .upload && $0.status == .active }) { return "Uploading" }
+        guard let uploads else { return "Upload status unavailable" }
+        if !uploads.pending.isEmpty { return "Saved locally · Waiting to upload" }
+        if state == .syncing { return "Checking cloud save…" }
+        return "No uploads pending"
+    }
+
     /// One-line progress text, or nil if nothing is in flight.
     public static func line(for transfers: [TransferInfo]) -> String? {
         let active = transfers.filter { !$0.isFinished }

@@ -14,12 +14,8 @@ function renderApp(path = "/") {
   const auth = new AuthStore(localStorage, null); stores.push(auth); auth.accept(session);
   render(<MemoryRouter initialEntries={[path]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
 }
-function dialogs() {
-  Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
-  Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); } });
-}
 it("forks with name and alias and shows lineage, fork point, usage and quota on home", async () => {
-  dialogs(); let forked = false;
+  let forked = false;
   const child = { ...drive, id: "d-child", name: "Branch", alias: "branch", usageBytes: 0, forkOf: { driveId: drive.id, forkPoint: 1000 }, forks: [] };
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/billing")) return json(billing);
@@ -27,7 +23,8 @@ it("forks with name and alias and shows lineage, fork point, usage and quota on 
     return json({ orgs: [{ ...org, drives: forked ? [{ ...org.drives[0], forks: [child.id] }, child] : org.drives }] });
   });
   vi.stubGlobal("fetch", fetcher); renderApp(); const user = userEvent.setup();
-  expect(await screen.findByText(/Usage: 1 KiB/)).toBeInTheDocument();
+  expect(await screen.findByText(/Last measured drive bytes: 1 KiB/)).toBeInTheDocument();
+  expect(await screen.findByText(/Deleting a file keeps its history/)).toBeInTheDocument();
   expect(await screen.findByRole("alert")).toHaveTextContent("Writes are paused");
   expect(screen.getByRole("meter", { name: "Organization storage usage" })).toHaveAttribute("value", "1024");
   await user.click(screen.getByText("Drive options"));
@@ -42,7 +39,6 @@ it("forks with name and alias and shows lineage, fork point, usage and quota on 
   expect(within(branch).getByText(/Forked from/)).toHaveTextContent("1970");
 });
 it("keeps alias conflicts editable and protects hard delete with typed confirmation and fork errors", async () => {
-  dialogs();
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/billing")) return json(billing);
     if (init?.method === "PATCH") { expect(JSON.parse(String(init.body)).alias).toBe("taken"); return json({ error: "alias_taken" }, 409); }
@@ -99,7 +95,7 @@ const versions = [
   { versionId: "v3", ts: new Date("2026-10-03T10:00:00").getTime(), seq: 3, op: "delete", size: 0, actor: null },
 ];
 it("picks the actual head as of time across pages, downloads it and restores through a guarded confirmation", async () => {
-  dialogs(); let restored = false;
+  let restored = false;
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/token")) return json({ token: "token", expiresAt: Date.now() + 900000, endpoint: "https://data.example", driveId: drive.id });
     if (url.includes("/versions?")) return json(new URL(url).searchParams.has("cursor") ? { versions: versions.slice(1), cursor: null } : { versions: versions.slice(0, 1), cursor: "next" });
@@ -137,7 +133,7 @@ it("picks the actual head as of time across pages, downloads it and restores thr
   expect(await screen.findByText("This file did not exist at that time.")).toBeInTheDocument();
 });
 it("edits a drive alias from its page and hard-deletes successfully", async () => {
-  dialogs(); let alias = "space"; let deleted = false;
+  let alias = "space"; let deleted = false;
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/token")) return json({ token: "read", expiresAt: Date.now() + 900000, endpoint: "https://data.example", driveId: drive.id });
     if (url.includes("/list?")) return json({ entries: [], cursor: null });
@@ -158,7 +154,6 @@ it("edits a drive alias from its page and hard-deletes successfully", async () =
   expect(await screen.findByRole("heading", { name: "Drive unavailable" })).toBeInTheDocument();
 });
 it("keeps failed restores in the confirmation", async () => {
-  dialogs();
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/token")) return json({ token: "token", expiresAt: Date.now() + 900000, endpoint: "https://data.example", driveId: drive.id });
     if (url.includes("/versions?")) return json({ versions: versions.slice(0, 1), cursor: null });

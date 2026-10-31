@@ -17,7 +17,7 @@ export function normalizeEmail(v: unknown): string | null {
 
 const codeHash = (email: string, code: string) => sha256Hex(`otp:${email}:${code}`);
 
-/** Always succeeds from the caller's view (no account enumeration); only rate limiting differs. */
+/** Delivery failures have the same response for every address, without account enumeration. */
 export async function otpStart(ctx: Ctx, email: string): Promise<void> {
 	const ip = ctx.req.headers.get("cf-connecting-ip") ?? "unknown";
 	const okEmail = await hit(ctx, `otp:email:${email}`, START_PER_EMAIL, HOUR);
@@ -39,8 +39,9 @@ export async function otpStart(ctx: Ctx, email: string): Promise<void> {
 			`<p>Your Unlispace sign-in code is <strong style="font-size:1.4em;letter-spacing:.1em">${code}</strong>.</p><p>It expires in 10 minutes. If you didn't request this, ignore this email.</p>`,
 		);
 	} catch (e) {
-		// Do not surface delivery errors: the response must be identical for every address.
 		console.error("otp email failed", String((e as Error)?.message ?? e));
+		await ctx.env.DB.prepare("DELETE FROM otp_codes WHERE email = ? AND code_hash = ?").bind(email, await codeHash(email, code)).run();
+		throw new HttpError(503, "email_unavailable", "Sign-in email could not be sent. Please try again later.");
 	}
 }
 

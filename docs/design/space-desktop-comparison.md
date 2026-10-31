@@ -113,3 +113,14 @@ page, drive filtering and Clear filters recovery against the existing mounted Sp
 No drive was mounted/ejected, pinned/unpinned or modified during this follow-up. New live
 offline downloads, VoiceOver acceptance, AI, indexed file search, teams and billing remain
 outside this validation. The installed app and DMG were not replaced by this follow-up.
+
+## Implementation follow-up — 26 October 2026
+
+The remaining core feature work is tracked in
+[comparison-implementation-status.md](comparison-implementation-status.md). This pass adds
+indexed filename search, native drive creation, a real team-management web flow and desktop
+handoff, billing handoff, and user-configured AI with explicit text attachments. Transfer
+implementation fixes and their evidence are recorded in
+[the performance follow-up](../research/performance/follow-up-2026-10-26.md).
+These source changes do not by themselves establish deployed feature parity, full-content
+search, all-source integrations, notarization or a new hosted performance result.

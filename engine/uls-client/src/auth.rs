@@ -11,14 +11,16 @@ pub struct ProviderToken {
     pub token: String,
     /// `None` keeps the endpoint the client was built with.
     pub endpoint: Option<String>,
+    /// A confirmed write-entitlement rejection selected a read-only credential.
+    pub read_only: bool,
 }
 
 impl ProviderToken {
     pub fn new(token: impl Into<String>) -> Self {
-        ProviderToken { token: token.into(), endpoint: None }
+        ProviderToken { token: token.into(), endpoint: None, read_only: false }
     }
     pub fn with_endpoint(token: impl Into<String>, endpoint: impl Into<String>) -> Self {
-        ProviderToken { token: token.into(), endpoint: Some(endpoint.into()) }
+        ProviderToken { token: token.into(), endpoint: Some(endpoint.into()), read_only: false }
     }
 }
 

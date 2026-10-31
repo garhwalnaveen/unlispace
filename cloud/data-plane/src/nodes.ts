@@ -56,11 +56,9 @@ export class NodeTree {
 		const at = path.lastIndexOf("/");
 		const parent = at < 0 ? "" : this.get(path.slice(0, at))!.id;
 		const name = path.slice(at + 1);
-		this.sql.exec(`INSERT INTO nodes(id,parent_id,name,type,head,size,ctype,mtime,seq) VALUES(?,?,?,?,?,?,?,?,?)
- ON CONFLICT(id) DO UPDATE SET parent_id=excluded.parent_id,name=excluded.name,type=excluded.type,head=excluded.head,size=excluded.size,ctype=excluded.ctype,mtime=excluded.mtime,seq=excluded.seq
- ON CONFLICT(parent_id,name) DO UPDATE SET type=excluded.type,head=excluded.head,size=excluded.size,
- ctype=excluded.ctype,mtime=excluded.mtime,seq=excluded.seq`,
-			id, parent, name, data.type, data.head, data.size, data.ctype, data.mtime, data.seq);
+		const existing = this.sql.exec<{id:string}>("SELECT id FROM nodes WHERE id=? OR (parent_id=? AND name=?) ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END LIMIT 1",id,parent,name,id).toArray()[0];
+		if (existing) this.sql.exec("UPDATE nodes SET parent_id=?,name=?,type=?,head=?,size=?,ctype=?,mtime=?,seq=? WHERE id=?",parent,name,data.type,data.head,data.size,data.ctype,data.mtime,data.seq,existing.id);
+		else this.sql.exec("INSERT INTO nodes(id,parent_id,name,type,head,size,ctype,mtime,seq) VALUES(?,?,?,?,?,?,?,?,?)",id,parent,name,data.type,data.head,data.size,data.ctype,data.mtime,data.seq);
 	}
 
 	detach(id: string): void {
@@ -87,4 +85,18 @@ export class NodeTree {
  UNION ALL SELECT n.*,sub.path||'/'||n.name FROM nodes n JOIN sub ON n.parent_id=sub.id
  ) SELECT * FROM sub`, id);
 	}
+}
+
+/** Derived filename index. Node identity keeps renames and fork imports consistent. */
+export function migrateSearch(sql: SqlStorage): void {
+    const existing = sql.exec<{name: string}>("SELECT name FROM sqlite_master WHERE name='node_search'").toArray().length > 0;
+    sql.exec("CREATE VIRTUAL TABLE IF NOT EXISTS node_search USING fts5(name, tokenize='trigram')");
+    sql.exec(`CREATE TRIGGER IF NOT EXISTS node_search_insert AFTER INSERT ON nodes BEGIN
+      INSERT INTO node_search(rowid,name) VALUES(new.rowid,new.name); END`);
+    sql.exec(`CREATE TRIGGER IF NOT EXISTS node_search_delete AFTER DELETE ON nodes BEGIN
+      DELETE FROM node_search WHERE rowid=old.rowid; END`);
+    sql.exec(`CREATE TRIGGER IF NOT EXISTS node_search_update AFTER UPDATE OF name ON nodes BEGIN
+      DELETE FROM node_search WHERE rowid=old.rowid;
+      INSERT INTO node_search(rowid,name) VALUES(new.rowid,new.name); END`);
+    if (!existing) sql.exec("INSERT INTO node_search(rowid,name) SELECT rowid,name FROM nodes");
 }

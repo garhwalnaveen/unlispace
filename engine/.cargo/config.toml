@@ -1,0 +1,4 @@
+# aes 0.8 uses runtime-detected ARM crypto only when this cfg is enabled.
+# Keep SMB signing enabled; use the accelerated implementation on Apple Silicon.
+[target.aarch64-apple-darwin]
+rustflags = ["--cfg", "aes_armv8"]

@@ -1,6 +1,6 @@
 //! The seam between the daemon and the filesystem mount adapters.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -18,7 +18,7 @@ pub enum NeedAccess {
 pub struct MountRequest {
     pub drive_id: String,
     pub drive_name: String,
-    /// Directory to mount on. Already created by the daemon.
+    /// Directory to mount on. Prepared through the adapter before mounting.
     pub mountpoint: PathBuf,
     pub client: Client,
     pub vfs: uls_vfs::Vfs,
@@ -39,6 +39,12 @@ impl std::error::Error for MountError {}
 pub trait MountAdapter: Send + Sync {
     /// Token access level this adapter needs (the read-only NFS adapter needs `Read`).
     fn access(&self) -> NeedAccess;
+    /// Prepare the target without probing an abandoned filesystem before its adapter can recover it.
+    async fn prepare_mountpoint(&self, path: &Path) -> Result<(), MountError> {
+        std::fs::create_dir_all(path).map_err(|error| MountError(ErrorBody::internal(
+            format!("cannot create {}: {}", path.display(), error.kind())
+        )))
+    }
     /// Present the drive at `req.mountpoint`. Returns once it is usable.
     async fn mount(&self, req: MountRequest) -> Result<Arc<dyn MountHandle>, MountError>;
 }
@@ -48,4 +54,22 @@ pub trait MountHandle: Send + Sync {
     /// Stop serving and detach from the filesystem. On error the mount stays usable and the
     /// caller may retry. Dropping the handle must stop any background serving task.
     async fn unmount(&self) -> Result<(), MountError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn default_preparation_creates_nested_mountpoint_and_rejects_files() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let path = dir.path().join("nested/Space");
+        let adapter = crate::nfs_adapter::NfsAdapter::default();
+        adapter.prepare_mountpoint(&path).await.unwrap();
+        assert!(path.is_dir());
+        adapter.prepare_mountpoint(&path).await.unwrap();
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"data").unwrap();
+        assert!(adapter.prepare_mountpoint(&file).await.is_err());
+    }
 }

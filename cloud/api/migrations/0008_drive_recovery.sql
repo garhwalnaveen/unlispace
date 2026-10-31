@@ -1,0 +1,1 @@
+ALTER TABLE drives ADD COLUMN purged_at INTEGER;

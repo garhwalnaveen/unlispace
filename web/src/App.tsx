@@ -1,3 +1,4 @@
+import { Button } from "./components/ui/button";
 import { useEffect, useState } from "react";
 import {
   Link,
@@ -14,6 +15,7 @@ import { DriveBrowser } from "./DriveBrowser";
 import { Home } from "./Home";
 import { AccessKeys } from "./AccessKeys";
 import { Billing } from "./Billing";
+import { AcceptInvitation, TeamPage } from "./Team";
 import { Settings } from "./Settings";
 import { ErrorNotice, Icon, Loading } from "./ui";
 function Protected() {
@@ -31,6 +33,7 @@ function Protected() {
 export function App() {
   const { auth, ready, user, error } = useAuth();
   const location = useLocation();
+  const authPage = ["/login", "/auth/callback", "/desktop"].includes(location.pathname);
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem("unlispace.theme");
     return saved === "light" || saved === "dark" ? saved : "system";
@@ -47,45 +50,43 @@ export function App() {
     return () => media.removeEventListener("change", apply);
   }, [theme]);
   useEffect(() => {
-    document.getElementById("main")?.focus();
+    document.getElementById("main")?.focus({ preventScroll: true });
   }, [location.pathname]);
   return (
-    <div className={`app ${user ? "workspace" : "welcome"}`}>
+    <div className={`app ${user && !authPage ? "workspace" : "welcome"}`}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <header className="topbar">
         <Link className="brand" to="/" aria-label="Unlispace home">
-          <span className="brand-mark" aria-hidden="true">u</span>
-          <span className="brand-name">unlispace</span>
+          <span className="brand-mark" aria-hidden="true"><Icon name="drive" /></span>
+          <span className="brand-name">Unlispace</span>
         </Link>
         <div className="topbar-right">
           <div className="theme-switch" role="group" aria-label="Appearance">
             {(["system", "light", "dark"] as const).map((value) => (
-              <button
+              <Button
                 key={value}
-                className="theme-button"
+                variant="ghost" size="icon"
                 onClick={() => setTheme(value)}
                 aria-label={`Use ${value} theme`}
                 aria-pressed={theme === value}
                 title={`${value[0].toUpperCase()}${value.slice(1)} theme`}
               >
                 <Icon name={value === "system" ? "monitor" : value === "light" ? "sun" : "moon"} />
-              </button>
+              </Button>
             ))}
           </div>
         </div>
       </header>
-      {user && (
+      {user && !authPage && (
         <aside className="sidebar">
-          <p className="sidebar-label">WORKSPACE</p>
           <nav aria-label="Main navigation">
-            <NavLink to="/" end><Icon name="drive" />Your drives</NavLink>
+            <NavLink to="/" end className={location.pathname.startsWith("/drives/") ? "active" : undefined}><Icon name="drive" />Your drives</NavLink>
             <NavLink to="/settings" end><Icon name="user" />Account</NavLink>
             <NavLink to="/settings/access-keys"><Icon name="key" />Access keys</NavLink>
           </nav>
           <div className="sidebar-bottom">
-            <div className="sidebar-tip"><Icon name="monitor" /><strong>At home in Finder.</strong><p>Your cloud files, right alongside everything else.</p></div>
             <Link className="profile-link" to="/settings">
               <span className="profile-avatar" aria-hidden="true">{user.email.charAt(0).toUpperCase()}</span>
               <span><strong>Your account</strong><span>{user.email}</span></span>
@@ -97,12 +98,12 @@ export function App() {
       <main id="main" tabIndex={-1}>
         <ErrorNotice error={error} />
         {Boolean(error) && (
-          <button onClick={() => void auth.retry().catch(() => {})}>
+          <Button onClick={() => void auth.retry().catch(() => {})}>
             Retry session
-          </button>
+          </Button>
         )}
         {!ready ? (
-          <Loading>Opening your space…</Loading>
+          <Loading>Loading your account…</Loading>
         ) : (
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -114,12 +115,14 @@ export function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/access-keys" element={<AccessKeys />} />
               <Route path="/orgs/:id/billing" element={<Billing />} />
+              <Route path="/orgs/:id/team" element={<TeamPage />} />
+              <Route path="/invites/:token" element={<AcceptInvitation />} />
             </Route>
             <Route
               path="*"
               element={
                 <section className="empty">
-                  <h1>This space is empty.</h1>
+                  <h1>Page not found</h1>
                   <p>That page could not be found.</p>
                   <Link to="/">Back to drives</Link>
                 </section>
@@ -128,10 +131,6 @@ export function App() {
           </Routes>
         )}
       </main>
-      <footer className="footer">
-        <span>Your files. Every version. One space.</span>
-        <span>Unlispace</span>
-      </footer>
     </div>
   );
 }

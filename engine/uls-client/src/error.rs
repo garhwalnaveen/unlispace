@@ -9,6 +9,8 @@ pub enum Error {
     /// 401: missing or wrong bearer token.
     #[error("unauthorized (check ULS_DEV_TOKEN)")]
     Unauthorized,
+    #[error("write access is unavailable; existing files remain readable")]
+    WriteDenied,
     /// 404 with the server's error code (`no_such_path`, `no_such_drive`, `no_such_shard`, ...).
     #[error("not found: {code}")]
     NotFound { code: String },

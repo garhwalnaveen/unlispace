@@ -56,7 +56,17 @@ public enum DaemonLifecycle {
     }
 
     public static func unregisterNow() throws {
-        try SMAppService.agent(plistName: plistName).unregister()
+        try unregisterAndWait(timeout: 15) { completion in
+            SMAppService.agent(plistName: plistName).unregister(completionHandler: completion)
+        }
+    }
+
+    // ServiceManagement delivers completion on its default dispatch queue, not the CLI's main thread.
+    // The synchronous unregister variant returns before reap and is unsafe before re-registering.
+    static func unregisterAndWait(timeout: TimeInterval, start: (@escaping @Sendable (Error?) -> Void) -> Void) throws {
+        let completion = UnregisterCompletion()
+        start { error in completion.finish(error) }
+        try completion.wait(timeout: timeout)
     }
 
     public static func unregister() async {

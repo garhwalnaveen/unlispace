@@ -211,7 +211,7 @@ fn run_inner(cli: Cli) -> std::pin::Pin<Box<dyn std::future::Future<Output = Res
         Cmd::Put {drive,..} | Cmd::Get {drive,..} | Cmd::Ls {drive,..} | Cmd::Stat {drive,..} | Cmd::Versions {drive,..} | Cmd::History {drive,..} | Cmd::Restore {drive,..} | Cmd::Show {drive,..} | Cmd::Mkdir {drive,..} | Cmd::Rm {drive,..} | Cmd::Mv {drive,..} | Cmd::Watch {drive,..} | Cmd::Mount {drive,..} | Cmd::Pin {drive,..} | Cmd::Unpin {drive,..} | Cmd::Fork {drive,..} | Cmd::Drive {cmd: DriveCmd::Info {drive}} => Some(drive),
         _ => None,
     };
-    if let Some(drive) = drive && !direct_control && std::env::var_os("ULS_DEV_TOKEN").is_none() && REQUEST_CLIENT.try_with(|_|()).is_err() && crate::control::socket()?.exists() {
+    if let Some(drive) = drive && !direct_control && std::env::var_os("ULS_S3_ACCESS_KEY_ID").is_none() && std::env::var_os("ULS_S3_SECRET_ACCESS_KEY").is_none() && std::env::var_os("ULS_DEV_TOKEN").is_none() && REQUEST_CLIENT.try_with(|_|()).is_err() && crate::control::socket()?.exists() {
         let value = crate::control::call("drive.resolve", serde_json::json!({"driveId":drive})).await?;
         *drive = value["driveId"].as_str().context("missing driveId")?.to_string();
     }
@@ -402,9 +402,25 @@ fn run_inner(cli: Cli) -> std::pin::Pin<Box<dyn std::future::Future<Output = Res
                 }
             }
         }
-        Cmd::Mount { drive, mountpoint, foreground, no_mount, port, read_only, state_dir } => {
+        Cmd::Mount { mut drive, mountpoint, foreground, no_mount, port, mut read_only, state_dir } => {
+            let key_mount = std::env::var_os("ULS_S3_ACCESS_KEY_ID").is_some() || std::env::var_os("ULS_S3_SECRET_ACCESS_KEY").is_some();
+            let mount_client = if key_mount {
+                let endpoint = std::env::var("ULS_S3_ENDPOINT").context("ULS_S3_ENDPOINT is required for an access-key mount")?;
+                let id = std::env::var("ULS_S3_ACCESS_KEY_ID").context("ULS_S3_ACCESS_KEY_ID is required")?;
+                let secret = std::env::var("ULS_S3_SECRET_ACCESS_KEY").context("ULS_S3_SECRET_ACCESS_KEY is required")?;
+                let provider = uls_client::AccessKeyTokenProvider::new(&endpoint, &drive, id, secret)?;
+                let grant = provider.grant().await?;
+                drive = grant.drive_id;
+                read_only |= !grant.can_write;
+                let mut builder = Client::builder(grant.endpoint, "").token_provider(provider).whole_shard_on_partial(true);
+                match ShardCache::open_default() {
+                    Ok(cache) => builder = builder.cache(Arc::new(cache)),
+                    Err(e) => tracing::warn!("shard cache disabled: {e}"),
+                }
+                Some(builder.build()?)
+            } else { None };
             // Legacy standalone flags retain the foreground behaviour used by the E2E harness.
-            if !foreground && !no_mount && port == 0 && state_dir.is_none() {
+            if !key_mount && !foreground && !no_mount && port == 0 && state_dir.is_none() {
                 print_value(crate::control::call("drive.mount",serde_json::json!({"driveId":drive,"mountpoint":mountpoint,"readOnly":read_only})).await?,json)?;
                 return Ok(());
             }
@@ -413,7 +429,8 @@ fn run_inner(cli: Cli) -> std::pin::Pin<Box<dyn std::future::Future<Output = Res
                 Some(d) => d,
                 None => crate::daemon::support_dir()?.join("cli").join(&drive),
             };
-            crate::nfs::mount(drive_client(&drive, true, true)?, drive, mountpoint, no_mount, port, read_only, state_dir).await?;
+            let client = match mount_client { Some(client) => client, None => drive_client(&drive, true, true)? };
+            crate::nfs::mount(client, drive, mountpoint, no_mount, port, read_only, state_dir).await?;
         }
     }
     Ok(())

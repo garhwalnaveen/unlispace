@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Runs `swift test` on a Command Line Tools-only machine, where Testing.framework
-# lives outside the default search paths. With full Xcode, plain `swift test` works.
+# Runs Swift tests with the Testing framework from the selected developer toolchain.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -10,7 +9,11 @@ KEYCHAIN_OPTIONS=()
 if [[ "${ULS_TEST_KEYCHAIN:-0}" != 1 ]]; then
   KEYCHAIN_OPTIONS=(--skip "KeychainTests|HandoffTests")
 fi
-CLT=/Library/Developer/CommandLineTools/Library/Developer
+DEVELOPER_ROOT="${DEVELOPER_DIR:-$(xcode-select -p)}"
+if [[ -d "$DEVELOPER_ROOT/Platforms/MacOSX.platform" ]]; then
+  exec swift test "${SWIFT_OPTIONS[@]}" ${KEYCHAIN_OPTIONS[@]+"${KEYCHAIN_OPTIONS[@]}"} "$@"
+fi
+CLT="$DEVELOPER_ROOT/Library/Developer"
 exec swift test "${SWIFT_OPTIONS[@]}" ${KEYCHAIN_OPTIONS[@]+"${KEYCHAIN_OPTIONS[@]}"} \
   -Xswiftc -F"$CLT/Frameworks" \
   -Xlinker -F"$CLT/Frameworks" \

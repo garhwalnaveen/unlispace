@@ -17,6 +17,8 @@ import {
 	parseRestore,
 } from "./validate";
 
+import { quotaFor } from "./quota";
+export { StorageQuota } from "./quota";
 export { DriveAuthority };
 
 const json = (body: unknown, status = 200, headers?: HeadersInit): Response => Response.json(body, { status, headers });
@@ -36,11 +38,13 @@ async function tokensEqual(a: string, b: string): Promise<boolean> {
 }
 
 interface Principal {
+	org: string | null;
 	actor: string;
 	/** null = dev token: admin on every drive */
 	drives: Map<string, Access> | null;
 	/** token expiry, epoch seconds; null = never */
 	exp: number | null;
+	upload?: {hash: string; length: number};
 }
 
 /** Extracts the bearer. The query token is honoured only when `allowQuery` (GET .../watch with a WebSocket Upgrade). */
@@ -54,13 +58,13 @@ function bearer(request: Request, url: URL, allowQuery: boolean): string | null 
 async function authenticate(token: string | null, env: Env): Promise<Principal | null> {
 	if (!token) return null;
 	if (env.ULS_ALLOW_DEV_TOKEN === "1" && env.ULS_DEV_TOKEN && (await tokensEqual(token, env.ULS_DEV_TOKEN))) {
-		return { actor: "dev", drives: null, exp: null };
+		return { actor: "dev", org: null, drives: null, exp: null };
 	}
 	const claims = await verifyDriveToken(token, { jwks: env.ULS_JWT_PUBLIC_JWKS, issuer: env.ULS_ISSUER });
 	if (!claims) return null;
 	const drives = new Map<string, Access>();
 	for (const g of claims.drives) if ((drives.get(g.id) ? ACCESS_RANK[drives.get(g.id)!] : 0) < ACCESS_RANK[g.access]) drives.set(g.id, g.access);
-	return { actor: claims.sub, drives, exp: claims.exp };
+	return { actor: claims.sub, org: claims.org, drives, exp: claims.exp, ...(claims.upload ? {upload: claims.upload} : {}) };
 }
 
 /** Contract M1 §3: read for GET stat/list/manifest/versions/changes/watch, shard GET, shards/missing; write for shard PUT, commit, restore. */
@@ -69,8 +73,8 @@ function requiredAccess(method: string, rest: string): Access | null {
 	if (rest === "watch") return method === "GET" ? "read" : null;
 	if (rest === "shards/missing") return method === "POST" ? "read" : null;
 	if (/^shards\/[^/]+$/.test(rest)) return method === "GET" ? "read" : method === "PUT" ? "write" : null;
-	if (rest === "commit" || rest === "restore") return method === "POST" ? "write" : null;
-	if (method === "GET" && ["stat", "list", "manifest", "versions", "tree-at", "changes"].includes(rest)) return "read";
+	if (rest === "commit" || rest === "restore" || rest === "commit-cancel" || rest === "manifest-pages") return method === "POST" ? "write" : null;
+	if (method === "GET" && ["stat", "list", "search", "manifest", "versions", "tree-at", "changes"].includes(rest)) return "read";
 	return null;
 }
 
@@ -127,8 +131,8 @@ function intParam(url: URL, name: string, def: number, min: number, max: number)
 
 // ---------- shards ----------
 
-async function putShard(request: Request, env: Env, stub: DriveStub, driveId: string, hash: string): Promise<Response> {
-	const d = await stub.describe();
+async function putShard(request: Request, env: Env, stub: DriveStub, driveId: string, hash: string, org: string | null): Promise<Response> {
+	const d = await stub.locate();
 	if (!d.ok) return failResponse(d);
 
 	const lenHeader = request.headers.get("Content-Length");
@@ -155,56 +159,55 @@ async function putShard(request: Request, env: Env, stub: DriveStub, driveId: st
 		},
 	});
 
+	const quota = org ? quotaFor(env, org) : null;
+	if (quota && !await quota.reserve(key, declared)) return err(403, "over_quota");
+	let stored = false;
 	let created = false;
 	try {
-		// R2 verifies the SHA-256 itself before publishing the object: a wrong upload is never visible under `key`,
-		// so there is nothing to clean up (and no window where a bad object can be committed against).
+		// Verify every upload, including duplicates: a conditional put may skip checksum validation
+        // when the key exists, which would grant a sibling drive access without proving possession.
 		const fixed = new FixedLengthStream(declared);
 		const pipeDone = request.body.pipeThrough(counter).pipeTo(fixed.writable);
-		const [putResult] = await Promise.all([
-			env.SHARDS.put(key, fixed.readable, { sha256: hash, onlyIf: { etagDoesNotMatch: "*" } }),
+		const existed = await env.SHARDS.head(key);
+		await Promise.all([
+			env.SHARDS.put(key, fixed.readable, { sha256: hash }),
 			pipeDone,
 		]);
-		created = putResult !== null;
+		created = existed === null;
+		stored = true;
 	} catch (e) {
+		// A storage timeout may follow a successful write; retain its reservation until reconciled.
+		if (quota) stored = await env.SHARDS.head(key).then(Boolean).catch(() => true);
 		if (tooLarge) return err(413, "too_large");
 		const msg = e instanceof Error ? e.message : String(e);
 		if (/sha-?256|checksum|digest/i.test(msg)) return err(400, "hash_mismatch");
 		return err(400, "bad_request", `upload failed: ${msg}`);
 	}
+	finally { if (quota) await quota.finish(key, stored); }
 	// If the object already existed, trust its recorded size (the conditional put skipped our bytes entirely).
 	const size = created ? declared : ((await env.SHARDS.head(key))?.size ?? declared);
 	await stub.markShards([[hash, size]]);
 	return json({ hash, size, stored: created }, created ? 201 : 200);
 }
 
-/** Returns hashes confirmed present in R2 (by HEAD, in parallel) among `hashes`, with sizes. */
-async function headAll(env: Env, driveId: string, hashes: string[]): Promise<[string, number][]> {
-	const out: [string, number][] = [];
-	for (let i = 0; i < hashes.length; i += 50) {
-		const batch = hashes.slice(i, i + 50);
-		const heads = await Promise.all(batch.map((h) => env.SHARDS.head(shardKey(driveId, h))));
-		heads.forEach((o, j) => {
-			if (o) out.push([batch[j]!, o.size]);
-		});
-	}
-	return out;
-}
-
 // ---------- routing ----------
 
 async function handle(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	const started = Date.now();
 	const url = new URL(request.url);
 	const path = url.pathname;
 	if (path === "/healthz") return json({ ok: true });
-	if (path.startsWith("/_blocks/")) return serveBlock(request, env, ctx, (drive) => stubFor(env, drive).describe());
+	if (path.startsWith("/_blocks/")) return serveBlock(request, env, ctx, (drive, hash) => stubFor(env, drive).authorizeShard(hash));
 
 	// Route first, so auth knows what is being asked for (and the query token is limited to the watch upgrade).
 	const m = /^\/v0\/drives\/([^/]+)(?:\/(.*))?$/.exec(path);
 	const method = request.method;
 	const isWatchUpgrade = !!m && m[2] === "watch" && method === "GET" && request.headers.get("Upgrade")?.toLowerCase() === "websocket";
-	const principal = await authenticate(bearer(request, url, isWatchUpgrade), env);
+	const directUpload = !!m && method === "PUT" && /^shards\/[a-f0-9]{64}$/.test(m[2] ?? "") && url.searchParams.getAll("uploadToken").length === 1;
+	const principal = await authenticate(directUpload ? url.searchParams.get("uploadToken") : bearer(request, url, isWatchUpgrade), env);
 	if (!principal) return err(401, "unauthorized");
+	if (url.searchParams.has("uploadToken") && (!directUpload || !principal.upload)) return err(403, "access_denied");
+	if (principal.upload && (!directUpload || m?.[2] !== `shards/${principal.upload.hash}` || request.headers.get("content-length") !== String(principal.upload.length))) return err(403, "access_denied");
 	if (!m) return err(404, "not_found");
 	const driveId = m[1]!;
 	const rest = m[2] ?? "";
@@ -245,6 +248,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 	if (rest === "watch") {
 		if (!isWatchUpgrade) return err(426, "upgrade_required");
 		const fwd = new Request(request);
+		fwd.headers.set("x-uls-authority-branch",driveId);
 		fwd.headers.delete(EXP_HEADER); // never trust a client-supplied value
 		if (principal.exp !== null) fwd.headers.set(EXP_HEADER, String(principal.exp));
 		return stubFor(env, driveId).fetch(fwd);
@@ -263,23 +267,31 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 		const unique = [...new Set(hashes as string[])];
 		const unknown = await stub.filterUnknown(unique);
 		if (!unknown.ok) return failResponse(unknown);
-		const info = await stub.describe();
-		if (!info.ok) return failResponse(info);
-		const present = await headAll(env, info.data.lineage, unknown.data);
-		if (present.length) await stub.markShards(present);
-		const have = new Set(present.map(([h]) => h));
-		return json({ missing: unknown.data.filter((h) => !have.has(h)) });
+		return json({ missing: unknown.data });
 	}
 	const sm = /^shards\/([^/]+)$/.exec(rest);
 	if (sm) {
 		const hash = sm[1]!;
 		if (!HASH_RE.test(hash)) return err(400, "bad_request", "hash must be 64 lowercase hex chars");
-		if (method === "PUT") return putShard(request, env, stub, driveId, hash);
-		const d = await stub.describe();
+		if (method === "PUT") return putShard(request, env, stub, driveId, hash, principal.org);
+		// Server-Timing splits auth/DO lookup from R2 time-to-first-byte for client-side diagnosis.
+		// Durations only: no identifiers or secrets.
+		const tLocate = Date.now();
+		const d = await stub.authorizeShard(hash);
 		if (!d.ok) return failResponse(d);
-		return getShard(request, env, d.data.lineage, hash);
+		const tR2 = Date.now();
+		const res = await getShard(request, env, d.data.lineage, hash);
+		const timed = new Response(res.body, res);
+		timed.headers.set("Server-Timing", `auth;dur=${tLocate - started}, do;dur=${tR2 - tLocate}, r2;dur=${Date.now() - tR2}`);
+		return timed;
 	}
 
+	if (rest === "manifest-pages") {
+        const body = await readJson(request,256 * 1024);
+        if (body instanceof Response) return body;
+        const result = await stub.storeManifestPage(body,principal.org ?? undefined);
+        return result.ok ? json(result.data) : failResponse(result);
+    }
 	// commit / restore
 	if (rest === "commit") {
 		const streamed = request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() === "application/x-ndjson";
@@ -287,28 +299,40 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 		if (body instanceof Response) return body;
 		const ops = streamed ? await readStreamCommit(request) : parseOps(body);
 		if (!Array.isArray(ops)) return failResponse(ops);
-		const wanted = new Set<string>();
-		for (const op of ops) if (op.op === "put") for (const [h] of op.shards) wanted.add(h);
-		let confirmed: [string, number][] = [];
-		if (wanted.size) {
-			const unknown = await stub.filterUnknown([...wanted]);
-			if (!unknown.ok) return failResponse(unknown);
-			const info = await stub.describe();
-			if (!info.ok) return failResponse(info);
-			confirmed = await headAll(env, info.data.lineage, unknown.data);
-		}
-		const r = await stub.commit(ops, confirmed, actor);
+		// Physical presence in a shared lineage is not authority to reference another drive's bytes.
+        const requestId = request.headers.get("x-uls-request-id") ?? (streamed ? undefined : (body as {requestId?: unknown}).requestId);
+		if (requestId !== undefined && (typeof requestId !== "string" || !/^[A-Za-z0-9:_-]{1,128}$/.test(requestId))) return err(400, "bad_request");
+		const r = await stub.commit(ops, [], actor, requestId as string | undefined, principal.org ?? undefined);
 		return r.ok ? json(r.data) : failResponse(r);
+	}
+	if (rest === "commit-cancel") {
+		const body = await readJson(request, MAX_COMMIT_BYTES);
+		if (body instanceof Response) return body;
+		const id = (body as {requestId?: unknown})?.requestId;
+		if (typeof id !== "string" || !/^[A-Za-z0-9:_-]{1,128}$/.test(id)) return err(400, "bad_request");
+		const result = await stub.cancelCommit(id, actor);
+		return result.ok ? json(result.data) : failResponse(result);
 	}
 	if (rest === "restore") {
 		const body = await readJson(request, MAX_COMMIT_BYTES);
 		if (body instanceof Response) return body;
 		const p = parseRestore(body);
 		if ("ok" in p) return failResponse(p);
-		const r = await stub.restore(p.key, p.versionId, p.ifVersion, actor);
+		const r = await stub.restore(p.key, p.versionId, p.ifVersion, actor, p.ifAbsent);
 		return r.ok ? json(r.data) : failResponse(r);
 	}
 
+    if (rest === "search") {
+        const query = (url.searchParams.get("q") ?? "").trim();
+        const cursor = url.searchParams.get("cursor");
+        const limit = intParam(url,"limit",50,1,100);
+        if ([...query].length<3 || query.length>256 || /[\u0000-\u001f\ud800-\udfff]/u.test(query) || limit === null)
+            return err(400,"bad_request","search needs 3–256 characters");
+        if (cursor !== null && (!/^(0|[1-9][0-9]{0,15})$/.test(cursor) || !Number.isSafeInteger(Number(cursor))))
+            return err(400,"bad_request","invalid cursor");
+        const result = await stub.search(query,cursor,limit);
+        return result.ok ? json(result.data) : failResponse(result);
+    }
 	// reads (method already checked by requiredAccess)
 	if (rest === "stat" || rest === "manifest" || rest === "versions" || rest === "tree-at" || rest === "list") {
 		const p = parsePath(url.searchParams.get("path") ?? "", rest === "stat" || rest === "tree-at" || rest === "list");
@@ -318,10 +342,13 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 			return r.ok ? json(r.data) : failResponse(r);
 		}
 		if (rest === "manifest") {
-			const r = await stub.manifest(p.key, url.searchParams.get("versionId"));
+            const rawShardCursor = url.searchParams.get("shardCursor");
+            const shardCursor = rawShardCursor === null ? null : Number(rawShardCursor);
+            if (rawShardCursor !== null && (!/^(0|[1-9][0-9]*)$/.test(rawShardCursor) || !Number.isSafeInteger(shardCursor) || shardCursor! > 1_000_000)) return err(400,"bad_request","invalid shard cursor");
+			const r = await stub.manifest(p.key, url.searchParams.get("versionId"),shardCursor);
 			if (!r.ok) return failResponse(r);
 			if (!env.ULS_BLOCK_KEY) return err(503, "block_signing_unavailable");
-			const info = await stub.describe();
+			const info = await stub.locate();
 			if (!info.ok) return failResponse(info);
 			return json({ ...r.data, ...await signBlocks(url.origin, driveId, r.data.shards, env.ULS_BLOCK_KEY, info.data.lineage) });
 		}
@@ -380,6 +407,20 @@ function adminError(code: string, status: number): Error & {code: string; status
 }
 
 export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
+	async configureQuota(org: string, limit: number, lineages: string[]): Promise<{usedBytes: number}> {
+		if (typeof org !== "string" || !org || org.length > 128 || !Number.isSafeInteger(limit) || limit < 0 || !Array.isArray(lineages) || !lineages.every(id => DRIVE_ID_RE.test(id))) throw new TypeError("invalid quota");
+		const result = await quotaFor(this.env, org).configure(limit, lineages);
+        for (const lineage of new Set(lineages)) await stubFor(this.env, lineage).bindQuotaOrg(org);
+        return result;
+	}
+    async quotaUsage(org: string, lineages: string[]): Promise<{usedBytes: number}> {
+        if (typeof org !== "string" || !org || org.length > 128 || !Array.isArray(lineages) || !lineages.every(id => DRIVE_ID_RE.test(id))) throw new TypeError("invalid quota");
+        return quotaFor(this.env, org).usage(lineages);
+    }
+    async reconcileQuota(org: string, lineages: string[]) {
+        if (typeof org !== "string" || !org || org.length > 128 || !Array.isArray(lineages) || !lineages.every(id => DRIVE_ID_RE.test(id))) throw new TypeError("invalid quota");
+        return quotaFor(this.env, org).reconcile(lineages);
+    }
 	async createDrive(driveId: string, placement?: Placement): Promise<{ driveId: string; placement: string; createdAt: number }> {
 		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
 		if (placement != null && !(PLACEMENTS as readonly unknown[]).includes(placement)) throw new TypeError("invalid placement");
@@ -394,38 +435,26 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
 	}
 
 	async forkDrive(sourceId: string, newId: string) {
-		const requested = Date.now();
-		if (typeof sourceId !== "string" || typeof newId !== "string" || !DRIVE_ID_RE.test(sourceId) || !DRIVE_ID_RE.test(newId)) throw new TypeError("invalid driveId");
-		const source = stubFor(this.env, sourceId);
-		const info = await source.describe();
-		if (!info.ok) throw adminError("no_such_drive", 404);
-		if (info.data.depth >= 8) throw adminError("fork_depth_exceeded", 400);
-		const child = stubFor(this.env, newId, info.data.placement);
-		const token = crypto.randomUUID();
-		const reserved = await child.reserveImport(token);
+		const requested=Date.now();
+		if (typeof sourceId!=="string" || typeof newId!=="string" || !DRIVE_ID_RE.test(sourceId) || !DRIVE_ID_RE.test(newId)) throw new TypeError("invalid driveId");
+		const source=stubFor(this.env,sourceId), info=await source.forkInfo();
+		if (!info.ok) throw adminError("no_such_drive",404);
+		if (info.data.depth>=8) throw adminError("fork_depth_exceeded",400);
+		const child=stubFor(this.env,newId,info.data.placement),token=crypto.randomUUID();
+		const reserved=await child.reserveImport(token);
 		if (!reserved.ok) throw new DriveExistsError(newId);
-		let header: ExportHeader | undefined;
 		try {
-			// Register before exporting: a sweep can finish first, but cannot start a local sweep afterwards.
-			if (!await stubFor(this.env, info.data.lineage).member(newId, false, requested + 60_000)) throw adminError("slow_down", 503);
-			const result = await source.beginExport(requested);
-			if (!result.ok) throw adminError(String((result as unknown as Fail).body.error), (result as unknown as Fail).status);
-			header = result.data;
-			if (header.depth >= 8) throw adminError("fork_depth_exceeded", 400);
-			let after = 0;
-			for (;;) {
-				const page = await source.exportPage(header.token, after);
-				await child.importPage(token, page.rows);
-				after = page.rows.at(-1)?.id ?? after;
-				if (page.done) break;
-			}
-			await child.finishImport(token, newId, header, true);
-			return {driveId: newId, sourceId, lineage: header.lineage, forkSeq: header.seq, forkPoint: header.ts, placement: header.placement ?? ""};
-		} catch (e) {
-			await child.cancelImport(token);
-			// Keep failed reservations in the registry conservatively; they must never enable a stale sweep.
-			throw e;
-		} finally { if (header) await source.endExport(header.token); }
+			if (!await stubFor(this.env,info.data.lineage).member(newId,false,requested+60_000)) throw adminError("slow_down",503);
+			const result=await source.forkMetadata(newId,requested);
+			if (!result.ok) throw adminError(String((result as unknown as Fail).body.error),(result as unknown as Fail).status);
+			const header=result.data;
+			await child.installFork(token,await source.metadataAuthority(),newId);
+			return {driveId:newId,sourceId,lineage:header.lineage,forkSeq:header.seq,forkPoint:header.ts,placement:header.placement ?? ""};
+		} catch(error) {
+			// A timed-out installation can have succeeded. Retain any branch and its bytes conservatively.
+			await child.cancelImport(token).catch(()=>undefined);
+			throw error;
+		}
 	}
 
 	async restoreSnapshot(driveId: string, key: string): Promise<{ok: true}> {
@@ -493,6 +522,13 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
 		const {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf} = r.data;
 		return {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf};
 	}
+
+	async restoreDrive(driveId: string): Promise<{ ok: true }> {
+		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
+		const restored = await stubFor(this.env, driveId).restoreDrive();
+		if (!restored.ok) throw adminError(String((restored as unknown as Fail).body.error), (restored as unknown as Fail).status);
+		return { ok: true };
+	}
 }
 
 export default {
@@ -513,7 +549,7 @@ export default {
 			if (origin && (env.ULS_WEB_ORIGINS ?? "").split(",").map(s => s.trim()).includes(origin)) {
 				response.headers.set("Access-Control-Allow-Origin", origin);
 				response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT");
-				response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+				response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Uls-Request-Id");
 			}
 		}
 		return response;

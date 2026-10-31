@@ -1,4 +1,5 @@
-import { chunkManifest, MAX_SIZE, type Shard } from "./chunker";
+import { digest } from "./crypto";
+import { chunkStream, MAX_SIZE, type Shard } from "./chunker";
 import type { DataPlane, Manifest } from "./data-plane";
 import { S3Error } from "./errors";
 
@@ -66,35 +67,42 @@ export function planEdits(baseSize: number, edits: Edit[], finalSize?: number, s
 }
 
 /** Untouched complete shards stay by reference; only partial shards and inserted bytes are fetched/chunked. */
-export async function editManifest(dp: DataPlane, base: Manifest, edits: Edit[], finalSize?: number, spliceRemove?: number): Promise<{ shards: Shard[]; size: number }> {
+export async function editManifest(dp: DataPlane, base: Manifest, edits: Edit[], finalSize?: number, spliceRemove?: number): Promise<{ shards: Shard[]; size: number; manifestRef?: string }> {
   const segments = planEdits(base.size, edits, finalSize, spliceRemove);
-  const shards: Shard[] = [];
-  const pending: AsyncIterable<Uint8Array>[] = [];
-  const flush = async (): Promise<void> => {
-    async function* input(): AsyncGenerator<Uint8Array> { for (const stream of pending) yield* stream; }
-    shards.push(...await chunkManifest(input(), (s, bytes) => dp.putShard(s, bytes)));
-    pending.length = 0;
-  };
-  for (const segment of segments) {
-    if (segment.kind === "bytes") {
-      pending.push((async function* () { yield segment.bytes; })());
-    } else if (segment.kind === "zero") {
-      pending.push((async function* () {
-        const zeros = new Uint8Array(Math.min(MAX_SIZE, segment.length));
-        for (let left = segment.length; left > 0; left -= Math.min(left, zeros.length)) yield zeros.subarray(0, Math.min(left, zeros.length));
-      })());
-    } else {
-      let offset = 0;
-      for (const shard of base.shards) {
-        const a = Math.max(segment.start, offset), b = Math.min(segment.start + segment.length, offset + shard.n);
-        if (a < b) {
-          if (a === offset && b === offset + shard.n) { await flush(); shards.push(shard); }
-          else pending.push(dp.bytes(base, a, b));
+  async function* output(): AsyncGenerator<Shard> {
+    const pending: AsyncIterable<Uint8Array>[] = [];
+    async function* flush(): AsyncGenerator<Shard> {
+      if (!pending.length) return;
+      async function* input(): AsyncGenerator<Uint8Array> { for (const stream of pending) yield* stream; }
+      for await (const bytes of chunkStream(input())) {
+        const shard = {h: await digest(bytes), n: bytes.length};
+        await dp.putShard(shard,bytes);
+        yield shard;
+      }
+      pending.length = 0;
+    }
+    for (const segment of segments) {
+      if (segment.kind === "bytes") {
+        pending.push((async function* () { yield segment.bytes; })());
+      } else if (segment.kind === "zero") {
+        pending.push((async function* () {
+          const zeros = new Uint8Array(Math.min(MAX_SIZE, segment.length));
+          for (let left = segment.length; left > 0; left -= Math.min(left, zeros.length)) yield zeros.subarray(0, Math.min(left, zeros.length));
+        })());
+      } else {
+        let offset = 0;
+        for await (const shard of dp.refs(base)) {
+          if (offset >= segment.start + segment.length) break;
+          const a = Math.max(segment.start, offset), b = Math.min(segment.start + segment.length, offset + shard.n);
+          if (a < b) {
+            if (a === offset && b === offset + shard.n) { yield* flush(); yield shard; }
+            else pending.push(dp.bytes(base, a, b));
+          }
+          offset += shard.n;
         }
-        offset += shard.n;
       }
     }
+    yield* flush();
   }
-  await flush();
-  return { shards, size: length(segments) };
+  return dp.buildManifest(output());
 }

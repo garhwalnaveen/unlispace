@@ -54,7 +54,7 @@ belongs to the gateway (M3 in agent 07's task).
 | `POST /orgs/{id}/billing/portal` | Owner/admin; `{url}`. No customer yet → 409 `no_billing_customer`. Does not send an email. |
 | `POST /webhooks/dodo` | Public transport, mandatory Dodo signature; `{ok:true,ignored?:true}` after durable handling. |
 
-Individual allows exactly one seat and 1 TB. Teams allows 1–1000 seats with 1 TB per seat
+Individual allows exactly one seat and 500 GB. Teams allows 1–1000 seats with 1 TB per seat
 pooled across org drives. Add-on quantity is 0–1000, each adding 500 GB. Units are decimal
 (1 TB = 10^12 bytes). Checkout seat count cannot be below current membership count.
 Prices remain undecided in product design: no Space pricing or made-up amounts are advertised.

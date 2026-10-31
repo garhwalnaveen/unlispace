@@ -22,12 +22,17 @@ pub(crate) struct Node {
     pub modified_ms: i64,
     pub flushed: bool,
     pub xattrs: BTreeMap<String, Vec<u8>>,
+    #[serde(default)]
+    pub xattrs_loaded: bool,
+    #[serde(default)]
+    pub xattrs_dirty: bool,
 }
 impl Node {
     pub fn new(attr: Attr, version: Option<String>) -> Self {
         let base_limit = attr.size;
+        let xattrs_loaded = version.is_none();
         Self { attr, valid: true, revision: 0, version, base: None, base_limit, extents: vec![], dirty_since: None,
-            modified_ms: now_ms(), flushed: false, xattrs: BTreeMap::new() }
+            modified_ms: now_ms(), flushed: false, xattrs: BTreeMap::new(), xattrs_loaded, xattrs_dirty: false }
     }
     pub fn touch(&mut self) {
         let ms = now_ms();
@@ -53,6 +58,8 @@ pub(crate) struct Batch {
     pub conflict_attempt: usize,
     pub cursor: Option<i64>,
     pub attempted: bool,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct State {
@@ -79,6 +86,7 @@ impl State {
     pub fn bytes(&self) -> u64 { self.blob_ids().values().sum() }
     pub fn usage(&self) -> u64 {
         self.bytes().saturating_add(self.nodes.values().chain(self.retired.values())
+            .chain(self.batch.iter().flat_map(|b| b.nodes.values()))
             .flat_map(|n| &n.xattrs).map(|(k,v)| (k.len()+v.len()) as u64).sum::<u64>())
     }
     pub fn allocate_id(&mut self, path: &str) -> u64 {
@@ -159,9 +167,11 @@ impl Journal {
     }
     pub fn blob_path(&self, id: u64) -> PathBuf { self.dir.join("blobs").join(id.to_string()) }
     pub fn write_blob(&self, id: u64, data: &[u8]) -> Result<(), FsError> {
-        let mut f = OpenOptions::new().write(true).create_new(true).open(self.blob_path(id))?;
-        f.write_all(data)?; f.sync_all()?;
-        File::open(self.dir.join("blobs"))?.sync_all()?;
+        let path = self.blob_path(id);
+        let mut f = OpenOptions::new().write(true).create_new(true).open(&path)?;
+        // Only this call created the file, so only it may remove a partial blob.
+        let written = f.write_all(data).and_then(|_| f.sync_all()).and_then(|_| File::open(self.dir.join("blobs"))?.sync_all());
+        if let Err(e) = written { let _ = std::fs::remove_file(&path); return Err(e.into()); }
         Ok(())
     }
     pub fn overlay(dir: &Path, n: &Node, off: u64, buf: &mut [u8]) -> Result<(), FsError> {
@@ -205,4 +215,48 @@ pub(crate) fn moved_path(path: &str, actions: &[Action]) -> Option<String> {
         }
     }
     Some(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_before_snapshot_commit_collects_only_the_unreferenced_blob() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let (mut journal, mut state) = Journal::open(dir.path(), "drive").unwrap();
+        let mut node = Node::new(attr(2, Kind::File, 3, now_ms()), None);
+        node.extents.push(Extent { off: 0, len: 3, stored_len: 3, blob: 1 });
+        journal.write_blob(1, b"old").unwrap();
+        state.nodes.insert("file".into(), node); state.next_blob = 2;
+        journal.save(&state).unwrap();
+        // Simulate death after syncing new bytes, before the one atomic SQLite snapshot.
+        journal.write_blob(2, b"not committed").unwrap();
+        assert!(journal.write_blob(2, b"must not replace").is_err());
+        assert_eq!(std::fs::read(journal.blob_path(2)).unwrap(), b"not committed");
+        drop(journal);
+        let (journal, recovered) = Journal::open(dir.path(), "drive").unwrap();
+        assert_eq!(recovered.next_blob, 2);
+        assert_eq!(std::fs::read(journal.blob_path(1)).unwrap(), b"old");
+        assert!(!journal.blob_path(2).exists());
+        assert_eq!(recovered.nodes["file"].attr.size, 3);
+        journal.write_blob(2, b"safe after orphan removal").unwrap();
+    }
+
+    #[test]
+    fn committed_blob_and_counter_survive_reopen_together() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let (mut journal, mut state) = Journal::open(dir.path(), "drive").unwrap();
+        journal.write_blob(1, b"durable").unwrap();
+        let mut node = Node::new(attr(2, Kind::File, 7, now_ms()), None);
+        node.extents.push(Extent { off: 0, len: 7, stored_len: 7, blob: 1 });
+        state.nodes.insert("file".into(), node); state.next_blob = 2;
+        journal.save(&state).unwrap(); drop(journal);
+        let (journal, recovered) = Journal::open(dir.path(), "drive").unwrap();
+        assert_eq!(recovered.next_blob, 2);
+        assert_eq!(std::fs::read(journal.blob_path(1)).unwrap(), b"durable");
+        let mut data = [0; 7];
+        Journal::overlay(dir.path(), &recovered.nodes["file"], 0, &mut data).unwrap();
+        assert_eq!(&data, b"durable");
+    }
 }

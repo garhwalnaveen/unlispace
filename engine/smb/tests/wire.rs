@@ -269,6 +269,11 @@ async fn signed_fifty_mib_round_trip_and_locks() {
             .await;
         written.update(&chunk);
     }
+    let mut flush = Vec::new();
+    FlushRequest::new(id.persistent, id.volatile).write_to(&mut flush).unwrap();
+    c.request(Command::Flush, &flush).await;
+    c.close(id).await;
+    let id = c.create(Create { name: "large", ..Create::default() }).await;
     let mut read = Sha256::new();
     for i in 0..800u64 {
         let r = c

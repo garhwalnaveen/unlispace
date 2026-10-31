@@ -35,31 +35,48 @@ pub async fn login(api: Option<String>) -> Result<()> {
 /// for the daemon to pick up on its next start.
 async fn store_session(api: &str, tokens: uls_auth::SessionTokens) -> Result<User> {
     if let Ok(sock) = daemon::socket_path()
-        && let Some(user) = try_daemon(&sock, api, &tokens).await
+        && let Some(user) = try_daemon(&sock, api, &tokens).await?
     {
         return Ok(user);
     }
     let store = StateStore::load(daemon::state_path()?);
     let session = Session::new(api, uls_auth::default_store())?;
     let user: User = session.sign_in(tokens)?.into();
-    store.update(|s| s.auth = Some(PersistedAuth { api_endpoint: api.trim_end_matches('/').to_string(), user: user.clone() }));
+    store.try_update(|s| s.auth = Some(PersistedAuth { api_endpoint: api.trim_end_matches('/').to_string(), user: user.clone() }))?;
     Ok(user)
 }
 
-async fn try_daemon(sock: &std::path::Path, api: &str, t: &uls_auth::SessionTokens) -> Option<User> {
+async fn try_daemon(sock: &std::path::Path, api: &str, t: &uls_auth::SessionTokens) -> Result<Option<User>> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    let stream = tokio::net::UnixStream::connect(sock).await.ok()?;
+    let stream = match tokio::net::UnixStream::connect(sock).await { Ok(stream) => stream, Err(_) => return Ok(None) };
     let (rd, mut wr) = stream.into_split();
     let p = serde_json::json!({"apiEndpoint": api, "accessToken": t.access_token, "refreshToken": t.refresh_token});
-    let mut line = serde_json::to_string(&serde_json::json!({"id": 1, "method": "auth.set", "params": p})).ok()?;
+    let mut line = serde_json::to_string(&serde_json::json!({"id": 1, "method": "auth.set", "params": p}))?;
     line.push('\n');
-    wr.write_all(line.as_bytes()).await.ok()?;
+    wr.write_all(line.as_bytes()).await.context("send session to engine")?;
     let mut lines = BufReader::new(rd).lines();
-    while let Ok(Some(l)) = lines.next_line().await {
-        let v: serde_json::Value = serde_json::from_str(&l).ok()?;
-        if v.get("id").and_then(|i| i.as_i64()) == Some(1) {
-            return serde_json::from_value(v.get("result")?.get("user")?.clone()).ok();
-        }
+    while let Some(line) = lines.next_line().await.context("read engine sign-in response")? {
+        let response: serde_json::Value = serde_json::from_str(&line).context("invalid engine sign-in response")?;
+        if response.get("id").and_then(|v|v.as_i64()) != Some(1) { continue; }
+        if let Some(error) = response.get("error") { anyhow::bail!("Engine could not save sign-in: {}", error.get("message").and_then(|v|v.as_str()).unwrap_or("unknown error")); }
+        let user = response.get("result").and_then(|v|v.get("user")).cloned().context("engine sign-in response missing user")?;
+        return Ok(Some(serde_json::from_value(user)?));
     }
-    None
+    anyhow::bail!("Engine disconnected before acknowledging sign-in")
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    #[tokio::test]
+    async fn a_live_engine_rejection_does_not_fall_back_to_writing_its_state_file() {
+        use tokio::io::{AsyncBufReadExt,AsyncWriteExt,BufReader};
+        let dir=tempfile::tempdir().unwrap();let socket=dir.path().join("test.sock");let listener=tokio::net::UnixListener::bind(&socket).unwrap();
+        let server=tokio::spawn(async move {
+            let (mut stream,_)=listener.accept().await.unwrap();let mut line=String::new();BufReader::new(&mut stream).read_line(&mut line).await.unwrap();
+            stream.write_all(b"{\"id\":1,\"error\":{\"code\":\"internal\",\"message\":\"Cannot save local state\"}}\n").await.unwrap();
+        });
+        let session=uls_auth::SessionTokens{access_token:"access-test".into(),refresh_token:"refresh-test".into(),expires_in:900,user:uls_auth::User{id:"test".into(),email:"test@example.invalid".into()},account_created:false};
+        let error=try_daemon(&socket,"http://127.0.0.1",&session).await.unwrap_err();assert!(error.to_string().contains("Cannot save local state"));server.await.unwrap();
+    }
 }

@@ -82,7 +82,7 @@ pub async fn plan(client: &Client, drive: &str, folder: &str, ts: i64) -> Result
                     if current.is_none() { mkdirs.push(Op::Mkdir {path}); }
                 } else {
                     let m = client.manifest(drive,&path,Some(&v.version_id)).await?;
-                    puts.push(Op::Put {path,if_version:current.as_ref().and_then(|s|s.version_id.clone()),if_absent:current.is_none(),size:m.size,content_type:m.content_type.unwrap_or_else(||"application/octet-stream".into()),mtime_ms:m.mtime_ms.unwrap_or(v.ts),shards:m.shards});
+                    puts.push(Op::Put {path,if_version:current.as_ref().and_then(|s|s.version_id.clone()),if_absent:current.is_none(),size:m.size,content_type:m.content_type.unwrap_or_else(||"application/octet-stream".into()),mtime_ms:m.mtime_ms.unwrap_or(v.ts),shards:m.shards,xattrs:m.xattrs});
                 }
             }
             (None,None) => {}

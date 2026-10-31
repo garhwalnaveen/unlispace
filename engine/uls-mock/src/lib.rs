@@ -54,6 +54,7 @@ struct Version {
     ctype: String,
     mtime: i64,
     manifest: Vec<ShardRef>,
+    xattrs: BTreeMap<String, Vec<ShardRef>>,
     seq: u64,
 }
 
@@ -80,10 +81,14 @@ impl Drive {
 pub struct Stats {
     /// Shard PUT requests received (any outcome).
     pub shard_puts: AtomicU64,
+    pub xattrs_disabled: std::sync::atomic::AtomicBool,
+    pub deny_writes: std::sync::atomic::AtomicBool,
     /// Shard PUTs that stored new bytes.
     pub shard_puts_stored: AtomicU64,
     /// Shard GETs served (full or ranged).
     pub shard_gets: AtomicU64,
+    /// Delay shard GET responses to exercise slow-network behavior without blocking metadata.
+    pub shard_read_delay_ms: AtomicU64,
     /// Ranged shard GETs served.
     pub shard_range_gets: AtomicU64,
     /// Number of upcoming shard PUTs that should fail with 503.
@@ -100,6 +105,19 @@ pub struct Stats {
     pub watch_connects: AtomicU64,
     /// Requests rejected with 401.
     pub unauthorized: AtomicU64,
+    /// Manifests carry signed `blockUrls` (like the Worker's edge-cached block route).
+    pub block_urls_enabled: std::sync::atomic::AtomicBool,
+    /// Added to the 900 s block URL lifetime (a large negative value mints already-expired URLs).
+    pub block_expiry_offset_secs: std::sync::atomic::AtomicI64,
+    /// When non-zero, block GETs fail with this HTTP status (401/403/404 exercise client fallback).
+    pub block_fail_status: AtomicU64,
+    /// Block GETs received (any outcome), and those that returned bytes.
+    pub block_gets: AtomicU64,
+    /// Serve wrong bytes from block GETs (the client must verify and fall back).
+    pub block_corrupt: std::sync::atomic::AtomicBool,
+    pub block_gets_ok: AtomicU64,
+    /// Shard PUT body delay, to exercise upload progress and rate limits.
+    pub shard_put_delay_ms: AtomicU64,
 }
 
 /// Out-of-band events pushed to open watch sockets.
@@ -202,6 +220,7 @@ fn router(inner: Shared) -> Router {
         .route("/v0/drives/{id}", put(create_drive).get(get_drive))
         .route("/v0/drives/{id}/shards/missing", post(missing))
         .route("/v0/drives/{id}/shards/{hash}", put(put_shard).get(get_shard))
+        .route("/_blocks/{lineage}/{hash}", get(block))
         .route("/v0/drives/{id}/commit", post(commit))
         .route("/v0/drives/{id}/stat", get(stat))
         .route("/v0/drives/{id}/list", get(list))
@@ -216,7 +235,8 @@ fn router(inner: Shared) -> Router {
 }
 
 async fn auth(State(s): State<Shared>, mut req: Request, next: Next) -> Resp {
-    if req.uri().path() == "/healthz" {
+    // Block URLs carry their own signature and no bearer, like the Worker's `/_blocks` route.
+    if req.uri().path() == "/healthz" || req.uri().path().starts_with("/_blocks/") {
         return next.run(req).await;
     }
     let hdr = req
@@ -306,7 +326,7 @@ async fn get_drive(State(s): State<Shared>, Path(id): Path<String>) -> Resp {
         Ok(jerr(
             StatusCode::OK,
             json!({"driveId": id, "placement": d.placement, "createdAt": d.created_at,
-                   "headSeq": d.seq, "fileCount": files, "bytes": bytes}),
+                   "headSeq": d.seq, "fileCount": files, "bytes": bytes, "features": if s.stats.xattrs_disabled.load(Ordering::SeqCst) { vec![] } else { vec!["xattrs"] }}),
         ))
     }))
 }
@@ -322,7 +342,10 @@ async fn missing(State(s): State<Shared>, Path(id): Path<String>, axum::Json(req
 }
 
 async fn put_shard(State(s): State<Shared>, Path((id, hash)): Path<(String, String)>, body: Bytes) -> Resp {
+    if s.stats.deny_writes.load(Ordering::SeqCst) { return err(StatusCode::FORBIDDEN, "over_quota"); }
     s.stats.shard_puts.fetch_add(1, Ordering::SeqCst);
+    let put_delay = s.stats.shard_put_delay_ms.load(Ordering::SeqCst);
+    if put_delay > 0 { tokio::time::sleep(std::time::Duration::from_millis(put_delay)).await; }
     let pending = s.stats.fail_puts.load(Ordering::SeqCst);
     if pending > 0 {
         s.stats.fail_puts.store(pending - 1, Ordering::SeqCst);
@@ -356,7 +379,7 @@ fn parse_range(v: &str, len: usize) -> Option<(usize, usize)> {
 }
 
 async fn get_shard(State(s): State<Shared>, Path((id, hash)): Path<(String, String)>, headers: HeaderMap) -> Resp {
-    collapse(with_drive(&s, &id, |d| {
+    let response = collapse(with_drive(&s, &id, |d| {
         let Some(data) = d.shards.get(&hash).cloned() else {
             return Ok(err(StatusCode::NOT_FOUND, "no_such_shard"));
         };
@@ -387,7 +410,10 @@ async fn get_shard(State(s): State<Shared>, Path((id, hash)): Path<(String, Stri
             r.status(StatusCode::OK).body(axum::body::Body::from(data))
         };
         Ok(resp.unwrap())
-    }))
+    }));
+    let delay = s.stats.shard_read_delay_ms.load(Ordering::SeqCst);
+    if delay > 0 { tokio::time::sleep(std::time::Duration::from_millis(delay)).await; }
+    response
 }
 
 fn push_log(d: &mut Drive, seq: u64, path: &str, op: &str, version: Option<&str>) {
@@ -422,8 +448,14 @@ fn next_version(s: &Shared) -> String {
     format!("v_{:026}", s.counter.fetch_add(1, Ordering::SeqCst) + 1)
 }
 
-async fn commit(State(s): State<Shared>, Path(id): Path<String>, axum::Json(req): axum::Json<CommitRequest>) -> Resp {
-    collapse(with_drive(&s, &id, |d| apply_commit(&s, d, req.ops).map(|r| jerr(StatusCode::OK, serde_json::to_value(r).unwrap()))))
+async fn commit(State(s): State<Shared>, Path(id): Path<String>, headers: HeaderMap, body: Bytes) -> Resp {
+    if s.stats.deny_writes.load(Ordering::SeqCst) { return err(StatusCode::FORBIDDEN, "over_quota"); }
+    let streamed = headers.get(header::CONTENT_TYPE).and_then(|h| h.to_str().ok()) == Some("application/x-ndjson");
+    let parsed = if streamed {
+        body.split(|b| *b == b'\n').filter(|line| !line.is_empty()).map(serde_json::from_slice).collect::<Result<Vec<Op>,_>>()
+    } else { serde_json::from_slice::<CommitRequest>(&body).map(|r| r.ops) };
+    let Ok(ops) = parsed else { return err(StatusCode::BAD_REQUEST, "bad_request"); };
+    collapse(with_drive(&s, &id, |d| apply_commit(&s, d, ops).map(|r| jerr(StatusCode::OK, serde_json::to_value(r).unwrap()))))
 }
 
 fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitResponse, Resp> {
@@ -450,14 +482,15 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
     let mut missing = vec![];
     for op in &ops {
         match op {
-            Op::Put { path, if_version, if_absent, size, content_type, mtime_ms, shards } => {
+            Op::Put { path, if_version, if_absent, size, content_type, mtime_ms, shards, xattrs } => {
                 if uls_proto::validate_path(path).is_err() || path.is_empty() || path.ends_with('/') {
                     return Err(err(StatusCode::BAD_REQUEST, "bad_path"));
                 }
                 if shards.iter().map(|r| r.n).sum::<u64>() != *size {
                     return Err(err(StatusCode::BAD_REQUEST, "bad_manifest"));
                 }
-                for r in shards {
+                let attrs = xattrs.clone().unwrap_or_else(|| nodes.get(path).and_then(|n| n.head.as_ref()).and_then(|h| new_versions.iter().chain(d.versions.iter()).find(|v| &v.id == h)).map(|v| v.xattrs.clone()).unwrap_or_default());
+                for r in shards.iter().chain(attrs.values().flatten()) {
                     if !d.shards.contains_key(&r.h) && !missing.contains(&r.h) {
                         missing.push(r.h.clone());
                     }
@@ -483,7 +516,7 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                 new_versions.push(Version {
                     ts,
                     id: vid.clone(), path: path.clone(), op: "put".into(), size: *size,
-                    ctype: content_type.clone(), mtime: *mtime_ms, manifest: shards.clone(), seq,
+                    ctype: content_type.clone(), mtime: *mtime_ms, manifest: shards.clone(), xattrs: attrs, seq,
                 });
                 logs.push((path.clone(), "put".into(), Some(vid.clone())));
                 results.push(CommitResult { path: path.clone(), version_id: vid, size: Some(*size) });
@@ -501,7 +534,7 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                 new_versions.push(Version {
                     ts,
                     id: vid.clone(), path: path.clone(), op: "mkdir".into(), size: 0,
-                    ctype: String::new(), mtime: ts, manifest: vec![], seq,
+                    ctype: String::new(), mtime: ts, manifest: vec![], xattrs: BTreeMap::new(), seq,
                 });
                 logs.push((path.clone(), "mkdir".into(), Some(vid.clone())));
                 results.push(CommitResult { path: path.clone(), version_id: vid, size: None });
@@ -524,7 +557,7 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                 new_versions.push(Version {
                     ts,
                     id: vid.clone(), path: path.clone(), op: "delete".into(), size: 0,
-                    ctype: String::new(), mtime: ts, manifest: vec![], seq,
+                    ctype: String::new(), mtime: ts, manifest: vec![], xattrs: BTreeMap::new(), seq,
                 });
                 logs.push((path.clone(), "delete".into(), Some(vid.clone())));
                 results.push(CommitResult { path: path.clone(), version_id: vid, size: None });
@@ -558,9 +591,9 @@ fn apply_commit(s: &Shared, d: &mut Drive, ops: Vec<Op>) -> Result<CommitRespons
                 new_versions.push(Version {
                     ts,
                     id: vid.clone(), path: to.clone(), op: "rename".into(), size: node.size,
-                    ctype: node.ctype.clone(), mtime: node.mtime, manifest, seq,
+                    ctype: node.ctype.clone(), mtime: node.mtime, manifest, xattrs: node.head.as_ref().and_then(|h|new_versions.iter().chain(d.versions.iter()).find(|v|&v.id==h)).map(|v|v.xattrs.clone()).unwrap_or_default(), seq,
                 });
-                new_versions.push(Version {ts,id:next_version(s),path:from.clone(),op:"delete".into(),size:0,ctype:String::new(),mtime:ts,manifest:vec![],seq});
+                new_versions.push(Version {ts,id:next_version(s),path:from.clone(),op:"delete".into(),size:0,ctype:String::new(),mtime:ts,manifest:vec![],xattrs:BTreeMap::new(),seq});
                 logs.push((from.clone(), "delete".into(), None));
                 logs.push((to.clone(), "rename".into(), Some(vid.clone())));
                 results.push(CommitResult { path: to.clone(), version_id: vid, size: None });
@@ -643,7 +676,39 @@ async fn list(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<P
     }))
 }
 
-async fn manifest(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<PathQ>) -> Resp {
+#[derive(Deserialize)]
+struct BlockQ {
+    exp: i64,
+    sig: String,
+}
+
+/// `GET /_blocks/{drive}/{hash}?exp&sig`: whole-shard bytes without a bearer token.
+async fn block(State(s): State<Shared>, Path((id, hash)): Path<(String, String)>, Query(q): Query<BlockQ>) -> Resp {
+    s.stats.block_gets.fetch_add(1, Ordering::SeqCst);
+    let forced = s.stats.block_fail_status.load(Ordering::SeqCst);
+    if forced != 0 {
+        return err(StatusCode::from_u16(forced as u16).unwrap_or(StatusCode::FORBIDDEN), "block_denied");
+    }
+    if q.sig != "mock" || q.exp <= now_ms() / 1000 {
+        return err(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    let resp = collapse(with_drive(&s, &id, |d| match d.shards.get(&hash).cloned() {
+        Some(data) => Ok(Response::builder()
+            .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+            .body(axum::body::Body::from(if s.stats.block_corrupt.load(Ordering::SeqCst) { Bytes::from_static(b"garbage") } else { data }))
+            .unwrap()),
+        None => Ok(err(StatusCode::NOT_FOUND, "no_such_shard")),
+    }));
+    if resp.status().is_success() {
+        s.stats.block_gets_ok.fetch_add(1, Ordering::SeqCst);
+    }
+    // Block URLs are another route to the same shard bytes, so they share the simulated latency.
+    let delay = s.stats.shard_read_delay_ms.load(Ordering::SeqCst);
+    if delay > 0 { tokio::time::sleep(std::time::Duration::from_millis(delay)).await; }
+    resp
+}
+
+async fn manifest(State(s): State<Shared>, Path(id): Path<String>, Query(q): Query<PathQ>, headers: HeaderMap) -> Resp {
     collapse(with_drive(&s, &id, |d| {
         let v = match &q.version_id {
             Some(vid) => d.versions.iter().find(|v| &v.id == vid && v.path == q.path && v.op != "delete" && v.op != "mkdir"),
@@ -655,10 +720,20 @@ async fn manifest(State(s): State<Shared>, Path(id): Path<String>, Query(q): Que
             }
         };
         let Some(v) = v else { return Ok(err(StatusCode::NOT_FOUND, "no_such_path")) };
-        Ok(jerr(StatusCode::OK, json!({
+        let mut body = json!({
             "path": v.path, "versionId": v.id, "size": v.size, "contentType": v.ctype,
-            "mtimeMs": v.mtime, "shards": v.manifest,
-        })))
+            "mtimeMs": v.mtime, "shards": v.manifest, "xattrs": v.xattrs,
+        });
+        if s.stats.block_urls_enabled.load(Ordering::SeqCst) {
+            let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("127.0.0.1");
+            let exp = now_ms() / 1000 + 900 + s.stats.block_expiry_offset_secs.load(Ordering::SeqCst);
+            let urls: serde_json::Map<String, Value> = v.manifest.iter()
+                .map(|r| (r.h.clone(), json!(format!("http://{host}/_blocks/{id}/{}?exp={exp}&sig=mock", r.h))))
+                .collect();
+            body["blockUrls"] = Value::Object(urls);
+            body["blockUrlsExpireAt"] = json!(exp);
+        }
+        Ok(jerr(StatusCode::OK, body))
     }))
 }
 
@@ -690,7 +765,7 @@ async fn restore(State(s): State<Shared>, Path(id): Path<String>, axum::Json(req
         };
         let op = Op::Put {
             path: req.path.clone(), if_version: req.if_version.clone(), if_absent: false, size: old.size,
-            content_type: old.ctype.clone(), mtime_ms: old.mtime, shards: old.manifest.clone(),
+            content_type: old.ctype.clone(), mtime_ms: old.mtime, shards: old.manifest.clone(), xattrs: Some(old.xattrs.clone()),
         };
         apply_commit(&s, d, vec![op]).map(|r| jerr(StatusCode::OK, serde_json::to_value(r).unwrap()))
     }))

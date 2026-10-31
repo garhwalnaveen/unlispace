@@ -17,6 +17,8 @@ export async function genKey(kid: string): Promise<{ priv: Jwk; pub: Jwk }> {
 }
 
 export class FakeDataPlane implements DataPlaneAdmin {
+	async configureQuota(_org: string, _limit: number, _lineages: string[]) { return {usedBytes: 0}; }
+	async quotaUsage(_org: string, lineages: string[]) { return {usedBytes: [...new Set(lineages)].reduce((n,id) => n + (this.stats.get(id) ?? 0), 0)}; }
 	created: string[] = [];
 	deleted: string[] = [];
 	deleteOptions: { driveId: string; hard: boolean }[] = [];
@@ -42,6 +44,7 @@ export class FakeDataPlane implements DataPlaneAdmin {
 		this.deleted.push(driveId);
 		return { ok: true as const };
 	}
+	async restoreDrive(_driveId: string) { return { ok: true as const }; }
 	async driveStats(driveId: string) {
 		if (this.failStats) throw new Error("data plane down");
 		return { headSeq: 0, fileCount: 0, bytes: this.stats.get(driveId) ?? 0, ownBytes: this.stats.get(driveId) ?? 0, lineage: driveId, depth: this.depths.get(driveId) ?? 0, forkOf: null };

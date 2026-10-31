@@ -2,7 +2,7 @@
 // It models the semantics the gateway relies on: versions, preconditions, parents, rename, restore and the change log.
 import type { FetchBinding } from "../src/data-plane";
 
-interface Version { nodeId: string; id: string; path: string; op: string; size: number | null; ts: number; actor: string; shards: { h: string; n: number }[] | null; ctype: string | null; mtime: number | null }
+interface Version { nodeId: string; id: string; path: string; op: string; size: number | null; ts: number; actor: string; shards: { h: string; n: number }[] | null; manifestRef?:string; ctype: string | null; mtime: number | null; xattrs?: Record<string,{h:string;n:number}[]> }
 interface Node { type: "file" | "folder"; head: string }
 interface Drive { nodes: Map<string, Node>; versions: Version[]; log: { ev: number; path: string; op: string; versionId: string | null }[]; seq: number }
 
@@ -19,6 +19,8 @@ const fail = (status: number, error: string, extra: Record<string, unknown> = {}
 const hex = (b: ArrayBuffer): string => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
 
 export class FakeDataPlane implements FetchBinding {
+  private receipts = new Map<string, string | null>();
+  metadata = new Map<string,unknown>();
   drives = new Map<string, Drive>();
   shards = new Map<string, Uint8Array>();
   tokens: string[] = [];
@@ -42,6 +44,16 @@ export class FakeDataPlane implements FetchBinding {
     const key = (raw: string): string => raw.replace(/\/$/, "");
 
     if (rest === "") return json({ driveId: m[1], placement: null, createdAt: 0, headSeq: drive.seq, fileCount: [...drive.nodes.values()].filter(n => n.type === "file").length, bytes: 0 });
+    if (rest === "manifest-pages" && method === "POST") {
+      const value = await request.json();
+      const hash = hex(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(value))));
+      this.metadata.set(`${m[1]}/${hash}`,value);
+      return json({hash});
+    }
+    if (rest === "shards/missing" && method === "POST") {
+      const {hashes} = await request.json() as {hashes: string[]};
+      return json({missing: hashes.filter(hash => !this.shards.has(`${m[1]}/${hash}`))});
+    }
     if (rest.startsWith("shards/") && rest !== "shards/missing") {
       const hash = rest.slice(7);
       if (method === "PUT") {
@@ -83,7 +95,11 @@ export class FakeDataPlane implements FetchBinding {
         v = drive.versions.find(x => x.id === n.head);
       }
       if (!v?.shards) return fail(404, "no_such_version");
-      return json({ path: k, versionId: v.id, size: v.size, contentType: v.ctype, mtimeMs: v.mtime, shards: v.shards });
+      const cursor = p("shardCursor") === "" ? null : Number(p("shardCursor"));
+      return json({ path: k, versionId: v.id, size: v.size, contentType: v.ctype, mtimeMs: v.mtime,
+        shards: cursor === null ? v.shards : v.shards.slice(cursor*1000,(cursor+1)*1000),
+        ...(cursor === null ? {} : {nextShardCursor:(cursor+1)*1000<v.shards.length ? cursor+1 : null}),
+        ...(v.manifestRef ? {manifestRef:v.manifestRef} : {}), ...(v.xattrs ? {xattrs:v.xattrs} : {}) });
     }
     if (rest === "versions") {
       const k = key(p("path")), limit = Number(p("limit") || 1000), skip = Number(p("cursor") ? atob(p("cursor")) : 0);
@@ -96,15 +112,33 @@ export class FakeDataPlane implements FetchBinding {
       const rows = drive.log.filter(x => x.ev > after);
       return json({ changes: rows.slice(0, limit), headSeq: drive.seq, lastEv: drive.log.at(-1)?.ev ?? 0, more: rows.length > limit });
     }
-    if (rest === "commit" && method === "POST") return this.commit(drive, await request.json() as { ops: Record<string, unknown>[] }, m[1]!);
+    if (rest === "commit-cancel") {
+      const {requestId} = await request.json() as {requestId:string};
+      const id = `${m[1]}:${requestId}`, previous = this.receipts.get(id);
+      if (previous === undefined) this.receipts.set(id,null);
+      return json({committed:previous ? JSON.parse(previous) : null});
+    }
+    if (rest === "commit" && method === "POST") {
+      const body = request.headers.get("content-type") === "application/x-ndjson"
+        ? {ops:(await request.text()).trim().split("\n").map(line=>JSON.parse(line)) as Record<string,unknown>[],requestId:request.headers.get("x-uls-request-id") ?? undefined}
+        : await request.json() as {ops:Record<string,unknown>[];requestId?:string};
+      const id = `${m[1]}:${body.requestId}`;
+      if (body.requestId && this.receipts.has(id)) {
+        const previous=this.receipts.get(id); return previous ? json(JSON.parse(previous)) : fail(409,"idempotency_conflict");
+      }
+      const response=this.commit(drive,body,m[1]!);
+      if (body.requestId && response.ok) this.receipts.set(id,await response.clone().text());
+      return response;
+    }
     if (rest === "restore" && method === "POST") {
-      const b = await request.json() as { path: string; versionId: string; ifVersion?: string };
+      const b = await request.json() as { path: string; versionId: string; ifVersion?: string; ifAbsent?: boolean };
       const v = drive.versions.find(x => x.id === b.versionId);
       if (!v || v.nodeId !== this.identity(drive,b.path)) return fail(404, "no_such_version");
       if (!v.shards) return fail(400, "not_restorable");
       const cur = drive.nodes.get(b.path);
-      if (b.ifVersion && cur?.head !== b.ifVersion) return fail(412, "precondition_failed", { currentVersionId: cur?.head ?? null });
+      if ((b.ifVersion && cur?.head !== b.ifVersion) || (b.ifAbsent && cur)) return fail(412, "precondition_failed", { currentVersionId: cur?.head ?? null });
       const row = this.addVersion(drive, b.path, "restore", v.size, v.shards, v.ctype, v.mtime);
+      row.manifestRef = v.manifestRef;
       row.nodeId = v.nodeId;
       drive.nodes.set(b.path, { type: "file", head: row.id });
       drive.seq++;
@@ -149,12 +183,25 @@ export class FakeDataPlane implements FetchBinding {
       };
       let failed: Response | null = null;
       if (op.op === "put") {
+        if (typeof op.manifestRef === "string") {
+          const root = this.metadata.get(`${driveId}/${op.manifestRef.slice(5)}`) as {size:number;pages:{h:string}[]} | undefined;
+          if (!root || root.size !== op.size) return fail(400,"bad_manifest");
+          const refs:{h:string;n:number}[] = [];
+          for (const page of root.pages) {
+            const values = this.metadata.get(`${driveId}/${page.h}`) as [string,number][] | undefined;
+            if (!values) return fail(400,"bad_manifest");
+            refs.push(...values.map(([h,n])=>({h,n})));
+          }
+          op.shards = refs;
+        }
         failed = precondition(cur);
         if (!failed && cur?.type === "folder") failed = fail(409, "path_conflict");
         for (const s of op.shards as { h: string; n: number }[]) if (!failed && !this.shards.has(`${driveId}/${s.h}`)) failed = fail(409, "missing_shards", { hashes: [s.h] });
         if (!failed) failed = this.parents(drive, k);
         if (!failed) {
           const row = this.addVersion(drive, k, "put", op.size as number, op.shards as Version["shards"], op.contentType as string, op.mtimeMs as number);
+          row.manifestRef = op.manifestRef as string | undefined;
+          row.xattrs = op.xattrs as Version["xattrs"] ?? drive.versions.find(v=>v.id===cur?.head)?.xattrs;
           drive.nodes.set(k, { type: "file", head: row.id });
           results.push({ path: k, versionId: row.id, size: row.size });
         }
@@ -182,6 +229,7 @@ export class FakeDataPlane implements FetchBinding {
             if (x !== from && !x.startsWith(`${from}/`)) continue;
             const node = drive.nodes.get(x)!, v = drive.versions.find(y => y.id === node.head)!, dest = k + x.slice(from.length);
             const row = x === from ? this.addVersion(drive, dest, "rename", v.size, v.shards, v.ctype, v.mtime) : v;
+            row.manifestRef = v.manifestRef;
             row.nodeId = v.nodeId;
             drive.nodes.delete(x); drive.nodes.set(dest, { type: node.type, head: row.id });
             if (x === from) last = row.id;

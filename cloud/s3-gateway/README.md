@@ -32,7 +32,21 @@ Addressing: path-style `/{bucket}/{key}` or virtual-host `{bucket}.{ULS_S3_HOST}
 
 Auth: header SigV4, presigned URLs, `UNSIGNED-PAYLOAD`, signed SHA-256 payload hash, `STREAMING-UNSIGNED-PAYLOAD-TRAILER`,
 `STREAMING-AWS4-HMAC-SHA256-PAYLOAD[-TRAILER]` (per-chunk and trailer signatures), trailing `crc32/crc32c/crc64nvme/sha1/sha256`.
-`x-uls-*` request headers must be in `SignedHeaders`. Errors are S3 XML (`<Error><Code>…`), `HEAD` and `304` have no body.
+`x-uls-*` and `x-s3sdk-*` request headers must be in `SignedHeaders`. Errors are S3 XML (`<Error><Code>…`), `HEAD` and `304` have no body.
+
+### SpaceFS wire names
+
+The same extension operations also accept `x-s3sdk-*` query parameters and headers. Authentication verifies the original
+request before translating names; a parameter or header supplied in both namespaces is rejected. Responses include both
+`x-uls-*` and `x-s3sdk-*` headers, including protocol version 1. Existing native routes keep their response shapes.
+
+`/_s3sdk/keys` also accepts session key management and signed child minting. It accepts `x-s3sdk-login-authorization`, returns
+flat child credentials (`accessKeyId`, `parent`, `secretAccessKey`, etc.), and successful DELETE returns 204. Key responses
+are `Cache-Control: no-store`. Session-created keys default to `write` when access is omitted, subject to the member's role.
+
+`?x-s3sdk-mount` explicitly returns 501: the SpaceFS SDK expects scoped provider storage credentials, whereas `?x-uls-mount`
+issues a native Unlispace drive token. No raw bucket credential is substituted. Optional direct uploads remain unsupported.
+This is wire-name compatibility for the implemented operations, not a claim that the published SpaceFS SDKs were tested.
 
 S3SP patch body (big-endian): `"S3SP" 01 00 00 00`, `u32 count` (1..10000), then per edit `u64 offset`, `u64 length`, bytes.
 Edits apply in order; gaps zero-fill; partial edits reuse untouched shards by reference and always compare-and-swap on the head.
@@ -73,13 +87,15 @@ For `wrangler dev`, run cloud/data-plane alongside, put the secrets above in `.d
 - UploadPartCopy, GetObject `partNumber`, multi-range GETs, ACL/tagging/lifecycle/CORS APIs: `501`.
 - `DeleteObject?versionId=` answers 501: history is immutable (use `?x-uls-restore`).
 - ListObjectVersions rebuilds its key universe from the live tree plus the full change log (O(drive history)); fine for M2, needs an index for big drives.
-- Multipart upload metadata and history annotations live in a single `S3State` Durable Object (`global`); unreferenced part shards are left to data-plane GC. No lifecycle expiry of abandoned uploads.
+- Multipart upload metadata and history annotations use workspace-scoped `S3State` Durable Objects with legacy global-state migration; unreferenced part shards are left to data-plane GC. No lifecycle expiry of abandoned uploads.
 - Single PUT limit is 95 MB, patch/write bodies 64 MiB, per the Workers body cap.
 - Not verified: behaviour against the real data plane through a live service binding (the fake follows its CONTRACT-NOTES), and real Workers memory/CPU limits on 95 MB uploads.
-- Cross-client rename/history and atomic operation provenance still need data-plane support; see [NEEDS.md](NEEDS.md). The gateway archives content history for its own S3 renames, and copies annotations on S3-created forks. Archives are not atomic with data-plane commits and are not a large-history replacement for node-based history.
+- Cross-client rename/history uses data-plane node identity. Operation annotations still use separate state writes after data-plane commits; cross-service atomicity remains unverified. See [NEEDS.md](NEEDS.md).
 - Optional direct-upload extensions return `501 NotImplemented`. Standard ListObjectVersions retains the existing immutable-history/delete-marker behavior; the JSON content-history extension omits rename/delete rows.
 - Test-only vitest shims (`vitest.config.ts`): the AWS SDK's browser build is selected under workerd, so the XML parser and aws-chunked encoder are swapped for byte-correct equivalents. Production code is unaffected.
 
 `test/conformance.test.ts` ports all 16 Space conformance names to describes using the real AWS S3 SDK against an in-memory
 ControlPlane + data-plane fake (including in-memory forks). `test/m3.test.ts` covers key cache expiry, post-authorization use
 recording, quota deletes, cross-drive copy, fork guard errors, extension limits and session/SigV4 key trust boundaries.
+
+The [31 October API comparison](../../docs/research/spacefs-api-gap-2026-10-31.md) records implemented fixes, remaining protocol differences and verification limits.

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { b64urlEncode } from "../src/jwt";
-import { makeWorld, ORIGIN, type SessionBody, type World } from "./helpers";
+import { makeWorld, ORIGIN, pkce, type SessionBody, type World } from "./helpers";
 
+const WEB_VERIFIER = "web_browser_proof_".repeat(4);
 const CLIENT_ID = "client-123.apps.googleusercontent.com";
 const enc = new TextEncoder();
 const j = (o: unknown) => b64urlEncode(enc.encode(JSON.stringify(o)));
@@ -21,7 +22,7 @@ async function idToken(key: CryptoKeyPair, claims: Record<string, unknown>, kid 
 async function setup(over: Record<string, unknown> = {}, tokenKey?: CryptoKeyPair) {
 	const w = await makeWorld({ GOOGLE_CLIENT_ID: CLIENT_ID, GOOGLE_CLIENT_SECRET: "shh" });
 	const g = await googleKey();
-	const start = await w.call(`/auth/google/start?return=${encodeURIComponent(ORIGIN + "/app")}`);
+	const start = await w.call(`/auth/google/start?return=${encodeURIComponent(ORIGIN + "/app")}&web_code_challenge=${await pkce(WEB_VERIFIER)}`);
 	expect(start.status).toBe(302);
 	const loc = new URL(start.headers.get("location")!);
 	const nonce = loc.searchParams.get("nonce")!;
@@ -80,19 +81,28 @@ describe("google oidc", () => {
 		expect(chal).toBe(loc.searchParams.get("code_challenge"));
 
 		const handoff = fragOf(r).replace("handoff=", "");
-		const ex = await w.call("/auth/handoff/exchange", { json: { handoff } });
+		const ex = await w.call("/auth/handoff/exchange", { json: { handoff, webCodeVerifier: WEB_VERIFIER } });
 		expect(ex.status).toBe(200);
 		const s = (await ex.json()) as SessionBody;
 		expect(s).toMatchObject({ accountCreated: true, user: { email: "g@example.com" } });
-		expect((await w.call("/auth/handoff/exchange", { json: { handoff } })).status).toBe(400);
+		expect((await w.call("/auth/handoff/exchange", { json: { handoff, webCodeVerifier: WEB_VERIFIER } })).status).toBe(400);
 		expect(w.dp.created).toHaveLength(1);
+	});
+
+	it("binds the handoff to the browser that initiated sign-in", async () => {
+		const {w,state} = await setup();
+		const handoff = fragOf(await callback(w,state)).replace("handoff=", "");
+		expect((await w.call("/auth/handoff/exchange", {json:{handoff}})).status).toBe(400);
+		expect((await w.call("/auth/handoff/exchange", {json:{handoff,webCodeVerifier:"different_browser_".repeat(4)}})).status).toBe(400);
+		expect((await w.call("/auth/handoff/exchange", {json:{handoff,webCodeVerifier:WEB_VERIFIER}})).status).toBe(400);
+		expect((await w.call("/auth/google/start")).status).toBe(400);
 	});
 
 	it("handoff expires after 60 s", async () => {
 		const { w, state } = await setup();
 		const handoff = fragOf(await callback(w, state)).replace("handoff=", "");
 		w.clock.t += 61_000;
-		expect((await w.call("/auth/handoff/exchange", { json: { handoff } })).status).toBe(400);
+		expect((await w.call("/auth/handoff/exchange", { json: { handoff, webCodeVerifier: WEB_VERIFIER } })).status).toBe(400);
 	});
 
 	it("state is single use and unknown state is rejected", async () => {

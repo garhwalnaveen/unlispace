@@ -21,6 +21,20 @@ pub struct SetOutcome {
     pub previous_user: Option<String>,
 }
 
+pub struct PreparedSet {
+    pub session: Arc<Session>,
+    pub user: User,
+    previous: Option<Arc<Session>>,
+    _refresh_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl PreparedSet {
+    pub async fn persist(&mut self) -> Result<(), ErrorBody> {
+        self._refresh_guard = match &self.previous { Some(session) => Some(session.pause_refresh().await), None => None };
+        self.session.persist_credentials().map_err(map_auth_err)
+    }
+}
+
 pub struct AuthHub {
     secrets: Arc<dyn SecretStore>,
     session: Mutex<Option<Arc<Session>>>,
@@ -75,40 +89,47 @@ impl AuthHub {
         self.has_session() || self.has_dev()
     }
 
-    /// Resume after a restart. Returns the session if a refresh token was found.
-    pub fn restore(&self, api: &str, user: &User) -> Result<Option<Arc<Session>>, ErrorBody> {
+    /// Read credentials without publishing them; the engine fences a late restore against account changes.
+    pub fn load_saved(&self, api: &str, user: &User) -> Result<Option<Arc<Session>>, ErrorBody> {
         let (s, found) = Session::restore(api, uls_auth::User { id: user.id.clone(), email: user.email.clone() }, self.secrets.clone())
             .map_err(map_auth_err)?;
         if !found {
             return Ok(None);
         }
-        let s = Arc::new(s);
-        *self.sess() = Some(s.clone());
-        Ok(Some(s))
+        Ok(Some(Arc::new(s)))
     }
 
-    /// `auth.set`
-    pub async fn set(&self, p: AuthSetParams) -> Result<SetOutcome, ErrorBody> {
+    pub fn install_saved(&self, session: Arc<Session>) { *self.sess() = Some(session); }
+
+    /// Validate a replacement; the engine drains old journals before persisting credentials.
+    pub async fn prepare_set(&self, p: AuthSetParams) -> Result<PreparedSet, ErrorBody> {
+        let previous = self.session();
         let s = Session::new(&p.api_endpoint, self.secrets.clone()).map_err(map_auth_err)?;
         let user: User = s
-            .sign_in_with_tokens(&p.api_endpoint, p.access_token, p.refresh_token)
+            .prepare_sign_in_with_tokens(&p.api_endpoint, p.access_token, p.refresh_token)
             .await
             .map_err(map_auth_err)?
             .into();
-        let s = Arc::new(s);
-        let old = self.sess().replace(s.clone());
-        let previous_user = old.as_ref().and_then(|o| o.user()).map(|u| u.id);
-        if let (Some(old), Some(prev)) = (old, previous_user.as_ref())
-            && *prev != user.id
-        {
-            // A different account: revoke it and wipe its Keychain item. (Same account: the new
-            // session already wrote its refresh token under the same Keychain account, and
-            // signing the old one out would delete that item.)
-            tokio::spawn(async move {
-                let _ = old.sign_out().await;
-            });
+        Ok(PreparedSet { session: Arc::new(s), user, previous, _refresh_guard: None })
+    }
+
+    pub async fn install(&self, prepared: PreparedSet) -> SetOutcome {
+        let PreparedSet { session, user, previous, _refresh_guard } = prepared;
+        let previous_user = previous.as_ref().and_then(|old| old.user()).map(|u| u.id);
+        if let Some(old) = previous {
+            // Finish cleanup before a later switch can reuse this user's Keychain account.
+            if let Err(error) = old.retire_replaced(previous_user.as_ref() == Some(&user.id)).await {
+                tracing::warn!("could not clean up replaced session: {error}");
+            }
         }
-        Ok(SetOutcome { session: s, user, previous_user })
+        *self.sess() = Some(session.clone());
+        SetOutcome { session, user, previous_user }
+    }
+
+    pub async fn set(&self, p: AuthSetParams) -> Result<SetOutcome, ErrorBody> {
+        let mut prepared = self.prepare_set(p).await?;
+        prepared.persist().await?;
+        Ok(self.install(prepared).await)
     }
 
     /// `config.set` dev-token path.
@@ -138,6 +159,21 @@ impl AuthHub {
         }
     }
 
+    pub async fn mount_access(&self, drive: &str) -> Result<NeedAccess, ErrorBody> {
+        let Some(session) = self.session() else { return Ok(NeedAccess::Write); };
+        let viewer = session.orgs().await.map_err(map_auth_err)?.iter().flat_map(|o| &o.drives)
+            .any(|d| d.id == drive && d.access == Some(Access::Read));
+        if viewer { return Ok(NeedAccess::Read); }
+        match session.drive_token(drive, Access::Write).await {
+            Ok(_) => Ok(NeedAccess::Write),
+            Err(AuthError::Api {status:403,code}) if code == "over_quota" => {
+                session.drive_token(drive, Access::Read).await.map_err(map_auth_err)?;
+                Ok(NeedAccess::Read)
+            },
+            Err(e) => Err(map_auth_err(e)),
+        }
+    }
+
     pub fn token_provider(self: &Arc<Self>, drive: &str, access: NeedAccess) -> Arc<dyn TokenProvider> {
         Arc::new(DriveProvider { hub: self.clone(), drive: drive.into(), access })
     }
@@ -162,8 +198,19 @@ impl DriveProvider {
                 drive_id: self.drive.clone(),
                 access: match self.access { NeedAccess::Read => Access::Read, NeedAccess::Write => Access::Write },
             };
-            let token = if refresh { source.refresh_credentials().await? } else { source.credentials().await? };
-            return Ok(ProviderToken::with_endpoint(token.token, token.endpoint));
+            let mut read_only = false;
+            let token = match if refresh { source.refresh_credentials().await } else { source.credentials().await } {
+                Ok(token) => token,
+                // Expiry must not cut off reads on an already mounted drive; writes still fail at the server.
+                Err(AuthError::Api { status: 403, code }) if code == "over_quota" && self.access == NeedAccess::Write => {
+                    read_only = true;
+                    source.session.drive_token(&self.drive, Access::Read).await?
+                },
+                Err(e) => return Err(e),
+            };
+            let mut token = ProviderToken::with_endpoint(token.token, token.endpoint);
+            token.read_only = read_only;
+            return Ok(token);
         }
         match &*self.hub.devl() {
             Some(dev) => Ok(ProviderToken::with_endpoint(dev.token.clone(), dev.endpoint.clone())),

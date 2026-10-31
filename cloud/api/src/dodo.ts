@@ -20,7 +20,8 @@ export interface Invoice {
 
 /** All outbound Dodo operations are injected at this boundary in tests. */
 export interface DodoPayments {
-	checkout(input: CheckoutInput): Promise<{ url: string }>;
+	checkout(input: CheckoutInput): Promise<{ url: string; sessionId: string }>;
+	checkoutStatus(sessionId: string): Promise<{ createdAt: string; paymentId: string | null; paymentStatus: string | null }>;
 	portal(customerId: string, returnUrl: string): Promise<{ url: string }>;
 	invoices(customerId: string, page: number): Promise<{ invoices: Invoice[]; nextPage: number | null }>;
 }
@@ -39,12 +40,14 @@ export function selectDodo(env: AppEnv, fetcher: typeof fetch): DodoPayments {
 			});
 			if (!res.ok) {
 				await res.body?.cancel();
+				if (res.status >= 400 && res.status < 500 && ![408, 409, 429].includes(res.status)) throw new HttpError(502, "billing_rejected");
 				throw new Error("provider rejected request");
 			}
 			const data: unknown = JSON.parse(await readText(res, 1024 * 1024));
 			if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid response");
 			return data as Record<string, unknown>;
-		} catch {
+		} catch (error) {
+			if (error instanceof HttpError) throw error;
 			// Provider bodies can contain payment details. Never log or forward them.
 			throw new HttpError(502, "billing_unavailable");
 		}
@@ -55,7 +58,16 @@ export function selectDodo(env: AppEnv, fetcher: typeof fetch): DodoPayments {
 		throw new HttpError(502, "billing_unavailable");
 	};
 	return {
-		async checkout(input) { return { url: url((await request("/checkouts", input)).checkout_url) }; },
+		async checkout(input) {
+			const data = await request("/checkouts", input);
+			if (typeof data.session_id !== "string" || !data.session_id) throw new HttpError(502, "billing_unavailable");
+			return { url: url(data.checkout_url), sessionId: data.session_id };
+		},
+		async checkoutStatus(sessionId) {
+			const data = await request(`/checkouts/${encodeURIComponent(sessionId)}`);
+			if (typeof data.created_at !== "string" || !Number.isFinite(Date.parse(data.created_at)) || (data.payment_id != null && typeof data.payment_id !== "string") || (data.payment_status != null && typeof data.payment_status !== "string")) throw new HttpError(502, "billing_unavailable");
+			return { createdAt: data.created_at, paymentId: (data.payment_id ?? null) as string | null, paymentStatus: (data.payment_status ?? null) as string | null };
+		},
 		async portal(customerId, returnUrl) {
 			const query = new URLSearchParams({ send_email: "false", return_url: returnUrl });
 			return { url: url((await request(`/customers/${encodeURIComponent(customerId)}/customer-portal/session?${query}`, {})).link) };

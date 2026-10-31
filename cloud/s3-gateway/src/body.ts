@@ -4,7 +4,8 @@ import { checksumNames, Checksum, type ChecksumName, checkChecksum } from "./che
 import { digest, utf8, verifyHmac } from "./crypto";
 import { integer, S3Error } from "./errors";
 
-export const PUT_LIMIT = 95_000_000;
+export const PUT_LIMIT = 5 * 1024 ** 3;
+export const OBJECT_LIMIT = 5 * 1024 ** 4;
 export const EDIT_LIMIT = 64 * 1024 * 1024;
 const decoder = new TextDecoder();
 

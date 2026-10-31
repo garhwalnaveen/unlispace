@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeWorld, signIn, pkce, type SessionBody } from "./helpers";
+import { REFRESH_RETRY_GRACE_MS } from "../src/session";
 
 const json = async <T>(r: Response) => (await r.json()) as T;
 
@@ -139,6 +140,7 @@ describe("refresh / logout", () => {
 		const w = await makeWorld();
 		const s1 = await signIn(w);
 		const s2 = await json<SessionBody>(await w.call("/auth/refresh", { json: { refreshToken: s1.refreshToken } }));
+		w.clock.t += REFRESH_RETRY_GRACE_MS + 1;
 		const reuse = await w.call("/auth/refresh", { json: { refreshToken: s1.refreshToken } });
 		expect(reuse.status).toBe(401);
 		expect(await json(reuse)).toEqual({ error: "invalid_refresh" });
@@ -147,11 +149,78 @@ describe("refresh / logout", () => {
 		expect((await w.call("/me", { token: s2.accessToken })).status).toBe(401);
 	});
 
+	describe("lost-response grace window", () => {
+		const refresh = (w: Awaited<ReturnType<typeof makeWorld>>, refreshToken: string) => w.call("/auth/refresh", { json: { refreshToken } });
+
+		it("a retry within the window gets a working session", async () => {
+			const w = await makeWorld();
+			const s1 = await signIn(w);
+			const lost = await json<SessionBody>(await refresh(w, s1.refreshToken));
+			w.clock.t += 5_000;
+			const r = await refresh(w, s1.refreshToken);
+			expect(r.status).toBe(200);
+			const s3 = await json<SessionBody>(r);
+			expect(s3.refreshToken).not.toBe(lost.refreshToken);
+			expect((await w.call("/me", { token: s3.accessToken })).status).toBe(200);
+			expect((await refresh(w, s3.refreshToken)).status).toBe(200);
+		});
+
+		it("the unused successor's refresh token is dead after the retry", async () => {
+			const w = await makeWorld();
+			const s1 = await signIn(w);
+			const lost = await json<SessionBody>(await refresh(w, s1.refreshToken));
+			const s3 = await json<SessionBody>(await refresh(w, s1.refreshToken));
+			expect((await refresh(w, lost.refreshToken)).status).toBe(401);
+			// presenting it was reuse of a rotated token, so the whole family went
+			expect((await w.call("/me", { token: s3.accessToken })).status).toBe(401);
+		});
+
+		it("a retry after the window revokes the family and the successor dies", async () => {
+			const w = await makeWorld();
+			const s1 = await signIn(w);
+			const s2 = await json<SessionBody>(await refresh(w, s1.refreshToken));
+			w.clock.t += REFRESH_RETRY_GRACE_MS + 1;
+			expect((await refresh(w, s1.refreshToken)).status).toBe(401);
+			expect((await refresh(w, s2.refreshToken)).status).toBe(401);
+		});
+
+		it("a retry after the successor was itself refreshed revokes the family", async () => {
+			const w = await makeWorld();
+			const s1 = await signIn(w);
+			const s2 = await json<SessionBody>(await refresh(w, s1.refreshToken));
+			const s3 = await json<SessionBody>(await refresh(w, s2.refreshToken));
+			expect((await refresh(w, s1.refreshToken)).status).toBe(401);
+			expect((await refresh(w, s3.refreshToken)).status).toBe(401);
+			expect((await w.call("/me", { token: s3.accessToken })).status).toBe(401);
+		});
+
+		it("two concurrent retries: exactly one succeeds", async () => {
+			const w = await makeWorld();
+			const s1 = await signIn(w);
+			await refresh(w, s1.refreshToken);
+			const rs = await Promise.all([refresh(w, s1.refreshToken), refresh(w, s1.refreshToken)]);
+			expect(rs.map((r) => r.status).sort()).toEqual([200, 401]);
+		});
+
+		it("logout then retry fails and revives nothing", async () => {
+			const w = await makeWorld();
+			const s1 = await signIn(w);
+			const s2 = await json<SessionBody>(await refresh(w, s1.refreshToken));
+			await w.call("/auth/logout", { json: { refreshToken: s2.refreshToken } });
+			expect((await refresh(w, s1.refreshToken)).status).toBe(401);
+			expect((await refresh(w, s2.refreshToken)).status).toBe(401);
+			expect((await w.call("/me", { token: s2.accessToken })).status).toBe(401);
+			const live = await w.env.DB.prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked_at IS NULL").first<{ n: number }>();
+			expect(live!.n).toBe(0);
+		});
+	});
+
 	it("does not touch other sessions of the same user", async () => {
 		const w = await makeWorld();
 		const a = await signIn(w);
 		const b = await signIn(w);
 		await w.call("/auth/refresh", { json: { refreshToken: a.refreshToken } });
+		w.clock.t += REFRESH_RETRY_GRACE_MS + 1;
 		await w.call("/auth/refresh", { json: { refreshToken: a.refreshToken } });
 		expect((await w.call("/me", { token: b.accessToken })).status).toBe(200);
 	});

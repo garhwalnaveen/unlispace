@@ -112,3 +112,13 @@ import Foundation
         await #expect(throws: DaemonClientError.socketMissing) { try await c.connect() }
     }
 }
+
+@Suite struct SavedSignInRecoveryProtocolTests {
+    @Test func recoveryIsExplicitAndBackwardsCompatible() throws {
+        let available = try JSONDecoder().decode(DaemonStatus.self, from: Data(#"{"version":"new","state":"error","message":"Approve Keychain access, then retry.","canRetrySignIn":true}"#.utf8))
+        #expect(available.canRetrySignIn == true)
+        #expect(available.message?.contains("Keychain") == true)
+        let legacy = try JSONDecoder().decode(DaemonStatus.self, from: Data(#"{"version":"old","state":"signed_out"}"#.utf8))
+        #expect(legacy.canRetrySignIn == nil)
+    }
+}

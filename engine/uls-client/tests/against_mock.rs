@@ -260,3 +260,94 @@ async fn next_change(w: &mut uls_client::WatchStream) -> uls_proto::Change {
         other => panic!("expected a change, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn partial_disk_cache_reads_reuse_verified_shard_in_ram() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Arc::new(ShardCache::open(dir.path().join("cache"), 1 << 30).unwrap());
+    let bytes = vec![0x53; 3 * 1024 * 1024];
+    let hash = uls_chunk::sha256_hex(&bytes);
+    cache.put(&hash, &bytes).unwrap();
+    let client = Client::builder("http://127.0.0.1:9", "unused")
+        .cache(cache.clone()).build().unwrap();
+    let shards = vec![uls_proto::ShardRef { h: hash.clone(), n: bytes.len() as u64 }];
+    assert_eq!(client.read_manifest_range("drive", &shards, 0, 65536).await.unwrap(), &bytes[..65536]);
+    // Eviction of the disk entry must not force another GET while the verified RAM copy lives.
+    std::fs::remove_file(cache.dir().join(hash)).unwrap();
+    assert_eq!(client.read_manifest_range("drive", &shards, 65536, 65536).await.unwrap(), &bytes[65536..131072]);
+}
+
+// ---- signed block URLs ---------------------------------------------------------------------
+
+async fn upload_small(c: &Client, dir: &tempfile::TempDir, seed: u64) -> Vec<u8> {
+    let bytes = data(3 << 20, seed);
+    let name = format!("b{seed}.bin");
+    let f = dir.path().join(&name);
+    std::fs::write(&f, &bytes).unwrap();
+    c.upload_file("demo", &f, &name, None).await.unwrap();
+    bytes
+}
+
+#[tokio::test]
+async fn whole_shard_reads_use_block_urls() {
+    let (srv, c, dir) = setup().await;
+    srv.stats.block_urls_enabled.store(true, Ordering::SeqCst);
+    let bytes = upload_small(&c, &dir, 11).await;
+    let m = c.manifest("demo", "b11.bin", None).await.unwrap();
+    assert!(!m.block_urls.is_empty());
+    let got = c.read_manifest_range("demo", &m.shards, 0, bytes.len() as u64).await.unwrap();
+    assert_eq!(&got[..], &bytes[..]);
+    assert!(srv.stats.block_gets_ok.load(Ordering::SeqCst) >= m.shards.len() as u64);
+    assert_eq!(srv.stats.shard_gets.load(Ordering::SeqCst), 0, "no authenticated shard GETs");
+}
+
+#[tokio::test]
+async fn block_url_failures_fall_back_to_authenticated_route() {
+    for status in [401u64, 403, 404] {
+        let (srv, c, dir) = setup().await;
+        srv.stats.block_urls_enabled.store(true, Ordering::SeqCst);
+        let bytes = upload_small(&c, &dir, 12).await;
+        let m = c.manifest("demo", "b12.bin", None).await.unwrap();
+        srv.stats.block_fail_status.store(status, Ordering::SeqCst);
+        let got = c.read_manifest_range("demo", &m.shards, 0, bytes.len() as u64).await.unwrap();
+        assert_eq!(&got[..], &bytes[..], "status {status}");
+        assert!(srv.stats.block_gets.load(Ordering::SeqCst) >= 1);
+        assert!(srv.stats.shard_gets.load(Ordering::SeqCst) >= m.shards.len() as u64);
+    }
+}
+
+#[tokio::test]
+async fn expired_block_urls_are_not_used() {
+    let (srv, c, dir) = setup().await;
+    srv.stats.block_urls_enabled.store(true, Ordering::SeqCst);
+    srv.stats.block_expiry_offset_secs.store(-900, Ordering::SeqCst);
+    let bytes = upload_small(&c, &dir, 13).await;
+    let m = c.manifest("demo", "b13.bin", None).await.unwrap();
+    let got = c.read_manifest_range("demo", &m.shards, 0, bytes.len() as u64).await.unwrap();
+    assert_eq!(&got[..], &bytes[..]);
+    assert_eq!(srv.stats.block_gets.load(Ordering::SeqCst), 0);
+    assert!(srv.stats.shard_gets.load(Ordering::SeqCst) >= 1);
+}
+
+#[tokio::test]
+async fn corrupt_block_bytes_fall_back_and_still_verify() {
+    let (srv, c, dir) = setup().await;
+    srv.stats.block_urls_enabled.store(true, Ordering::SeqCst);
+    let bytes = upload_small(&c, &dir, 14).await;
+    let m = c.manifest("demo", "b14.bin", None).await.unwrap();
+    srv.stats.block_corrupt.store(true, Ordering::SeqCst);
+    let got = c.read_manifest_range("demo", &m.shards, 0, bytes.len() as u64).await.unwrap();
+    assert_eq!(&got[..], &bytes[..]);
+    assert!(srv.stats.block_gets.load(Ordering::SeqCst) >= 1);
+    assert!(srv.stats.shard_gets.load(Ordering::SeqCst) >= 1);
+}
+
+#[tokio::test]
+async fn upload_limiter_reserves_sequential_slots() {
+    let l = uls_client::UploadLimiter::new(1_000_000);
+    assert!(l.reserve(1_000_000).is_zero());
+    let d = l.reserve(1_000_000);
+    assert!(d >= std::time::Duration::from_millis(900) && d <= std::time::Duration::from_millis(1100), "{d:?}");
+    l.set_bps(0);
+    assert!(l.reserve(u64::MAX).is_zero());
+}

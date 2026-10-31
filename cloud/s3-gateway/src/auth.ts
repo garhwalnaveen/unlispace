@@ -33,8 +33,6 @@ export class MemoryKeyResolver implements KeyResolver {
   }
 }
 
-export async function secretFor(master: Uint8Array, keyId: string): Promise<string> { return base64(await hmac(master, keyId)).slice(0, 40); }
-
 export interface Auth {
   key: ResolvedKey;
   payloadHash: string;
@@ -90,7 +88,7 @@ export async function authenticate(request: Request, resolver: KeyResolver, now 
   if (!names.includes("host") || names.some((n, i) => !/^[a-z0-9-]+$/.test(n) || (i > 0 && compare(names[i - 1]!, n) >= 0))) throw new S3Error(400, "AuthorizationHeaderMalformed");
   if (!presigned && !names.includes("x-amz-date")) throw new S3Error(403, "SignatureDoesNotMatch");
   for (const [name] of request.headers) {
-    if (name.startsWith("x-uls-") && !names.includes(name)) throw new S3Error(403, "SignatureDoesNotMatch", "Extension headers must be signed");
+    if ((name.startsWith("x-uls-") || name.startsWith("x-s3sdk-")) && !names.includes(name)) throw new S3Error(403, "SignatureDoesNotMatch", "Extension headers must be signed");
   }
   const headers = names.map(name => {
     const value = name === "host" ? (request.headers.get("host") ?? url.host) : request.headers.get(name);

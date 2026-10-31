@@ -16,6 +16,7 @@ interface GoogleState {
 	nonce: string;
 	verifier: string;
 	ret: string;
+	webChallenge: string;
 }
 
 export function configured(ctx: Ctx): boolean {
@@ -39,10 +40,12 @@ export function allowedReturn(ctx: Ctx, ret: string | null): string {
 
 export async function googleStart(ctx: Ctx): Promise<Response> {
 	const ret = allowedReturn(ctx, ctx.url.searchParams.get("return"));
+	const webChallenge = ctx.url.searchParams.get("web_code_challenge") ?? "";
+	if (!/^[A-Za-z0-9_-]{43}$/.test(webChallenge)) throw new HttpError(400, "bad_request", "browser sign-in challenge required");
 	const state = randomB64url(32);
 	const nonce = randomB64url(24);
 	const verifier = randomB64url(48);
-	await putOneTime(ctx, "google_state", 10 * MIN, null, { nonce, verifier, ret } satisfies GoogleState, state);
+	await putOneTime(ctx, "google_state", 10 * MIN, null, { nonce, verifier, ret, webChallenge } satisfies GoogleState, state);
 	const q = new URLSearchParams({
 		client_id: ctx.env.GOOGLE_CLIENT_ID!,
 		redirect_uri: redirectUri(ctx),
@@ -135,7 +138,7 @@ export async function googleCallback(ctx: Ctx): Promise<Response> {
 		if (!tok.id_token) throw new GoogleFail("token_exchange_failed");
 		const email = await verifyIdToken(ctx, tok.id_token, st.payload.nonce);
 		const { user, created } = await findOrCreateUser(ctx, email);
-		const handoff = await putOneTime(ctx, "handoff", 60_000, user.id, { created });
+		const handoff = await putOneTime(ctx, "handoff", 60_000, user.id, { created, webChallenge: st.payload.webChallenge });
 		return back(`handoff=${handoff}`);
 	} catch (e) {
 		if (e instanceof GoogleFail) { console.error("google callback rejected", e.message); return back(`error=${e.message}`); }

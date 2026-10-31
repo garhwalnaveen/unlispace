@@ -5,6 +5,13 @@ import UnlispaceKit
 @testable import Unlispace
 
 @Suite @MainActor struct AppModelTests {
+    @Test func searchSelectsOnlyDriveAndKeepsValidSelection() {
+        #expect(FileSearchView.selectedDrive("", available: ["a"]) == "a")
+        #expect(FileSearchView.selectedDrive("a", available: ["a", "b"]) == "a")
+        #expect(FileSearchView.selectedDrive("a", available: ["b", "c"]) == "")
+        #expect(FileSearchView.selectedDrive("a", available: []) == "")
+    }
+
     @Test func transferEventsReplaceProgressAndRemoveFinishedTransfers() {
         let model = AppModel()
         var transfer = TransferInfo(id: "one", driveId: "drive", path: "/notes.txt", direction: .upload,
@@ -132,5 +139,34 @@ import UnlispaceKit
         #expect(model.pendingDriveActions.isEmpty)
         #expect(model.lastError != nil)
         #expect(model.isDriveBusy(drives[2]))
+    }
+}
+
+private actor SavedSignInDeniedClient: DaemonClient {
+    func connect() async throws {}
+    func disconnect() async {}
+    func status() async throws -> DaemonStatus { DaemonStatus(version:"test",state:.error,message:"macOS could not read saved sign-in. Approve Keychain access.",canRetrySignIn:true) }
+    func authStatus() async throws -> AuthStatus { AuthStatus(signedIn:false) }
+    func listDrives() async throws -> [DriveInfo] { throw DaemonClientError.remote(DaemonError(code:"unauthorized",message:"credentials unavailable")) }
+    func transfers() async throws -> [TransferInfo] { [] }
+    func mount(driveId:String) async throws {}
+    func unmount(driveId:String) async throws {}
+    func setConfig(_ config:DaemonConfig) async throws {}
+    func authSet(_ params:AuthSetParams) async throws -> AuthSetResult { throw DaemonClientError.notConnected }
+    func authSignOut() async throws {}
+    nonisolated func events() -> AsyncStream<DaemonEvent> { AsyncStream { $0.finish() } }
+}
+
+@Suite @MainActor struct SavedSignInRecoveryModelTests {
+    @Test func aCredentialErrorKeepsTheEngineConnectedAndShowsExplicitRecovery() async throws {
+        let model=AppModel();model.usingMock=false
+        model.drives=[DriveInfo(driveId:"stale",name:"Stale account drive",mountState:.mounted)]
+        try await model.refreshConnected(using:SavedSignInDeniedClient())
+        #expect(!model.usingMock)
+        #expect(!model.isSignedIn)
+        #expect(model.canRetrySignIn)
+        #expect(model.stateMessage?.contains("Keychain") == true)
+        #expect(model.drives.isEmpty)
+        #expect(model.uploads == nil)
     }
 }

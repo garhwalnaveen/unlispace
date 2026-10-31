@@ -1,6 +1,9 @@
 import { ApiError, type DriveApi } from "./api";
 import { chunkLength, MAX_CHUNK } from "./fastcdc";
 
+// Fits the JSON commit even at minimum CDC chunk sizes; larger files use the desktop path.
+export const MAX_WEB_UPLOAD = 3 * 1024 * 1024 * 1024;
+
 export interface UploadProgress {
   phase: "hashing" | "uploading" | "committing" | "done";
   bytes: number;
@@ -13,6 +16,8 @@ export async function uploadFile(
   path: string,
   progress: (value: UploadProgress) => void,
 ): Promise<void> {
+  if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > MAX_WEB_UPLOAD)
+    throw new Error("Browser uploads support files up to 3 GiB. Use the desktop app for larger files.");
   if (!path || path.startsWith("/") || path.split("/").some((part) => !part || part === "." || part === "..") || path.includes("\0") || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(path) || new TextEncoder().encode(path).length > 1024)
     throw new Error("This file name is not supported. Rename it before uploading.");
   // Read the authoritative head before hashing, including names outside the loaded list page.

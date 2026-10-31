@@ -31,18 +31,6 @@ const org = {
   drives: [drive],
 };
 it("shows the trial, explains plan limits, and requires exact drive-name confirmation before deletion", async () => {
-  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
-    configurable: true,
-    value: function (this: HTMLDialogElement) {
-      this.setAttribute("open", "");
-    },
-  });
-  Object.defineProperty(HTMLDialogElement.prototype, "close", {
-    configurable: true,
-    value: function (this: HTMLDialogElement) {
-      this.removeAttribute("open");
-    },
-  });
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "POST") return json({ error: "plan_limit" }, 403);
     if (init?.method === "DELETE") return json({ ok: true });
@@ -122,6 +110,7 @@ it("opens a file with a drive read token and shows its version history", async (
   const user = userEvent.setup();
   renderApp("/drives/d-test/a%20%23%3F.txt");
   expect(await screen.findByText("v_head")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Your drives" })).toHaveClass("active");
   expect(screen.getByRole("link", { name: /Show in Finder/ })).toHaveAttribute(
     "href",
     "uls://open?drive=d-test&path=a+%23%3F.txt",

@@ -6,6 +6,10 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "build:ingress": "node node/build.mjs",
+    "test:ingress": "node node/build.mjs && node --test node/streaming.test.mjs",
+    "typecheck:ingress": "tsc --noEmit -p node/tsconfig.json",
+    "test:sdk-python": "node node/sdk-test.mjs",
     "types": "wrangler types"
   },
   "dependencies": {
@@ -15,6 +19,7 @@
     "@aws-sdk/client-s3": "3.1156.0",
     "@aws-sdk/s3-request-presigner": "3.1156.0",
     "@cloudflare/vitest-plugin": "1.4.7",
+    "@spacefs/s3sdk": "0.4.0",
     "@types/node": "22.15.17",
     "typescript": "5.9.3",
     "vitest": "4.1.12",

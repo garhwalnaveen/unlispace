@@ -17,7 +17,8 @@ const webhookKey = btoa("a local test-only webhook secret!");
 async function fixture() {
 	const w = await makeWorld({ DODO_PRODUCTS: JSON.stringify(products), DODO_PAYMENTS_WEBHOOK_KEY: "whsec_" + webhookKey, DODO_PAYMENTS_API_KEY: "local-test-only", DODO_PAYMENTS_ENVIRONMENT: "test_mode" });
 	const provider = {
-		checkout: vi.fn(async (_input: CheckoutInput) => ({ url: "https://checkout.dodopayments.com/test" })),
+		checkout: vi.fn(async (_input: CheckoutInput) => ({ url: "https://checkout.dodopayments.com/test", sessionId: "cks_test" })),
+		checkoutStatus: vi.fn(async (_sessionId: string) => ({createdAt: new Date(w.clock.t).toISOString(), paymentId: null, paymentStatus: null})),
 		portal: vi.fn(async (_customerId: string, _returnUrl: string) => ({ url: "https://customer.dodopayments.com/test" })),
 		invoices: vi.fn(async (_customerId: string, _page: number) => ({ invoices: [{ paymentId: "pay_test", status: "succeeded", amount: 2000, currency: "USD", createdAt: new Date(w.clock.t).toISOString() }], nextPage: null })),
 	} satisfies DodoPayments;
@@ -66,11 +67,24 @@ describe("billing catalog and checkout", () => {
 		const r = await w.call("/billing/catalog");
 		expect(r.status).toBe(200);
 		const b = await json(r);
-		expect(b).toMatchObject({ provider: "dodo", trialDays: 7, trialRequiresCard: false, checkoutAvailable: true, storageAddon: { bytes: 500_000_000_000 }, plans: [{ id: "individual", bytesPerSeat: 1_000_000_000_000, maxSeats: 1 }, { id: "teams", bytesPerSeat: 1_000_000_000_000 }] });
+		expect(b).toMatchObject({ provider: "dodo", trialDays: 7, trialRequiresCard: false, checkoutAvailable: true, storageAddon: { bytes: 500_000_000_000 }, plans: [{ id: "individual", bytesPerSeat: 500_000_000_000, maxSeats: 1 }, { id: "teams", bytesPerSeat: 1_000_000_000_000 }] });
 		expect(JSON.stringify(b)).not.toContain("local-test-only");
 		delete w.env.DODO_PRODUCTS;
 		expect((await json(await w.call("/billing/catalog"))).checkoutAvailable).toBe(false);
 		expect((await w.call("/billing/catalog", { method: "POST" })).status).toBe(405);
+	});
+
+	it("publishes configured prices only when complete and single-currency", async () => {
+		const { w } = await fixture();
+		expect((await json(await w.call("/billing/catalog"))).prices).toBeNull();
+		const price = (amount: number, currency = "USD") => ({ amount, currency });
+		const full = { individual: { monthly: price(1500), annual: price(15000) }, teams: { monthly: price(1500), annual: price(15000) }, storage: { monthly: price(500), annual: price(5000) } };
+		w.env.DODO_PRICES = JSON.stringify(full);
+		expect((await json(await w.call("/billing/catalog"))).prices).toEqual(full);
+		w.env.DODO_PRICES = JSON.stringify({ ...full, storage: { monthly: price(500, "EUR"), annual: price(5000) } });
+		expect((await json(await w.call("/billing/catalog"))).prices).toBeNull();
+		w.env.DODO_PRICES = "{bad";
+		expect((await json(await w.call("/billing/catalog"))).prices).toBeNull();
 	});
 
 	it("creates a recurring Teams checkout with seats and storage addons; entitlements await a webhook", async () => {
@@ -98,7 +112,7 @@ describe("billing catalog and checkout", () => {
 		const member = await signIn(w, "member@example.com");
 		await w.env.DB.prepare("INSERT INTO memberships VALUES(?,?,?,?)").bind(org.id, member.user.id, "member", w.clock.t).run();
 		expect(await json(await call("/checkout", { json: { plan: "teams" } }))).toEqual({ error: "seats_below_members" });
-		provider.checkout.mockRejectedValueOnce(new HttpError(502, "billing_unavailable"));
+		provider.checkout.mockRejectedValueOnce(new HttpError(502, "billing_rejected"));
 		expect((await call("/checkout", { json: { plan: "teams", seats: 2 } })).status).toBe(502);
 		expect(await w.env.DB.prepare("SELECT COUNT(*) AS n FROM billing_checkouts").first()).toEqual({ n: 0 });
 		await activate({ product_id: products.teams.monthly, quantity: 2 });
@@ -163,6 +177,23 @@ describe("Dodo Standard Webhooks verification", () => {
 });
 
 describe("subscription event persistence", () => {
+	it("keeps a replacement checkout locked when the previous subscription sends terminal events", async () => {
+		const {w, org, call, activate, provider} = await fixture();
+		const {data} = await activate();
+		w.clock.t += 1000;
+		expect((await deliver(w, {type:"subscription.cancelled", timestamp:new Date(w.clock.t).toISOString(), data:{...data,status:"cancelled"}}, "cancel-old")).status).toBe(200);
+		expect((await call("/checkout", {json:{plan:"individual"}})).status).toBe(200);
+		const locked = await w.env.DB.prepare("SELECT intent_id FROM billing_checkout_locks WHERE org_id=?").bind(org.id).first();
+		w.clock.t += 1000;
+		const terminal = {type:"subscription.expired", timestamp:new Date(w.clock.t).toISOString(), data:{...data,status:"expired"}};
+		for (const id of ["expired-old", "expired-old", "expired-old-second-delivery"]) {
+			expect((await deliver(w, terminal, id)).status).toBe(200);
+			expect(await w.env.DB.prepare("SELECT intent_id FROM billing_checkout_locks WHERE org_id=?").bind(org.id).first()).toEqual(locked);
+		}
+		expect((await call("/checkout", {json:{plan:"teams"}})).status).toBe(409);
+		expect((await call("/checkout", {json:{plan:"individual"}})).status).toBe(200);
+		expect(provider.checkout).toHaveBeenCalledTimes(2);
+	});
 	it("uses verified product/quantity/addons, updates org tier, and handles replay/out-of-order events", async () => {
 		const { w, org, call, activate } = await fixture();
 		const { response, data } = await activate({ product_id: products.teams.annual, quantity: 3, addons: [{ addon_id: products.storage.annual, quantity: 2 }] });
@@ -200,6 +231,7 @@ describe("subscription event persistence", () => {
 		const cancelled = { ...data, metadata: undefined, status: "cancelled" };
 		expect((await deliver(w, { type: "subscription.cancelled", timestamp: new Date(w.clock.t).toISOString(), data: cancelled }, "evt_cancel")).status).toBe(200);
 		expect(await json(await call())).toMatchObject({ status: "cancelled", writable: false });
+		expect((await call("/checkout", {json:{plan:"individual"}})).status).toBe(200);
 	});
 });
 
@@ -216,7 +248,7 @@ describe("drive-token entitlements", () => {
 	it("blocks over-quota writes across all org drives, allows reads/viewers, and restores writes after activation", async () => {
 		const { w, s, org, activate } = await fixture();
 		const id = org.drives[0].id;
-		w.dp.stats.set(id, 1_000_000_000_000);
+		w.dp.stats.set(id, 500_000_000_000);
   await meterUsage(rpcContext(w.env));
 		expect(await tokenAccess(w, s.accessToken, id)).toMatchObject({ access: "write" });
 		await w.env.DB.prepare("INSERT INTO drives(id,org_id,name,status,created_at) VALUES(?,?,?,'ready',?)").bind("d_second", org.id, "Second", w.clock.t).run();
@@ -234,7 +266,7 @@ describe("drive-token entitlements", () => {
 		expect(await tokenAccess(w, s.accessToken, id)).toEqual({ status: 200, access: "write" });
 	});
 
-	it("metering rejects unavailable/invalid stats while token issuance uses its last measurement", async () => {
+	it("metering rejects unavailable/invalid stats while token issuance uses authoritative quota usage", async () => {
 		const { w, s, org } = await fixture();
 		w.dp.failStats = true;
 		await expect(meterUsage(rpcContext(w.env))).rejects.toThrow();

@@ -112,10 +112,9 @@ export async function listVersions(c: ObjectContext, bucket: string): Promise<Re
   const q = c.url.searchParams, { prefix, delimiter, max, encode } = listParams(c.url);
   const keyMarker = q.get("key-marker") ?? "", versionMarker = q.get("version-id-marker") ?? "";
   if (versionMarker && !keyMarker) throw new S3Error(400, "InvalidArgument", "version-id-marker requires key-marker");
-  // Universe of keys: the live tree plus every file path the change log has ever seen (deleted keys keep their markers).
+  // Protocol v1 lists content history for live files; deletion never destroys retained history.
   const keys = new Set<string>();
   for await (const item of walkKeys(c, prefix, "", null)) if (!item.prefix && !item.key.endsWith("/")) keys.add(item.key);
-  for (const change of await c.dp.changes()) if (!change.path.endsWith("/") && change.path.startsWith(prefix)) keys.add(change.path);
   const sorted = [...keys].sort(compareKeys);
   const k = keyText(encode);
   const out: string[] = [], seenPrefixes = new Set<string>();
@@ -135,7 +134,7 @@ export async function listVersions(c: ObjectContext, bucket: string): Promise<Re
       out.push(`<CommonPrefixes>${tag("Prefix", k(cp))}</CommonPrefixes>`);
       continue;
     }
-    const versions = (await c.dp.versions(key)).filter(v => v.op !== "mkdir").reverse();
+    const versions = (await c.dp.versions(key)).filter(v => !["mkdir", "rename", "delete"].includes(v.op)).reverse();
     let skip = key === keyMarker && versionMarker !== "";
     for (const [i, v] of versions.entries()) {
       if (skip) { if (v.versionId === versionMarker) skip = false; continue; }
@@ -143,9 +142,7 @@ export async function listVersions(c: ObjectContext, bucket: string): Promise<Re
       if (count === max) { truncated = true; break outer; }
       count++; nextKey = key; nextVersion = v.versionId;
       const common = tag("Key", k(key)) + tag("VersionId", v.versionId) + tag("IsLatest", i === 0) + tag("LastModified", iso(v.ts));
-      out.push(v.op === "delete"
-        ? `<DeleteMarker>${common}</DeleteMarker>`
-        : `<Version>${common}${tag("ETag", await etag(await c.dp.manifest(key, v.versionId)))}${tag("Size", v.size ?? 0)}${tag("StorageClass", "STANDARD")}</Version>`);
+      out.push(`<Version>${common}${tag("ETag", await etag(await c.dp.manifest(key, v.versionId)))}${tag("Size", v.size ?? 0)}${tag("StorageClass", "STANDARD")}</Version>`);
     }
   }
   let body = tag("Name", bucket) + tag("Prefix", k(prefix)) + tag("KeyMarker", k(keyMarker)) + tag("VersionIdMarker", versionMarker);

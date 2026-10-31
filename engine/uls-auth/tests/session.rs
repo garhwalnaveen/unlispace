@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use base64::Engine;
@@ -27,6 +28,25 @@ fn tokens(access: String, refresh: &str) -> SessionTokens {
 
 fn session_json(access: &str, refresh: &str) -> Value {
     json!({"accessToken":access,"refreshToken":refresh,"expiresIn":900,"user":{"id":"u_1","email":"a@b.c"},"accountCreated":false})
+}
+
+fn fast(s: Session) -> Session {
+    s.with_retry_backoff(vec![Duration::from_millis(5); 3])
+}
+
+/// Fails the first `fail` calls with `first`, then rotates rt_1 -> rt_2.
+struct FlakyThenOk {
+    calls: AtomicUsize,
+    fail: usize,
+    first: ResponseTemplate,
+}
+impl Respond for FlakyThenOk {
+    fn respond(&self, req: &Request) -> ResponseTemplate {
+        let n = self.calls.fetch_add(1, Ordering::SeqCst);
+        let body: Value = serde_json::from_slice(&req.body).unwrap();
+        assert_eq!(body["refreshToken"], "rt_1", "every attempt replays the same token");
+        if n < self.fail { self.first.clone() } else { ResponseTemplate::new(200).set_body_json(session_json(&jwt(now_s() + 900), "rt_2")) }
+    }
 }
 
 /// Each refresh returns rt_{n+1}, and checks the caller presented the previous one.
@@ -112,9 +132,9 @@ async fn transient_refresh_failure_keeps_session() {
     let srv = MockServer::start().await;
     Mock::given(method("POST")).and(path("/auth/refresh")).respond_with(ResponseTemplate::new(503)).mount(&srv).await;
     let store = Arc::new(MemoryStore::new());
-    let s = Session::new(srv.uri(), store.clone()).unwrap();
+    let s = fast(Session::new(srv.uri(), store.clone()).unwrap());
     s.sign_in(tokens(jwt(now_s() + 10), "rt_1")).unwrap();
-    assert!(matches!(s.access_token().await, Err(AuthError::Api { status: 503, .. })));
+    assert!(matches!(s.access_token().await, Err(AuthError::Offline(_))));
     assert!(s.is_signed_in());
     assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_1"));
 }
@@ -236,4 +256,168 @@ async fn orgs_accepts_viewer_role() {
     let orgs = s.orgs().await.unwrap();
     assert_eq!(orgs[0].role.as_deref(), Some("viewer"));
     assert_eq!(orgs[0].drives[0].access, Some(Access::Read));
+}
+
+#[tokio::test]
+async fn refresh_retries_same_token_after_503_and_persists_rotation() {
+    let srv = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/auth/refresh"))
+        .respond_with(FlakyThenOk { calls: AtomicUsize::new(0), fail: 2, first: ResponseTemplate::new(503) })
+        .mount(&srv).await;
+    let store = Arc::new(MemoryStore::new());
+    let s = fast(Session::new(srv.uri(), store.clone()).unwrap());
+    s.sign_in(tokens(jwt(now_s() + 10), "rt_1")).unwrap();
+    s.access_token().await.unwrap();
+    assert_eq!(srv.received_requests().await.unwrap().len(), 3);
+    assert!(s.is_signed_in());
+    assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_2"));
+}
+
+#[tokio::test]
+async fn refresh_retries_after_dropped_connection_and_429_and_bad_body() {
+    for first in [ResponseTemplate::new(429), ResponseTemplate::new(200).set_body_string("{not json"), ResponseTemplate::new(200).set_delay(Duration::from_millis(300))] {
+        let srv = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/auth/refresh"))
+            .respond_with(FlakyThenOk { calls: AtomicUsize::new(0), fail: 1, first })
+            .mount(&srv).await;
+        let store = Arc::new(MemoryStore::new());
+        let s = fast(Session::new(srv.uri(), store.clone()).unwrap());
+        s.sign_in(tokens(jwt(now_s() + 10), "rt_1")).unwrap();
+        s.access_token().await.unwrap();
+        assert!(s.is_signed_in());
+        assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_2"));
+    }
+}
+
+#[tokio::test]
+async fn refresh_survives_connection_reset() {
+    // A raw listener that accepts and immediately drops the first connection, then proxies the rest to wiremock.
+    let srv = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/auth/refresh"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(session_json(&jwt(now_s() + 900), "rt_2")))
+        .mount(&srv).await;
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let upstream = srv.address().to_string();
+    tokio::spawn(async move {
+        let (c, _) = l.accept().await.unwrap();
+        drop(c);
+        loop {
+            let (mut c, _) = l.accept().await.unwrap();
+            let up = upstream.clone();
+            tokio::spawn(async move {
+                if let Ok(mut u) = tokio::net::TcpStream::connect(up).await {
+                    let _ = tokio::io::copy_bidirectional(&mut c, &mut u).await;
+                }
+            });
+        }
+    });
+    let store = Arc::new(MemoryStore::new());
+    let s = fast(Session::new(format!("http://{addr}"), store.clone()).unwrap());
+    s.sign_in(tokens(jwt(now_s() + 10), "rt_1")).unwrap();
+    s.access_token().await.unwrap();
+    assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_2"));
+}
+
+#[tokio::test]
+async fn network_down_is_offline_and_keeps_token() {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    drop(l); // nothing listens: connection refused
+    let store = Arc::new(MemoryStore::new());
+    let s = fast(Session::new(format!("http://{addr}"), store.clone()).unwrap());
+    s.sign_in(tokens(jwt(now_s() + 10), "rt_1")).unwrap();
+    let mut ev = s.subscribe();
+    assert!(matches!(s.access_token().await, Err(AuthError::Offline(_))));
+    assert!(s.is_signed_in());
+    assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_1"));
+    assert!(ev.try_recv().is_err(), "no SignedOut event");
+}
+
+#[tokio::test]
+async fn other_4xx_on_refresh_does_not_sign_out() {
+    let srv = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/auth/refresh")).respond_with(ResponseTemplate::new(400).set_body_json(json!({"error":"bad_request"}))).mount(&srv).await;
+    let store = Arc::new(MemoryStore::new());
+    let s = fast(Session::new(srv.uri(), store.clone()).unwrap());
+    s.sign_in(tokens(jwt(now_s() + 10), "rt_1")).unwrap();
+    assert!(matches!(s.access_token().await, Err(AuthError::Api { status: 400, .. })));
+    assert!(s.is_signed_in());
+    assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_1"));
+}
+
+#[tokio::test]
+async fn drive_token_retries_transient_and_never_signs_out() {
+    let srv = MockServer::start().await;
+    let access = jwt(now_s() + 3600);
+    let ok = json!({"token":"dt_1","expiresAt":now_s() * 1000 + 600_000,"endpoint":"http://data","driveId":"d-abc"});
+    Mock::given(method("POST")).and(path("/drives/d-abc/token")).respond_with(ResponseTemplate::new(503)).up_to_n_times(2).with_priority(1).mount(&srv).await;
+    Mock::given(method("POST")).and(path("/drives/d-abc/token")).respond_with(ResponseTemplate::new(200).set_body_json(ok)).with_priority(2).mount(&srv).await;
+    let store = Arc::new(MemoryStore::new());
+    let s = fast(Session::new(srv.uri(), store.clone()).unwrap());
+    s.sign_in(tokens(access, "rt_1")).unwrap();
+    assert_eq!(s.drive_token("d-abc", Access::Write).await.unwrap().token, "dt_1");
+
+    // Persistent 503 on a different drive: offline error, session intact.
+    Mock::given(method("POST")).and(path("/drives/d-down/token")).respond_with(ResponseTemplate::new(503)).mount(&srv).await;
+    assert!(matches!(s.drive_token("d-down", Access::Write).await, Err(AuthError::Offline(_))));
+    assert!(s.is_signed_in());
+    assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_1"));
+}
+
+#[tokio::test]
+async fn drive_token_401_with_dead_refresh_signs_out_only_via_refresh() {
+    let srv = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/drives/d-abc/token")).respond_with(ResponseTemplate::new(401).set_body_json(json!({"error":"unauthorized"}))).mount(&srv).await;
+    Mock::given(method("POST")).and(path("/auth/refresh")).respond_with(ResponseTemplate::new(503)).mount(&srv).await;
+    let store = Arc::new(MemoryStore::new());
+    let s = fast(Session::new(srv.uri(), store.clone()).unwrap());
+    s.sign_in(tokens(jwt(now_s() + 3600), "rt_1")).unwrap();
+    assert!(matches!(s.drive_token("d-abc", Access::Write).await, Err(AuthError::Offline(_))));
+    assert!(s.is_signed_in());
+    assert_eq!(store.get("u_1").unwrap().as_deref(), Some("rt_1"));
+}
+
+#[tokio::test]
+async fn sign_out_reports_credential_delete_denial_but_revokes_and_disconnects() {
+    struct DeleteDenied(MemoryStore);
+    impl SecretStore for DeleteDenied {
+        fn get(&self,account:&str)->Result<Option<String>,uls_auth::StoreError>{self.0.get(account)}
+        fn set(&self,account:&str,value:&str)->Result<(),uls_auth::StoreError>{self.0.set(account,value)}
+        fn delete(&self,_:&str)->Result<(),uls_auth::StoreError>{Err(uls_auth::StoreError("Keychain access denied".into()))}
+    }
+    let api=MockServer::start().await;
+    Mock::given(method("POST")).and(path("/auth/logout")).respond_with(ResponseTemplate::new(200)).expect(1).mount(&api).await;
+    let store=Arc::new(DeleteDenied(MemoryStore::new()));let session=Session::new(api.uri(),store.clone()).unwrap();
+    session.sign_in(tokens(jwt(now_s()+900),"refresh-test")).unwrap();let mut events=session.subscribe();
+    assert!(matches!(session.sign_out().await,Err(AuthError::Store(_))));
+    assert!(!session.is_signed_in());assert!(matches!(session.access_token().await,Err(AuthError::SignedOut)));
+    assert_eq!(events.recv().await.unwrap(),AuthEvent::SignedOut);
+    assert!(store.get("u_1").unwrap().is_some(),"failed deletion must not be reported as a successful wipe");
+}
+
+#[tokio::test]
+async fn sign_out_waits_for_in_flight_rotation_and_cannot_recreate_saved_credentials() {
+    let api = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/auth/refresh"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(200)).set_body_json(session_json(&jwt(now_s()+900), "rotated")))
+        .expect(1).mount(&api).await;
+    Mock::given(method("POST")).and(path("/auth/logout"))
+        .respond_with(ResponseTemplate::new(200)).expect(1).mount(&api).await;
+    let store = Arc::new(MemoryStore::new());
+    let session = Arc::new(Session::new(api.uri(), store.clone()).unwrap());
+    session.sign_in(tokens(jwt(now_s()+1), "old")).unwrap();
+    let refreshing = { let session=session.clone(); tokio::spawn(async move {session.access_token().await}) };
+    for _ in 0..100 {
+        if !api.received_requests().await.unwrap().is_empty() {break;}
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(!api.received_requests().await.unwrap().is_empty());
+    session.sign_out().await.unwrap();
+    refreshing.await.unwrap().unwrap();
+    assert!(!session.is_signed_in());
+    assert!(store.get("u_1").unwrap().is_none(), "a late refresh must not restore a signed-out credential");
+    let requests=api.received_requests().await.unwrap();
+    let logout:Value=serde_json::from_slice(&requests.iter().find(|r|r.url.path()=="/auth/logout").unwrap().body).unwrap();
+    assert_eq!(logout["refreshToken"],"rotated", "revoke the token after rotation, not its obsolete predecessor");
 }

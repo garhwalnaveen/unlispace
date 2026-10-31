@@ -2,26 +2,18 @@ import Foundation
 
 /// In-memory daemon used when the real socket is absent. Mounting is simulated.
 public actor MockDaemonClient: DaemonClient {
-    private var drives: [DriveInfo]
-    private var state: EngineState
-    private var activeTransfers: [TransferInfo] = []
+    private var drives = [
+        DriveInfo(driveId: "demo", name: "Demo Drive", mountState: .unmounted),
+        DriveInfo(driveId: "work", name: "Work", mountState: .unmounted),
+    ]
+    private var state: EngineState = .idle
     private var offlinePins: [OfflinePin] = []
     private var uploadSnapshot = UploadsSnapshot(pending: [], journalBytes: 0, journalCapBytes: 10 * 1024 * 1024 * 1024)
     private var user: AuthUser?
     private var apiEndpoint: String?
-    private let demoEmail: String
     private var subscribers: [UUID: AsyncStream<DaemonEvent>.Continuation] = [:]
 
-    public init(drives: [DriveInfo]? = nil, state: EngineState = .idle, signedInAs email: String? = nil,
-                demoEmail: String = "demo@unlispace.local") {
-        self.demoEmail = demoEmail
-        if let email { self.user = AuthUser(id: "u_mock", email: email) }
-        self.drives = drives ?? [
-            DriveInfo(driveId: "demo", name: "Demo Drive", mountState: .unmounted),
-            DriveInfo(driveId: "work", name: "Work", mountState: .unmounted),
-        ]
-        self.state = state
-    }
+    public init() {}
 
     public func connect() async throws {}
     public func disconnect() async {
@@ -31,7 +23,7 @@ public actor MockDaemonClient: DaemonClient {
 
     public func status() async throws -> DaemonStatus {
         let state = user == nil && self.state == .idle ? EngineState.signedOut : self.state
-        return DaemonStatus(version: "mock", state: state, message: "Mock engine", pendingOps: activeTransfers.count + uploadSnapshot.pending.count)
+        return DaemonStatus(version: "mock", state: state, message: "Mock engine", pendingOps: uploadSnapshot.pending.count)
     }
 
     public func listDrives() async throws -> [DriveInfo] { drives }
@@ -53,7 +45,7 @@ public actor MockDaemonClient: DaemonClient {
         emit(.state(StateEvent(state: state)))
     }
 
-    public func transfers() async throws -> [TransferInfo] { activeTransfers }
+    public func transfers() async throws -> [TransferInfo] { [] }
 
     public func uploads() async throws -> UploadsSnapshot? { uploadSnapshot }
     public func setUploads(_ snapshot: UploadsSnapshot) { uploadSnapshot = snapshot }
@@ -82,7 +74,7 @@ public actor MockDaemonClient: DaemonClient {
         guard !params.accessToken.isEmpty, !params.refreshToken.isEmpty else {
             throw DaemonClientError.remote(DaemonError(code: "bad_request", message: "empty token"))
         }
-        let u = AuthUser(id: "u_mock", email: demoEmail)
+        let u = AuthUser(id: "u_mock", email: "demo@unlispace.local")
         user = u
         apiEndpoint = params.apiEndpoint
         state = .idle
@@ -100,19 +92,6 @@ public actor MockDaemonClient: DaemonClient {
         for i in drives.indices { drives[i].mountState = .unmounted; drives[i].mountPath = nil }
         state = .signedOut
         emit(.state(StateEvent(state: .signedOut)))
-    }
-
-    public func pushChange(_ c: ChangeEvent) { emit(.change(c)) }
-
-    public func setState(_ s: EngineState) {
-        state = s
-        emit(.state(StateEvent(state: s)))
-    }
-
-    public func pushTransfer(_ t: TransferInfo) {
-        activeTransfers.removeAll { $0.id == t.id }
-        if !t.isFinished { activeTransfers.append(t) }
-        emit(.transfer(t))
     }
 
     private func emit(_ e: DaemonEvent) {

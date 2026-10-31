@@ -48,7 +48,7 @@ async fn seed(c: &Client, data: &[u8]) -> Vec<ShardRef> {
     }
     c.commit("drive", vec![Op::Put { path: "a".into(), if_version: None, if_absent: true,
         size: data.len() as u64, content_type: "application/octet-stream".into(), mtime_ms: 0,
-        shards: refs.clone() }]).await.unwrap();
+        shards: refs.clone(), xattrs: None }]).await.unwrap();
     refs
 }
 
@@ -261,7 +261,10 @@ async fn interrupted_upload_reopens_and_probes_without_reuploading_stored_shards
         let direct = client(server.url()); direct.create_drive("drive", None).await.unwrap();
         let proxy = Proxy::start(&server).await;
         proxy.traffic.lock().unwrap().fail_put = Some((2, lost_ack));
-        let c = client(proxy.url.clone());
+        // Sequential uploads make "which shards reached the server" deterministic; concurrent
+        // upload bounds are covered by the publisher's unit tests.
+        let c = Client::builder(proxy.url.clone(), "test").parallelism(1).retry(RetryPolicy { max_attempts: 1,
+            base_delay: Duration::from_millis(1), max_delay: Duration::from_millis(1) }).build().unwrap();
         let expected = data(8 << 20);
         assert!(shards(&expected).len() >= 3);
         let dir = tempfile::tempdir_in("/tmp").unwrap();
@@ -281,4 +284,50 @@ async fn interrupted_upload_reopens_and_probes_without_reuploading_stored_shards
         }
         assert_manifest(&c, &expected).await; assert_no_scratch(dir.path());
     }
+}
+
+#[tokio::test]
+async fn pending_items_report_phase_progress_and_per_file_transfer_events() {
+    let server = MockServer::start("test").await;
+    let c = client(server.url()); c.create_drive("drive", None).await.unwrap();
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let opts = VfsOptions { quiet_window: Duration::from_millis(50), max_dirty_age: Duration::from_millis(50),
+        retry_initial: Duration::from_secs(3600), retry_max: Duration::from_secs(3600), ..VfsOptions::default() };
+    let v = Vfs::open(c.clone(), "drive", dir.path(), options()).await.unwrap();
+    let body = data(6 << 20);
+    v.create("a.bin", Kind::File).await.unwrap(); v.write("a.bin", 0, &body).await.unwrap();
+    let items = v.pending_items().await;
+    assert_eq!(items.len(), 1);
+    assert_eq!((items[0].path.as_str(), items[0].bytes, items[0].uploading, items[0].bytes_sent), ("a.bin", body.len() as u64, false, 0));
+    // Plan capacity: unknown, then quota - used - pending journal bytes.
+    assert_eq!(v.volume().await, None);
+    v.set_capacity(Some((100 << 20, 10 << 20)));
+    assert_eq!(v.volume().await, Some((100 << 20, (90 << 20) - body.len() as u64)));
+    v.shutdown().await.unwrap();
+
+    // Slow PUTs expose the `uploading` phase with partial progress; commit emits the file event.
+    server.stats.shard_put_delay_ms.store(300, std::sync::atomic::Ordering::SeqCst);
+    let c = Client::builder(server.url(), "test").parallelism(1).build().unwrap();
+    let v = Vfs::open(c, "drive", dir.path(), opts).await.unwrap();
+    let mut events = v.subscribe();
+    let mut body = data(7 << 20); body.reverse(); // distinct from a.bin's shards
+    v.create("b.bin", Kind::File).await.unwrap(); v.write("b.bin", 0, &body).await.unwrap(); v.flush("b.bin").await.unwrap();
+    let mut saw_partial = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        for item in v.pending_items().await {
+            if item.uploading && item.bytes_sent > 0 && item.bytes_sent < item.bytes { saw_partial = true; }
+            assert!(item.bytes_sent <= item.bytes);
+        }
+        if v.pending().await.files == 0 { break; }
+        assert!(std::time::Instant::now() < deadline, "publication did not finish");
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+    assert!(saw_partial, "never observed uploading with partial bytesSent");
+    let mut files = vec![];
+    while let Ok(ev) = events.try_recv() {
+        if let uls_vfs::VfsEvent::Transfer { files: f, .. } = ev { files.extend(f); }
+    }
+    assert_eq!(files, vec![("b.bin".to_string(), body.len() as u64)]);
+    v.shutdown().await.unwrap();
 }

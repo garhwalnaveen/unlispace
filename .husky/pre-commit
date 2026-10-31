@@ -1,1 +1,6 @@
-bun typecheck
+#!/bin/sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+for package in web cloud/api cloud/data-plane cloud/s3-gateway; do
+  npm --prefix "$package" run typecheck
+done

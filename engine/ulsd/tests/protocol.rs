@@ -19,7 +19,7 @@ fn spec_example_session() {
     // <- status
     let resp: Response = rt(r#"{"id":1,"result":{"version":"0.1.0","state":"idle","pendingOps":0}}"#);
     let st: Status = serde_json::from_value(resp.result.unwrap()).unwrap();
-    assert_eq!(st, Status { version: "0.1.0".into(), state: State::Idle, message: None, pending_ops: Some(0) });
+    assert_eq!(st, Status { can_retry_sign_in: None, version: "0.1.0".into(), state: State::Idle, message: None, pending_ops: Some(0), upload_bandwidth_bps: None });
     // -> drive.mount
     let r = parse_request(r#"{"id":2,"method":"drive.mount","params":{"driveId":"demo"}}"#).unwrap();
     assert_eq!(parse_params::<DriveParams>(&r).unwrap().drive_id, "demo");

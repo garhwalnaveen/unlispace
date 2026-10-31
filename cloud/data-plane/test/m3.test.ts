@@ -33,10 +33,7 @@ async function sweep(drive: string, now: number) {
 }
 
 async function snapshot(drive: string) {
-	return runInDurableObject(stubFor(drive), async (instance, ctx) => {
-		ctx.storage.sql.exec("INSERT OR REPLACE INTO meta VALUES('snapshot_at','0')");
-		return instance.snapshot();
-	});
+	return stubFor(drive).snapshot(true);
 }
 
 describe("M3 forks", () => {
@@ -55,6 +52,7 @@ describe("M3 forks", () => {
 		expect(await admin.driveStats(child)).toMatchObject({headSeq: 3, fileCount: 121, bytes: 7, ownBytes: 0, depth: 1, lineage: source, forkOf: {driveId: source, forkPoint: fork.forkPoint}});
 		expect((await get(child, `manifest?path=f&versionId=${first.versionId}`)).shards).toEqual(first.shards);
 		expect(await get(child, "versions?path=f")).toEqual(await get(source, "versions?path=f"));
+		expect((await get(child, "search?q=empty")).entries).toHaveLength(50);
 		expect((await get(child, "changes?since=0")).changes).toMatchObject([{seq: 3, op: "resync"}]);
 		await putFile(source, "parent-only", "parent");
 		await putFile(child, "child-only", "child");
@@ -71,7 +69,7 @@ describe("M3 forks", () => {
 		expect(await (await selfFetch(new Request(url))).text()).toBe("current");
 		const other = await newDrive();
 		const forged = await signBlocks("http://example.com", other, m.shards, env.ULS_BLOCK_KEY, source);
-		expect((await selfFetch(new Request(forged.blockUrls[m.shards[0].h]!))).status).toBe(401);
+		expect((await selfFetch(new Request(forged.blockUrls[m.shards[0].h]!))).status).toBe(404);
 	});
 
 	it("freezes export pages behind queued commits while subsequent parent writes remain independent", async () => {
@@ -86,7 +84,7 @@ describe("M3 forks", () => {
 			const result = await exported;
 			if (!result.ok) throw new Error("export failed");
 			expect(result.data.seq).toBe(1);
-			const pages = instance.exportPage(result.data.token);
+			const pages = await instance.exportPage(result.data.token);
 			expect(pages.rows.some(r => r.payload.includes('"name":"queued"'))).toBe(true);
 			instance.endExport(result.data.token);
 		});
@@ -175,7 +173,7 @@ describe("M3 snapshots", () => {
 	it("rebuilds list/stat/manifest/versions and the log from gzip into an empty DO", async () => {
 		const source = await newDrive("weur");
 		await putFile(source, "dir/f", "old"); await putFile(source, "dir/f", "new");
-		const routes = ["list?path=", "list?path=dir/", "stat?path=dir/f", "manifest?path=dir/f", "versions?path=dir/f", "changes?since=0"];
+		const routes = ["list?path=", "list?path=dir/", "stat?path=dir/f", "manifest?path=dir/f", "versions?path=dir/f", "changes?since=0", "search?q=dir"];
 		const before = await Promise.all(routes.map(route => get(source, route)));
 		const key = await snapshot(source);
 		expect(key).toBe(`snapshots/${source}/2.ndjson.gz`);
@@ -223,7 +221,7 @@ describe("M3 CORS", () => {
 			expect(preflight.status).toBe(204);
 			expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
 			expect(preflight.headers.get("Access-Control-Allow-Methods")).toBe("GET, POST, PUT");
-			expect(preflight.headers.get("Access-Control-Allow-Headers")).toBe("Authorization, Content-Type");
+			expect(preflight.headers.get("Access-Control-Allow-Headers")).toBe("Authorization, Content-Type, X-Uls-Request-Id");
 			expect(preflight.headers.get("Access-Control-Allow-Credentials")).toBeNull();
 			for (const token of [TOKEN, null]) {
 				const response = await api(path, {token, headers: {Origin: "http://localhost:5173"}});
@@ -241,13 +239,18 @@ describe("M3 CORS", () => {
 
 describe("M3 compatibility and historical manifests", () => {
 	it("defaults old DO metadata to its existing R2 namespace and migrates inherited flags", async () => {
-		const source = await newDrive(); await putFile(source, "f", "old-layout");
+		const source = `legacy-${Date.now().toString(36)}-${counter++}`, data=bytes("old-layout");
+		const hash=[...new Uint8Array(await crypto.subtle.digest("SHA-256",data))].map(n=>n.toString(16).padStart(2,"0")).join("");
+		await env.SHARDS.put(`shards/${source}/${hash}`,data);
 		await runInDurableObject(stubFor(source), (_instance, ctx) => {
-			const sql = ctx.storage.sql;
-			sql.exec("DELETE FROM meta WHERE k IN ('lineage','depth')");
+			const sql=ctx.storage.sql,version="v_00000000000000000000000000",manifest=JSON.stringify([[hash,10]]);
+			for (const [key,value] of Object.entries({drive_id:source,created_at:"1700000000000",head_seq:"1",deleted:"0"})) sql.exec("INSERT INTO meta VALUES(?,?)",key,value);
+			sql.exec("INSERT INTO versions(id,path,op,size,manifest,seq,ts,actor,ctype,mtime,node_id) VALUES(?,'f','put',10,?,1,1700000000000,'fixture','text/plain',1700000000000,'legacy-node')",version,manifest);
+			sql.exec("INSERT INTO nodes(id,parent_id,name,type,head,size,ctype,mtime,seq) VALUES('legacy-node','','f','file',?,10,'text/plain',1700000000000,1)",version);
+			sql.exec("INSERT INTO path_log VALUES(1,1700000000000,'legacy-node','f','put')");
 			sql.exec("ALTER TABLE shards_known RENAME TO old_shards");
 			sql.exec("CREATE TABLE shards_known(h TEXT PRIMARY KEY,n INTEGER NOT NULL)");
-			sql.exec("INSERT INTO shards_known SELECT h,n FROM old_shards");
+			sql.exec("INSERT INTO shards_known VALUES(?,10)",hash);
 			sql.exec("DROP TABLE old_shards");
 		});
 		await evictDurableObject(stubFor(source));

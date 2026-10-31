@@ -1,3 +1,5 @@
+import { Input } from "./components/ui/input";
+import { Button } from "./components/ui/button";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "./context";
@@ -41,20 +43,19 @@ export function Settings() {
     <>
       <header className="page-heading">
         <div>
-          <p className="eyebrow">PERSONAL DETAILS</p>
           <h1>Account</h1>
-          <p className="muted">A few details to make this space yours.</p>
+          <p className="muted">Manage your profile and browser session.</p>
         </div>
       </header>
-      <p><Link to="/settings/access-keys">Manage access keys →</Link></p>
+      <p><Link to="/settings/access-keys">Manage access keys</Link></p>
       <section className="panel settings">
         <ErrorNotice error={error} />
-        {Boolean(error) && <button onClick={reload}>Try again</button>}
+        {Boolean(error) && <Button onClick={reload}>Try again</Button>}
         {loading && <Loading />}
         {data && (
           <form className="stack" onSubmit={save}>
             <label htmlFor="account-email">Email address</label>
-            <input
+            <Input
               id="account-email"
               type="email"
               autoComplete="email"
@@ -62,7 +63,7 @@ export function Settings() {
               readOnly
             />
             <label htmlFor="display-name">Display name</label>
-            <input
+            <Input
               id="display-name"
               autoComplete="name"
               value={name}
@@ -71,9 +72,9 @@ export function Settings() {
                 setSaved(false);
               }}
             />
-            <button className="primary" disabled={busy}>
+            <Button variant="default" disabled={busy}>
               {busy ? "Please wait…" : "Save changes"}
-            </button>
+            </Button>
             {saved && <p role="status">Your display name has been saved.</p>}
           </form>
         )}
@@ -83,9 +84,9 @@ export function Settings() {
           <p className="muted small">
             Sign out of this browser, including its other tabs.
           </p>
-          <button disabled={busy} onClick={() => void logout()}>
+          <Button disabled={busy} onClick={() => void logout()}>
             Sign out
-          </button>
+          </Button>
         </div>
       </section>
     </>

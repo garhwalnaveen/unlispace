@@ -154,6 +154,9 @@ impl SmbBackend for VfsBackend {
     async fn remove_xattr(&self, path: &str, name: &str) -> Result<(), FsError> {
         self.vfs.remove_xattr(path, name).await.map_err(error)
     }
+    async fn volume(&self) -> Option<(u64, u64)> {
+        self.vfs.volume().await
+    }
     fn subscribe(&self) -> broadcast::Receiver<ChangeEvent> {
         self.events.subscribe()
     }

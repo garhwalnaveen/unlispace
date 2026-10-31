@@ -179,7 +179,7 @@ export async function m3Checks(h) {
     const unsigned = await signed('POST', '/_uls/keys', { body, hash: 'UNSIGNED-PAYLOAD' });
     assert.equal(unsigned.status, 400);
   });
-  await check('m3 native daemon-less CLI fork + get', async () => {
+  if (process.env.E2E_API_ONLY !== '1') await check('m3 native daemon-less CLI fork + get', async () => {
     assert(session && forkId, 'requires session and fork');
     const prefix = cacheSandbox.length ? cacheSandbox : [binary];
     const result = await command(prefix[0], [...prefix.slice(1), '--json', 'fork', forkId, 'e2e-cli-fork'], { ULS_API: api, ULS_ACCESS_TOKEN: session.accessToken, ULS_ENDPOINT: endpoint, ULS_SOCKET: join(work, 'must-not-start-daemon.sock') });
@@ -189,20 +189,23 @@ export async function m3Checks(h) {
     const get = await command(prefix[0], [...prefix.slice(1), 'get', id, 'm3.bin', output], { ULS_ENDPOINT: endpoint, ULS_DEV_TOKEN: token });
     assert.equal(get.code, 0); assert((await readFile(output)).equals(Buffer.from('fork only'))); await unlink(output);
   });
-  await check('m3 quota rejects writes + tokens; reads and deletes survive', async () => {
+  await check('m3 stale drive meter cannot override org quota; deletion retains history', async () => {
     assert(session && parent && forkId, 'requires keys and fork');
     assert.match(drive, /^d-[a-z0-9]{26}$/);
     const sql = `INSERT OR REPLACE INTO drive_usage(drive_id,logical_bytes,own_bytes,measured_at) VALUES('${drive}',1,9000000000000000,${Date.now()})`;
     const changed = await command(process.execPath, [wrangler, 'd1', 'execute', 'DB', '--local', '--persist-to', join(work, 'api-state'), '--config', join(work, 'api/wrangler.json'), '--command', sql]);
     assert.equal(changed.code, 0, 'isolated local D1 quota setup failed');
-    const billing = await json(api, `/orgs/${org}/billing`, { token: session.accessToken }); assert.equal(billing.overQuota, true);
-    const denied = await signed('PUT', `/${fork}/m3.bin`, { body: Buffer.from('denied') });
-    assert.equal(denied.status, 403); assert.match(denied.text, /<Code>QuotaExceeded<\/Code>/);
+    const billing = await json(api, `/orgs/${org}/billing`, { token: session.accessToken });
+    assert.equal(billing.overQuota, false); assert(billing.usedBytes > 0 && billing.usedBytes < billing.quotaBytes);
+    await ok('PUT', `/${fork}/m3.bin`, { body: Buffer.from('fork only') });
     const token = await request(api, `/drives/${forkId}/token`, { token: session.accessToken, body: { access: 'write' } });
-    assert.equal(token.status, 403); assert.equal(token.data.error, 'over_quota');
+    assert.equal(token.status, 200);
     assert.equal((await request(api, `/drives/${forkId}/token`, { token: session.accessToken, body: { access: 'read' } })).status, 200);
     await matches(fork, Buffer.from('fork only'));
+    const beforeDelete = await json(api, `/orgs/${org}/billing`, { token: session.accessToken });
     await ok('DELETE', `/${fork}/m3.bin`);
+    const afterDelete = await json(api, `/orgs/${org}/billing`, { token: session.accessToken });
+    assert.equal(afterDelete.usedBytes, beforeDelete.usedBytes, 'retained history must stay charged');
     assert.equal((await signed('GET', `/${fork}/m3.bin`)).status, 404);
   });
   await check('m3 parent revocation kills warmed child within 35 s', async () => {

@@ -11,6 +11,7 @@ import { normalizeEmail, otpStart, otpVerify } from "./otp";
 import * as R from "./resources";
 import * as K from "./access-keys";
 import * as B from "./billing";
+import * as T from "./teams";
 import { authenticate, createSession, logout, refreshSession } from "./session";
 import { sha256B64url, timingSafeEqual } from "./util";
 import { findOrCreateUser } from "./users";
@@ -24,6 +25,7 @@ async function route(ctx: Ctx): Promise<Response> {
 	const seg = p.split("/").filter(Boolean);
 
 	if (p === "/healthz" && m === "GET") return json({ ok: true });
+	if (p === "/client-config" && m === "GET") return json({ webOrigin: ctx.env.ULS_WEB_ORIGIN });
 	if (p === "/billing/catalog") {
 		if (m === "GET") return B.getCatalog(ctx);
 		throw new HttpError(405, "method_not_allowed");
@@ -58,9 +60,12 @@ async function route(ctx: Ctx): Promise<Response> {
 				if (!configured(ctx)) throw new HttpError(501, "not_configured");
 				return googleCallback(ctx);
 			case "POST /auth/handoff/exchange": {
-				const h = str((await readJson(req)).handoff, 256);
-				const row = h ? await takeOneTime<{ created: boolean }>(ctx, "handoff", h) : null;
-				if (!row || !row.userId) throw new HttpError(400, "invalid_handoff");
+				const body = await readJson(req);
+				const h = str(body.handoff, 256);
+				const verifier = str(body.webCodeVerifier, 128);
+				if (!verifier || !/^[A-Za-z0-9_-]{43,128}$/.test(verifier)) throw new HttpError(400, "invalid_handoff");
+				const row = h ? await takeOneTime<{ created: boolean; webChallenge: string }>(ctx, "handoff", h) : null;
+				if (!row?.userId || !row.payload.webChallenge || !timingSafeEqual(await sha256B64url(verifier), row.payload.webChallenge)) throw new HttpError(400, "invalid_handoff");
 				const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.userId).first<{ id: string; email: string }>();
 				if (!user) throw new HttpError(400, "invalid_handoff");
 				return json(await createSession(ctx, user, !!row.payload?.created));
@@ -107,10 +112,19 @@ async function route(ctx: Ctx): Promise<Response> {
 	}
 
 	// ---- authenticated resources ----
-	const known = p === "/me" || p === "/orgs" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork))?)$/.test(p);
+	const teamRoute = /^\/orgs\/[^/]+\/(members(\/[^/]+)?|invites(\/[^/]+)?)$/.test(p);
+	const acceptRoute = /^\/invites\/[^/]+\/accept$/.test(p);
+	const known = teamRoute || acceptRoute || p === "/me" || p === "/me/access" || p === "/orgs" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|deleted-drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork|restore))?)$/.test(p);
 	if (!known) throw new HttpError(404, "not_found");
 	const a = await authenticate(ctx);
-	if (seg[0] === "keys") {
+	if (acceptRoute) {
+		if (m === "POST") return T.acceptInvite(ctx, a, seg[1]!);
+	} else if (teamRoute) {
+		if (seg[2] === "members" && seg.length === 3 && m === "GET") return T.members(ctx, a, seg[1]!);
+		if (seg[2] === "members" && seg.length === 4 && (m === "PATCH" || m === "DELETE")) return T.changeMember(ctx, a, seg[1]!, seg[3]!);
+		if (seg[2] === "invites" && seg.length === 3 && m === "POST") return T.invite(ctx, a, seg[1]!);
+		if (seg[2] === "invites" && seg.length === 4 && m === "DELETE") return T.revokeInvite(ctx, a, seg[1]!, seg[3]!);
+	} else if (seg[0] === "keys") {
 		if (seg.length === 1 && m === "GET") return K.listKeys(ctx, a);
 		if (seg.length === 1 && m === "POST") return K.createKey(ctx, a);
 		if (seg.length === 2 && m === "DELETE") return K.revokeKey(ctx, a, seg[1]!);
@@ -119,13 +133,18 @@ async function route(ctx: Ctx): Promise<Response> {
 		if (seg[3] === "checkout" && m === "POST") return B.checkout(ctx, a, seg[1]!);
 		if (seg[3] === "invoices" && m === "GET") return B.invoices(ctx, a, seg[1]!);
 		if (seg[3] === "portal" && m === "POST") return B.portal(ctx, a, seg[1]!);
+	} else if (p === "/me/access") {
+		if (m === "GET") return R.getMeAccess(ctx, a);
 	} else if (p === "/me") {
 		if (m === "GET") return R.getMe(ctx, a);
 		if (m === "PATCH") return R.patchMe(ctx, a);
 	} else if (p === "/orgs") {
 		if (m === "GET") return R.listOrgs(ctx, a);
 	} else if (seg[0] === "orgs") {
-		if (m === "POST") return R.createDrive(ctx, a, seg[1]!);
+		if (seg[2] === "deleted-drives" && m === "GET") return R.deletedDrives(ctx, a, seg[1]!);
+		if (seg[2] === "drives" && m === "POST") return R.createDrive(ctx, a, seg[1]!);
+	} else if (seg[2] === "restore") {
+		if (m === "POST") return R.restoreDrive(ctx, a, seg[1]!);
 	} else if (seg[2] === "fork") {
 		if (m === "POST") return R.forkDrive(ctx, a, seg[1]!);
 	} else if (seg[2] === "token") {
@@ -142,7 +161,7 @@ export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promis
 	const cors = corsHeaders(env, req);
 	if (req.method === "OPTIONS") return preflight(env, req);
 	const f = deps.fetch ?? fetch.bind(globalThis);
-	const ctx: Ctx = { env, req, url: new URL(req.url), now: deps.now ? deps.now() : Date.now(), fetch: f, email: deps.email ?? selectSender(env, f), dodo: deps.dodo };
+	const ctx: Ctx = { env, req, url: new URL(req.url), now: deps.now ? deps.now() : Date.now(), clock: deps.now ?? Date.now, fetch: f, email: deps.email ?? selectSender(env, f), dodo: deps.dodo };
 	let res: Response;
 	try {
 		res = await route(ctx);

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
+import { Monitor, Sun, Moon, HardDrive, UserRound, KeyRound, ChevronRight, Folder, File } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { errorMessage } from "./api";
 
 export function ErrorNotice({ error }: { error: unknown }) {
@@ -66,54 +68,23 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement;
-    const dialog = ref.current;
-    dialog?.showModal();
-    dialog?.querySelector<HTMLElement>("input, select, textarea")?.focus();
-    return () => {
-      dialog?.close();
-      if (previous instanceof HTMLElement) previous.focus();
-    };
-  }, []);
+  const [opener] = useState(() => document.activeElement);
   return (
-    <dialog
-      ref={ref}
-      onCancel={(event) => {
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent aria-describedby={undefined} onCloseAutoFocus={(event) => {
         event.preventDefault();
-        onClose();
-      }}
-      aria-labelledby="dialog-title"
-    >
-      <div className="dialog-heading">
-        <h2 id="dialog-title">{title}</h2>
-        <button
-          className="icon-button"
-          onClick={onClose}
-          aria-label="Close dialog"
-        >
-          ×
-        </button>
-      </div>
-      {children}
-    </dialog>
+        if (opener instanceof HTMLElement) opener.focus();
+      }}>
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
   );
 }
-type IconName = "monitor" | "sun" | "moon" | "drive" | "user" | "key" | "chevron" | "folder" | "file";
-const iconPaths: Record<IconName, ReactNode> = {
-  monitor: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /></>,
-  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>,
-  moon: <path d="M20.5 13A8.5 8.5 0 0 1 11 3.5 8.5 8.5 0 1 0 20.5 13Z" />,
-  drive: <><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M3 13h18m-5 3h2m-11 0h.01" /></>,
-  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2" /></>,
-  key: <><circle cx="8" cy="9" r="5" /><path d="m12 12 9 9m-3-3 3-3m-6 0 3-3" /></>,
-  chevron: <path d="m9 5 7 7-7 7" />,
-  folder: <path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />,
-  file: <><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Zm0 0v6h6M8 13h8m-8 4h5" /></>,
-};
-export function Icon({ name }: { name: IconName }) {
-  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{iconPaths[name]}</svg>;
+const icons = { monitor: Monitor, sun: Sun, moon: Moon, drive: HardDrive, user: UserRound, key: KeyRound, chevron: ChevronRight, folder: Folder, file: File };
+export function Icon({ name }: { name: keyof typeof icons }) {
+  const Component = icons[name];
+  return <Component size={18} strokeWidth={1.75} aria-hidden="true" />;
 }
 export function FileIcon({ folder = false }: { folder?: boolean }) {
   return <span className={`file-icon ${folder ? "folder" : ""}`}><Icon name={folder ? "folder" : "file"} /></span>;

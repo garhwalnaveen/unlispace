@@ -1,35 +1,40 @@
+import { Button } from "./components/ui/button";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Drive } from "./api";
 import { useAuth } from "./context";
 import { driveLink, finderLink } from "./links";
-import { ErrorNotice, FileIcon, Loading, useLoad } from "./ui";
+import { ErrorNotice, Icon, Loading, useLoad } from "./ui";
 import { DriveDialog, DriveTools, ForkNotice, type DriveAction } from "./DriveTools";
 import { OrgUsage } from "./Usage";
 
 export function Home() {
   const { auth } = useAuth();
-  const { data, loading, error, reload } = useLoad(auth.api.orgs);
+  const orgsLoad = useLoad(auth.api.orgs);
+  const accessLoad = useLoad(auth.api.access);
+  const { data, loading, error } = orgsLoad;
+  // Readiness comes from /me/access; if it is unavailable the drive list still works from /orgs.
+  const workspaces = Array.isArray(accessLoad.data?.workspaces) ? accessLoad.data.workspaces : [];
+  const reload = () => { orgsLoad.reload(); accessLoad.reload(); };
   const [fork, setFork] = useState<Drive | null>(null);
   const [action, setAction] = useState<DriveAction | null>(null);
   return (
     <>
       <header className="page-heading">
         <div>
-          <p className="eyebrow">WORKSPACE / OVERVIEW</p>
           <h1>Your drives</h1>
           <p className="muted">
-            Everything you’re working on, with room to grow.
+            Browse your files here or open a drive in Finder.
           </p>
         </div>
       </header>
       {fork && <ForkNotice drive={fork} />}
       <ErrorNotice error={error} />
-      {Boolean(error) && <button onClick={reload}>Try again</button>}
-      {loading && <Loading>Finding your spaces…</Loading>}
+      {Boolean(error) && <Button onClick={reload}>Try again</Button>}
+      {loading && <Loading>Loading drives…</Loading>}
       {data?.orgs.length === 0 && (
         <div className="empty">
-          <h2>No spaces yet</h2>
+          <h2>No workspaces yet</h2>
           <p>
             Your account has no organizations. Contact your workspace owner.
           </p>
@@ -37,12 +42,15 @@ export function Home() {
       )}
       {data?.orgs.map((org) => {
         const canManage = org.role === "owner" || org.role === "admin";
+        const ws = workspaces.find((item) => item.id === org.id);
+        const trialEndsAt = ws ? ws.trialEndsAt : org.trialEndsAt;
+        const trialPending = ws ? ws.trialPending : org.trialPending;
         const days =
-          org.trialEndsAt === null
+          trialEndsAt === null || ws?.state === "paid"
             ? null
             : Math.max(
                 0,
-                Math.ceil((org.trialEndsAt - Date.now()) / 86_400_000),
+                Math.ceil((trialEndsAt - Date.now()) / 86_400_000),
               );
         const drives = org.drives.filter((drive) => drive.status !== "deleted");
         return (
@@ -61,47 +69,52 @@ export function Home() {
                     ` · ${days > 0 ? `${days} trial day${days === 1 ? "" : "s"} remaining` : "Trial ended"}`}
                 </p>
               </div>
-              <div className="actions"><Link to={`/orgs/${encodeURIComponent(org.id)}/billing`}>Billing</Link>
+              <div className="actions"><Link to={`/orgs/${encodeURIComponent(org.id)}/team`}>Team</Link><Link to={`/orgs/${encodeURIComponent(org.id)}/billing`}>Billing</Link>
               {canManage && (
-                <button className="primary" onClick={() => setAction({ kind: "create", org })}>
-                  + New drive
-                </button>
+                <Button variant="default" onClick={() => setAction({ kind: "create", org })}>
+                  New drive
+                </Button>
               )}</div>
             </div>
+            {trialPending && <p className="notice" role="status">Your account is verified. Your drive is not ready yet, so your seven-day trial has not started.</p>}
+            {ws && !trialPending && !ws.storageReady && <p className="notice" role="status">Your account is verified. Your storage is still being prepared.</p>}
+            {ws?.state === "expired" && <p className="notice" role="status">Your trial has ended. Your files remain readable; choose a plan in Billing to keep uploading.</p>}
+            {(drives.some((drive) => drive.status === "provisioning_failed") || (ws && !ws.storageReady)) && <Button disabled={loading || accessLoad.loading} onClick={reload}>Retry drive setup</Button>}
             <OrgUsage orgId={org.id} />
-            <div className="drives-grid">
+            <div className="drive-list">
               {drives.map((drive) => (
                 <article className="drive-card" key={drive.id}>
-                  <div className="drive-card-top">
-                    <FileIcon folder />
-                    <span className="muted small">
-                      {drive.placement || "Automatic region"}
-                    </span>
+                  <div className="drive-heading">
+                    <span className="drive-icon"><Icon name="drive" /></span>
+                    <div>
+                      <h3>
+                        {drive.status === "ready" ? (
+                          <Link to={driveLink(drive.id)}>{drive.name}</Link>
+                        ) : (
+                          drive.name
+                        )}
+                      </h3>
+                      <p className="muted small">
+                        {drive.status === "ready"
+                          ? "Ready"
+                          : "Drive setup could not finish. Retry to prepare your storage."}
+                      </p>
+                    </div>
                   </div>
-                  <h3>
-                    {drive.status === "ready" ? (
-                      <Link to={driveLink(drive.id)}>{drive.name}</Link>
-                    ) : (
-                      drive.name
-                    )}
-                  </h3>
-                  <p className="muted small">
-                    {drive.status === "ready"
-                      ? "Ready when you are"
-                      : "Provisioning needs attention. Reload to retry."}
-                  </p>
-                  <DriveTools drive={drive} canManage={canManage} onDone={(created) => { setFork(created || null); reload(); }} />
                   <div className="drive-card-actions">
                     {drive.status === "ready" && (
-                      <a href={finderLink(drive.id, "")}>Show in Finder ↗</a>
+                      <>
+                        <Button asChild><Link to={driveLink(drive.id)}>Browse files</Link></Button>
+                        <Button asChild><a href={finderLink(drive.id, "")}>Show in Finder</a></Button>
+                      </>
                     )}
-
                   </div>
+                  <DriveTools drive={drive} canManage={canManage} onDone={(created) => { setFork(created || null); reload(); }} />
                 </article>
               ))}
               {!drives.length && (
                 <div className="empty">
-                  <h3>A fresh space</h3>
+                  <h3>No drives yet</h3>
                   <p>Create a drive to get started.</p>
                 </div>
               )}
@@ -109,16 +122,6 @@ export function Home() {
           </section>
         );
       })}
-      <aside className="desktop-note">
-        <span aria-hidden="true">↗</span>
-        <div>
-          <strong>Make room on your Mac.</strong>
-          <p className="muted small">
-            Use Unlispace in Finder to work with files of any size. Every save
-            keeps a version.
-          </p>
-        </div>
-      </aside>
       {action && (
         <DriveDialog
           action={action}

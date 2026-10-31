@@ -8,9 +8,9 @@ const input: CheckoutInput = { product_cart: [{ product_id: "p_test", quantity: 
 describe("Dodo HTTP adapter (fake fetch only)", () => {
 	it("uses documented checkout and portal paths, JSON and query shapes", async () => {
 		const w = await makeWorld({ DODO_PAYMENTS_API_KEY: "test-only", DODO_PAYMENTS_ENVIRONMENT: "test_mode" });
-		const fetcher = vi.fn<typeof fetch>(async (_url, _init) => Response.json({ checkout_url: "https://checkout.test/session" }));
+		const fetcher = vi.fn<typeof fetch>(async (_url, _init) => Response.json({ checkout_url: "https://checkout.test/session", session_id: "cks_test" }));
 		const client = selectDodo(w.env, fetcher);
-		expect(await client.checkout(input)).toEqual({ url: "https://checkout.test/session" });
+		expect(await client.checkout(input)).toEqual({ url: "https://checkout.test/session", sessionId: "cks_test" });
 		const [url, init] = fetcher.mock.calls[0]!;
 		expect(url).toBe("https://test.dodopayments.com/checkouts");
 		expect(init?.method).toBe("POST");
@@ -49,9 +49,9 @@ describe("Dodo HTTP adapter (fake fetch only)", () => {
 		expect(fetcher).not.toHaveBeenCalled();
 		w.env.DODO_PAYMENTS_API_KEY = "test-only";
 		w.env.DODO_PAYMENTS_ENVIRONMENT = "test_mode";
-		await expect(client.checkout(input)).rejects.toMatchObject({ status: 502, code: "billing_unavailable" });
+		await expect(client.checkout(input)).rejects.toMatchObject({ status: 502, code: "billing_rejected" });
 		for (const checkout_url of ["http://insecure.test", "javascript:alert(1)", null]) {
-			fetcher.mockResolvedValueOnce(Response.json({ checkout_url }));
+			fetcher.mockResolvedValueOnce(Response.json({ checkout_url, session_id: "cks_test" }));
 			await expect(client.checkout(input)).rejects.toMatchObject({ status: 502 });
 		}
 		fetcher.mockResolvedValueOnce(new Response("not JSON"));

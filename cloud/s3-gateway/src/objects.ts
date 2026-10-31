@@ -48,21 +48,25 @@ export async function mutationHeaders(manifest: Manifest): Promise<Record<string
 export async function annotate(c: ObjectContext, result: CommitResult, manifest: Omit<Manifest, "versionId">, operation: string, restoredFrom?: string): Promise<Manifest> {
   const versionId = result.results[0]!.versionId;
   const saved = { ...manifest, versionId };
-  await c.state.put<VersionAnnotation>(`version:${c.dp.drive}:${versionId}`, { operation, manifest: saved, ...(restoredFrom ? { restoredFrom } : {}) });
+  await c.state.put<VersionAnnotation>(`version:${c.dp.drive}:${versionId}`, { operation, ...(restoredFrom ? { restoredFrom } : {}) });
   return saved;
 }
 export async function commitManifest(c: ObjectContext, manifest: Omit<Manifest, "versionId">, conditions: { ifVersion?: string; ifAbsent?: boolean }, operation = "put"): Promise<Manifest> {
-  const result = await c.dp.commit([{ op: "put", path: c.key, size: manifest.size, contentType: manifest.contentType ?? "application/octet-stream", mtimeMs: manifest.mtimeMs ?? c.now(), shards: manifest.shards, ...conditions }]);
+  const result = await c.dp.commit([{ op: "put", path: c.key, size: manifest.size, contentType: manifest.contentType ?? "application/octet-stream", mtimeMs: manifest.mtimeMs ?? c.now(), shards: manifest.manifestRef ? [] : manifest.shards, ...(manifest.manifestRef ? {manifestRef:manifest.manifestRef} : {}), ...(manifest.xattrs ? {xattrs:manifest.xattrs} : {}), ...conditions }]);
   return annotate(c, result, manifest, operation);
 }
 export async function getObject(c: ObjectContext): Promise<Response> {
   if (c.url.searchParams.has("partNumber")) throw new S3Error(501, "NotImplemented");
   const version = c.url.searchParams.get("versionId"), asOf = c.request.headers.get("x-uls-as-of");
-  if (version && asOf) throw new S3Error(400, "InvalidArgument", "versionId and as-of are mutually exclusive");
+  if (version !== null && asOf !== null) throw new S3Error(400, "InvalidArgument", "versionId and as-of are mutually exclusive");
   let versionId = version ?? undefined;
-  if (asOf) {
+  if (asOf !== null) {
     const epoch = Date.parse(asOf);
-    if (!/^\d{4}-\d{2}-\d{2}T/.test(asOf) || !Number.isFinite(epoch)) throw new S3Error(400, "InvalidArgument");
+    const timestamp = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(asOf);
+    if (!timestamp || !Number.isFinite(epoch)) throw new S3Error(400, "InvalidArgument", "as-of must be an RFC 3339 timestamp");
+    const year = Number(timestamp[1]), month = Number(timestamp[2]), day = Number(timestamp[3]);
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    if (day > [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!) throw new S3Error(400, "InvalidArgument", "as-of contains an invalid calendar date");
     const versions = await c.dp.versions(c.key);
     const selected = versions.filter(v => v.ts <= epoch).at(-1);
     if (!selected || selected.op === "delete") throw new S3Error(404, "NoSuchVersion");
@@ -141,8 +145,27 @@ export async function copyObject(c: ObjectContext): Promise<Response> {
   const conditions = await preconditions(c.request, current);
   const directive = c.request.headers.get("x-amz-metadata-directive") ?? "COPY";
   if (directive !== "COPY" && directive !== "REPLACE") throw new S3Error(400, "InvalidArgument");
-  const shards = sourcePlane.drive === c.dp.drive ? base.shards : await chunkManifest(sourcePlane.bytes(base), (shard, bytes) => c.dp.putShard(shard, bytes));
-  const manifest = await commitManifest(c, { ...base, shards, path: c.key, contentType: directive === "REPLACE" ? c.request.headers.get("content-type") ?? "application/octet-stream" : base.contentType, mtimeMs: c.now() }, conditions, "copy");
+  const sameDrive = sourcePlane.drive === c.dp.drive;
+  const copied = sameDrive ? {shards:base.shards,...(base.manifestRef ? {manifestRef:base.manifestRef} : {})} : await c.dp.buildManifest((async function* () {
+    for await (const shard of sourcePlane.refs(base)) {
+      const parts: Uint8Array[] = [];
+      for await (const bytes of sourcePlane.bytes({...base,manifestRef:undefined,nextShardCursor:null,shards:[shard],size:shard.n})) parts.push(bytes);
+      const bytes = new Uint8Array(shard.n); let offset = 0;
+      for (const part of parts) {bytes.set(part,offset);offset+=part.length;}
+      await c.dp.putShard(shard,bytes);
+      yield shard;
+    }
+  })());
+  if (!sameDrive && base.xattrs) for (const refs of Object.values(base.xattrs)) {
+    for (const ref of refs) {
+      const bytes: Uint8Array[] = [];
+      for await (const part of sourcePlane.bytes({...base,manifestRef:undefined,nextShardCursor:null,shards:[ref],size:ref.n})) bytes.push(part);
+      const data = new Uint8Array(ref.n); let offset=0;
+      for (const part of bytes) {data.set(part,offset);offset+=part.length;}
+      await c.dp.putShard(ref,data);
+    }
+  }
+  const manifest = await commitManifest(c, { ...base,manifestRef:undefined,nextShardCursor:null,...copied, path: c.key, contentType: directive === "REPLACE" ? c.request.headers.get("content-type") ?? "application/octet-stream" : base.contentType, mtimeMs: c.now() }, conditions, "copy");
   return xml("CopyObjectResult", tag("ETag", await etag(manifest)) + tag("LastModified", new Date(manifest.mtimeMs!).toISOString()), 200, await mutationHeaders(manifest));
 }
 export async function deleteKey(c: ObjectContext, key: string, request: Request): Promise<void> {
@@ -176,7 +199,7 @@ export async function editObject(c: ObjectContext, extension: string): Promise<R
   const remove = extension === "splice" ? integer(c.request.headers.get("x-uls-remove"), 0) : undefined;
   const original = base ?? { path: c.key, versionId: "", size: 0, shards: [], contentType: c.request.headers.get("content-type") ?? "application/octet-stream", mtimeMs: c.now() };
   const updated = await editManifest(c.dp, original, edits, size, remove);
-  const manifest = await commitManifest(c, { ...original, ...updated, mtimeMs: c.now() }, cas, "write");
+  const manifest = await commitManifest(c, { ...original, manifestRef:undefined, nextShardCursor:null, ...updated, mtimeMs: c.now() }, cas, "write");
   return new Response(null, { headers: await mutationHeaders(manifest) });
 }
 export async function renameObject(c: ObjectContext): Promise<Response> {
@@ -198,7 +221,7 @@ export async function restoreObject(c: ObjectContext): Promise<Response> {
   const current = await optionalHead(c.dp, c.key);
   const conditions = await preconditions(c.request, current);
   const base = await c.dp.manifest(c.key, versionId);
-  const result = await c.dp.restore(c.key, versionId, conditions.ifVersion);
+  const result = await c.dp.restore(c.key, versionId, conditions.ifVersion, conditions.ifAbsent);
   const manifest = await annotate(c, result, { ...base, mtimeMs: c.now() }, "restore", versionId);
   return new Response(null, { headers: { ...await mutationHeaders(manifest), "x-uls-restored-from": versionId } });
 }

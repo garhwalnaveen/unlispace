@@ -40,7 +40,7 @@ public struct AuthStatus: Codable, Sendable, Equatable {
 
 extension DaemonConfig: CustomStringConvertible, CustomDebugStringConvertible {
     public var description: String {
-        "DaemonConfig(endpoint: \(endpoint ?? "nil"), token: \(token == nil ? "nil" : LogFormat.redacted), cacheCapBytes: \(cacheCapBytes.map(String.init) ?? "nil"))"
+        "DaemonConfig(endpoint: \(endpoint ?? "nil"), token: \(token == nil ? "nil" : LogFormat.redacted), cacheCapBytes: \(cacheCapBytes.map(String.init) ?? "nil"), uploadBandwidthBps: \(uploadBandwidthBps.map(String.init) ?? "nil"))"
     }
     public var debugDescription: String { description }
 }

@@ -15,12 +15,18 @@ public struct DaemonStatus: Codable, Sendable, Equatable {
     public var state: EngineState
     public var message: String?
     public var pendingOps: Int?
+    public var canRetrySignIn: Bool?
+    /// Upload bandwidth limit in bytes per second; 0 = unlimited. Absent on older engines.
+    public var uploadBandwidthBps: Int64?
 
-    public init(version: String, state: EngineState, message: String? = nil, pendingOps: Int? = nil) {
+    public init(version: String, state: EngineState, message: String? = nil, pendingOps: Int? = nil,
+                uploadBandwidthBps: Int64? = nil, canRetrySignIn: Bool? = nil) {
         self.version = version
         self.state = state
         self.message = message
         self.pendingOps = pendingOps
+        self.uploadBandwidthBps = uploadBandwidthBps
+        self.canRetrySignIn = canRetrySignIn
     }
 }
 
@@ -103,8 +109,11 @@ public struct DaemonConfig: Codable, Sendable, Equatable {
     public var endpoint: String?
     public var token: String?
     public var cacheCapBytes: Int64?
-    public init(endpoint: String? = nil, token: String? = nil, cacheCapBytes: Int64? = nil) {
+    /// 0 = unlimited.
+    public var uploadBandwidthBps: Int64?
+    public init(endpoint: String? = nil, token: String? = nil, cacheCapBytes: Int64? = nil, uploadBandwidthBps: Int64? = nil) {
         self.endpoint = endpoint; self.token = token; self.cacheCapBytes = cacheCapBytes
+        self.uploadBandwidthBps = uploadBandwidthBps
     }
 }
 

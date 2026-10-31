@@ -67,27 +67,34 @@ it("shows key errors and allows selecting all accessible drives", async () => {
   await user.click(screen.getByRole("button", { name: "Create access key" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Access keys are not configured");
 });
-const catalog = { plans: [{ id: "individual", name: "Individual", bytesPerSeat: 1e12, minSeats: 1, maxSeats: 1 }, { id: "teams", name: "Teams", bytesPerSeat: 1e12, minSeats: 2, maxSeats: 1000 }], storageAddon: { bytes: 500e9, maxQuantity: 1000 }, checkoutAvailable: true, trialDays: 7 };
+const catalog = { plans: [{ id: "individual", name: "Individual", bytesPerSeat: 500e9, minSeats: 1, maxSeats: 1 }, { id: "teams", name: "Teams", bytesPerSeat: 1e12, minSeats: 2, maxSeats: 1000 }], storageAddon: { bytes: 500e9, maxQuantity: 1000 }, checkoutAvailable: true, trialDays: 7, checkoutStartsImmediately: true, checkoutEndsTrial: true };
 it("shows trial, invoices and sends checkout selections without losing errors", async () => {
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/orgs")) return json({ orgs: [org] });
     if (url.endsWith("/catalog")) return json(catalog);
     if (url.includes("/invoices?")) return json({ invoices: [{ paymentId: "inv_1", createdAt: "2026-10-01T10:00:00Z", amount: 2000, currency: "USD", status: "paid" }], nextPage: null });
     if (init?.method === "POST") return json({ error: "billing_not_configured" }, 503);
-    return json({ orgId: org.id, plan: "individual", state: "trial_active", writable: true, status: "trialing", trialEndsAt: Date.now() + 86_400_000, seats: 1, storageAddons: 0, quotaBytes: 1e12, usedBytes: 1000 });
+    return json({ orgId: org.id, plan: "individual", state: "trial_active", writable: true, status: "trialing", trialEndsAt: Date.now() + 86_400_000, seats: 1, storageAddons: 0, quotaBytes: 500e9, usedBytes: 1000 });
   });
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup(); renderApp(`/orgs/${org.id}/billing`);
   expect(await screen.findByText(/1 trial day remaining/)).toBeInTheDocument();
   expect(await screen.findByText("inv_1")).toBeInTheDocument();
+  expect(screen.getByRole("table")).toHaveTextContent("inv_1");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await user.click(await screen.findByRole("button", { name: "Choose a plan" }));
+  expect(screen.getByLabelText("Billing period")).toHaveValue("monthly");
+  expect(screen.getByLabelText("Checkout summary")).toHaveTextContent("ends any remaining free trial");
+  expect(screen.getByLabelText("Checkout summary")).toHaveTextContent("amount due today");
   await user.selectOptions(await screen.findByLabelText("Plan"), "teams");
   await user.selectOptions(screen.getByLabelText("Billing period"), "annual");
   fireEvent.change(screen.getByLabelText("Seats"), { target: { value: "3" } });
   fireEvent.change(screen.getByLabelText(/Extra storage/), { target: { value: "2" } });
-  await user.click(screen.getByRole("button", { name: "Continue to checkout" }));
+  await user.click(screen.getByRole("button", { name: "Review annual checkout" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Billing is not configured");
   const checkout = fetcher.mock.calls.find(([url]) => url.endsWith("/checkout"));
   expect(JSON.parse(String(checkout?.[1]?.body))).toEqual({ plan: "teams", cadence: "annual", seats: 3, storageAddons: 2 });
+  await user.click(screen.getByRole("button", { name: "Close" }));
   await user.click(screen.getByRole("button", { name: "Manage subscription" }));
   await waitFor(() => expect(fetcher.mock.calls.some(([url, init]) => url.endsWith("/portal") && init?.method === "POST")).toBe(true));
 });

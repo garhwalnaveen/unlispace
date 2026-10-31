@@ -12,8 +12,8 @@ use crate::ntstatus;
 use crate::proto::crypto::{SigningAlgo, verify};
 use crate::proto::header::{Command, SMB2_FLAGS_ASYNC_COMMAND, SMB2_FLAGS_SIGNED, SMB2_HEADER_LEN};
 use crate::proto::messages::{
-    CloseRequest, CreateContext, CreateRequest, CreateResponse, FileId, LeaseBreakAck,
-    LeaseBreakNotification, LeaseContext, WriteRequest,
+    CloseRequest, CreateContext, CreateRequest, CreateResponse, FileId, FlushRequest, LeaseBreakAck,
+    LeaseBreakNotification, LeaseContext, ReadRequest, ReadResponse, WriteRequest,
 };
 use crate::server::ServerState;
 use crate::tests::memfs::MemFsBackend;
@@ -778,4 +778,246 @@ async fn an_overwrite_that_finds_no_file_and_then_one_still_waits_before_truncat
     assert_eq!(status(&reply), 0);
     assert_eq!(status(&waiter.next().await), 0);
     assert_eq!(size().await, 0);
+}
+
+fn read_body(file_id: FileId, length: u32) -> Vec<u8> {
+    let mut body = Vec::new();
+    ReadRequest {
+        structure_size: 49,
+        padding: 0,
+        flags: 0,
+        length,
+        offset: 0,
+        file_id,
+        minimum_count: 0,
+        channel: 0,
+        remaining_bytes: 0,
+        read_channel_info_offset: 0,
+        read_channel_info_length: 0,
+        buffer: Vec::new(),
+    }
+    .write_to(&mut body)
+    .expect("read");
+    body
+}
+
+/// A READ that waits on the backend must not hold up the connection's
+/// other requests: it goes asynchronous, an ECHO sent after it is answered
+/// at once, and the READ's final response follows with the data.
+#[tokio::test(start_paused = true)]
+async fn a_slow_read_does_not_hold_up_later_requests() {
+    let backend = MemFsBackend::new()
+        .with_file("f.txt", b"data")
+        .with_read_delay(Duration::from_secs(20));
+    let state = serve(backend).await;
+    let mut peer = holder_without_lease(&state).await;
+    let (_, reply) = peer
+        .request(
+            &state,
+            Command::Create,
+            &create_body(READ_WRITE, SHARE_READ_WRITE, false),
+        )
+        .await;
+    assert_eq!(status(&reply), 0);
+    let file_id = CreateResponse::parse(&reply[SMB2_HEADER_LEN..])
+        .expect("create response")
+        .file_id;
+
+    let (read_mid, read) = peer.message(Command::Read, &read_body(file_id, 4));
+    let interim = peer.dispatch(&state, &read).await.expect("interim");
+    assert_eq!(status(&interim), ntstatus::STATUS_PENDING);
+    let async_id = header(&interim).async_id().expect("an AsyncId");
+    assert_eq!(header(&interim).message_id, read_mid);
+
+    // The reader is free: later requests are answered while the READ waits.
+    let started = tokio::time::Instant::now();
+    let (_, echo) = peer.request(&state, Command::Echo, &[4, 0, 0, 0]).await;
+    assert_eq!(status(&echo), 0);
+    assert_eq!(header(&echo).command, Command::Echo);
+    assert!(started.elapsed() < Duration::from_secs(1));
+
+    let last = peer.next().await;
+    let hdr = header(&last);
+    assert_eq!(hdr.command, Command::Read);
+    assert_eq!(status(&last), 0);
+    assert_eq!(hdr.async_id(), Some(async_id));
+    assert_eq!(hdr.message_id, read_mid);
+    let response = ReadResponse::parse(&last[SMB2_HEADER_LEN..]).expect("read response");
+    assert_eq!(response.data, b"data");
+    assert_eq!(peer.conn.pending.len(), 0);
+}
+
+/// A FLUSH sent after a slow WRITE to the same open completes after it: the
+/// backend sees the write first, and the FLUSH reply follows the WRITE's.
+#[tokio::test]
+async fn a_flush_waits_for_an_earlier_slow_write_to_the_same_open() {
+    let backend = MemFsBackend::new()
+        .with_file("f.txt", b"data")
+        .with_write_delay(Duration::from_millis(600));
+    let state = serve(backend.clone()).await;
+    let mut peer = holder_without_lease(&state).await;
+    let (_, reply) = peer
+        .request(
+            &state,
+            Command::Create,
+            &create_body(READ_WRITE, SHARE_READ_WRITE, false),
+        )
+        .await;
+    assert_eq!(status(&reply), 0);
+    let file_id = CreateResponse::parse(&reply[SMB2_HEADER_LEN..])
+        .expect("create response")
+        .file_id;
+
+    let (write_mid, write) = peer.message(Command::Write, &write_body(file_id, b"new!".to_vec()));
+    let interim = peer.dispatch(&state, &write).await.expect("interim");
+    assert_eq!(status(&interim), ntstatus::STATUS_PENDING);
+    let mut flush = Vec::new();
+    FlushRequest::new(file_id.persistent, file_id.volatile).write_to(&mut flush).expect("flush body");
+    let (flush_mid, flush) = peer.message(Command::Flush, &flush);
+    let flushed = peer.dispatch(&state, &flush).await;
+
+    let mut finals = Vec::new();
+    if let Some(r) = flushed && status(&r) != ntstatus::STATUS_PENDING { finals.push(r); }
+    while finals.len() < 2 { finals.push(peer.next().await); }
+    // Replies may arrive in either order (SMB2 matches them by MessageId); what must hold is that
+    // the backend applied the WRITE before the FLUSH that followed it, and both succeeded.
+    let mut ids: Vec<_> = finals.iter().map(|r| header(r).message_id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec![write_mid, flush_mid]);
+    assert!(finals.iter().all(|r| status(r) == 0));
+    assert_eq!(backend.completions(), vec!["write", "flush"], "FLUSH reached the backend before the earlier WRITE");
+}
+
+/// A READ that answers quickly is answered in one step, with no interim
+/// response.
+#[tokio::test]
+async fn a_fast_read_is_answered_in_one_step() {
+    let state = server().await;
+    let mut peer = holder_without_lease(&state).await;
+    let (_, reply) = peer
+        .request(
+            &state,
+            Command::Create,
+            &create_body(READ_WRITE, SHARE_READ_WRITE, false),
+        )
+        .await;
+    let file_id = CreateResponse::parse(&reply[SMB2_HEADER_LEN..])
+        .expect("create response")
+        .file_id;
+    let (_, read) = peer
+        .request(&state, Command::Read, &read_body(file_id, 4))
+        .await;
+    assert_eq!(status(&read), 0);
+    assert_eq!(header(&read).async_id(), None);
+}
+
+/// CANCEL ends a slow READ with STATUS_CANCELLED.
+#[tokio::test(start_paused = true)]
+async fn cancel_ends_a_slow_read() {
+    let backend = MemFsBackend::new()
+        .with_file("f.txt", b"data")
+        .with_read_delay(Duration::from_secs(20));
+    let state = serve(backend).await;
+    let mut peer = holder_without_lease(&state).await;
+    let (_, reply) = peer
+        .request(
+            &state,
+            Command::Create,
+            &create_body(READ_WRITE, SHARE_READ_WRITE, false),
+        )
+        .await;
+    let file_id = CreateResponse::parse(&reply[SMB2_HEADER_LEN..])
+        .expect("create response")
+        .file_id;
+    let (read_mid, read) = peer.message(Command::Read, &read_body(file_id, 4));
+    let interim = peer.dispatch(&state, &read).await.expect("interim");
+    assert_eq!(status(&interim), ntstatus::STATUS_PENDING);
+    let cancel = peer.message_with(Command::Cancel, read_mid, 1, &[4, 0, 0, 0]);
+    assert!(peer.dispatch(&state, &cancel).await.is_none());
+    let last = peer.next().await;
+    assert_eq!(header(&last).command, Command::Read);
+    assert_eq!(status(&last), ntstatus::STATUS_CANCELLED);
+}
+
+async fn holder_without_lease(state: &Arc<ServerState>) -> Peer {
+    Peer::new(state, false).await
+}
+
+/// macOS rejects interim metadata replies inside related CREATE/query/CLOSE chains.
+#[tokio::test(start_paused = true)]
+async fn slow_compound_metadata_stays_in_one_response() {
+    use crate::proto::header::SMB2_FLAGS_RELATED_OPERATIONS;
+    use crate::proto::messages::{QueryDirectoryRequest, QueryInfoRequest};
+
+    for command in [Command::QueryDirectory, Command::QueryInfo] {
+        let backend = MemFsBackend::new()
+            .with_file("f.txt", b"data")
+            .with_metadata_delay(Duration::from_secs(2));
+        let state = serve(backend.clone()).await;
+        let mut peer = Peer::new(&state, false).await;
+        let mut create = CreateRequest::parse(&create_body(0x81, 7, false)).unwrap();
+        if command == Command::QueryDirectory {
+            create.name = Vec::new();
+            create.name_length = 0;
+            create.create_options = 1;
+        }
+        let mut body = Vec::new();
+        create.write_to(&mut body).unwrap();
+        let (_, create) = peer.message(Command::Create, &body);
+        body.clear();
+        if command == Command::QueryDirectory {
+            QueryDirectoryRequest {
+                structure_size: 33,
+                file_information_class: 0x0c,
+                flags: QueryDirectoryRequest::FLAG_RESTART_SCANS,
+                file_index: 0,
+                file_id: FileId::any(),
+                file_name_offset: 96,
+                file_name_length: 2,
+                output_buffer_length: 4096,
+                file_name: crate::utils::utf16le("*"),
+            }
+            .write_to(&mut body)
+            .unwrap();
+        } else {
+            QueryInfoRequest {
+                structure_size: 41,
+                info_type: 1,
+                file_information_class: crate::info_class::FILE_BASIC_INFORMATION,
+                output_buffer_length: 4096,
+                input_buffer_offset: 0,
+                reserved: 0,
+                input_buffer_length: 0,
+                additional_information: 0,
+                flags: 0,
+                file_id: FileId::any(),
+                input_buffer: Vec::new(),
+            }
+            .write_to(&mut body)
+            .unwrap();
+        }
+        let (_, mut query) = peer.message(command, &body);
+        query[0x10] |= SMB2_FLAGS_RELATED_OPERATIONS as u8;
+        let (_, mut close) = peer.message(Command::Close, &close_body(FileId::any()));
+        close[0x10] |= SMB2_FLAGS_RELATED_OPERATIONS as u8;
+        let frame = peer
+            .dispatch(&state, &compound(&[create, query, close]))
+            .await
+            .unwrap();
+        let mut rest = &frame[..];
+        for expected in [Command::Create, command, Command::Close] {
+            let hdr = header(rest);
+            assert_eq!(hdr.command, expected);
+            assert_eq!(status(rest), 0, "{command:?} must not split its compound");
+            assert_eq!(hdr.async_id(), None);
+            if expected == Command::Close {
+                assert_eq!(hdr.next_command, 0);
+            } else {
+                assert_ne!(hdr.next_command, 0);
+                rest = &rest[hdr.next_command as usize..];
+            }
+        }
+        assert_eq!(backend.open_handles(), 0);
+        assert_eq!(peer.conn.pending.len(), 0);
+    }
 }

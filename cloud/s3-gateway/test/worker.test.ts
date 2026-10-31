@@ -17,10 +17,12 @@ describe("worker entry point", () => {
 	});
 
 	it("rejects an unknown access key even with a well-formed header (no default credentials)", async () => {
+		const amzDate = new Date().toISOString().replace(/[-:]|\.\d{3}/g, "");
 		const res = await SELF.fetch("https://s3.test/", {
 			headers: {
-				authorization: `AWS4-HMAC-SHA256 Credential=ULS1AAAAAAAAAAAAAAAAA/20261025/auto/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=${"0".repeat(64)}`,
-				"x-amz-date": new Date().toISOString().replace(/[-:]|\.\d{3}/g, ""),
+				// The credential scope date must match x-amz-date, or the gateway rejects it as malformed (400).
+				authorization: `AWS4-HMAC-SHA256 Credential=ULS1AAAAAAAAAAAAAAAAA/${amzDate.slice(0, 8)}/auto/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=${"0".repeat(64)}`,
+				"x-amz-date": amzDate,
 			},
 		});
 		expect(res.status).toBe(403);

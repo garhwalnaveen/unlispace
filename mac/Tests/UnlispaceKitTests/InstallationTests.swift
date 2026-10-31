@@ -4,6 +4,26 @@ import Testing
 @testable import UnlispaceKit
 
 @Suite struct InstallationTests {
+    @Test func supportUnregisterWaitsForCompletion() throws {
+        try DaemonLifecycle.unregisterAndWait(timeout: 1) { completion in
+            DispatchQueue.global().async { completion(nil) }
+        }
+    }
+
+    @Test func supportUnregisterPropagatesCompletionFailure() {
+        #expect(throws: NSError(domain: "ServiceManagementTest", code: 42)) {
+            try DaemonLifecycle.unregisterAndWait(timeout: 1) { completion in
+                DispatchQueue.global().async { completion(NSError(domain: "ServiceManagementTest", code: 42)) }
+            }
+        }
+    }
+
+    @Test func supportUnregisterTimesOutWithoutClaimingSuccess() {
+        #expect(throws: (any Error).self) {
+            try DaemonLifecycle.unregisterAndWait(timeout: 0.01) { _ in }
+        }
+    }
+
     @Test func freshBundleCanEnableEngineAndMissingFilesAreDistinct() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("Unlispace-install-\(UUID().uuidString).app")
         defer { try? FileManager.default.removeItem(at: root) }

@@ -96,6 +96,10 @@ pub trait SmbBackend: Send + Sync + 'static {
     ) -> Result<(), FsError> {
         Err(FsError::NotSupported)
     }
+    /// Volume `(total, available)` bytes when known; `None` keeps the server's default volume.
+    async fn volume(&self) -> Option<(u64, u64)> {
+        None
+    }
     fn subscribe(&self) -> broadcast::Receiver<ChangeEvent>;
 }
 

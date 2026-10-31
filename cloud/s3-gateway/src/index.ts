@@ -5,11 +5,15 @@ import { errorResponse, S3Error, tag, xml } from "./errors";
 import { listObjects, listVersions } from "./listing";
 import { abortUpload, completeUpload, createUpload, listParts, listUploads, uploadPart } from "./multipart";
 import { copyObject, deleteKey, deleteObject, editObject, getObject, putObject, renameObject, restoreObject, type ObjectContext } from "./objects";
-import { BoundState, type VersionAnnotation, type StateStore } from "./state";
+import { BoundState, WorkspaceState, type VersionAnnotation, type StateStore } from "./state";
 import { control, keyResolver, type ControlPlane, type SessionAPI } from "./control-plane";
 import { etag } from "./data-plane";
 import { digest } from "./crypto";
 import { XMLParser } from "fast-xml-parser";
+import { handleIngressBridge } from "./ingress-bridge";
+import { directPlan, directCommit } from "./direct";
+
+declare global { interface Env { ULS_INGRESS_SECRET?: string; ULS_DATA_ENDPOINT?: string } }
 
 export { S3State } from "./state";
 
@@ -21,6 +25,8 @@ export interface Deps {
   tokens: InternalTokenMinter;
   dataPlane: FetchBinding;
   state: StateStore;
+  workspaceState?: (org: string, keyId: string) => StateStore;
+  publicDataEndpoint?: string;
   host: string;
   now: () => number;
 }
@@ -39,7 +45,13 @@ export function depsFromEnv(env: Env): Deps {
     tokens: new Ed25519TokenMinter(JSON.parse(env.ULS_JWT_PRIVATE_JWK ?? "") as JsonWebKey & { kid?: string }, env.ULS_ISSUER),
     dataPlane: env.DATA_PLANE,
     state: new BoundState(env.S3_STATE.get(env.S3_STATE.idFromName("global"))),
+    workspaceState: (org,keyId) => new WorkspaceState(
+      new BoundState(env.S3_STATE.get(env.S3_STATE.idFromName(`workspace:${org}`))),
+      new BoundState(env.S3_STATE.get(env.S3_STATE.idFromName("global"))),
+      async () => new Set((await control(() => cp.listDrives(keyId))).map(d=>d.driveId)),
+    ),
     host: env.ULS_S3_HOST,
+    publicDataEndpoint: env.ULS_DATA_ENDPOINT,
     now: Date.now,
   };
 }
@@ -55,13 +67,22 @@ function address(url: URL, host: string): { bucket: string | null; key: string }
 }
 
 export async function handle(request: Request, deps: Deps): Promise<Response> {
-  const url = new URL(request.url);
+  let url = new URL(request.url);
+  const storageMount = url.searchParams.has("x-s3sdk-mount");
   const requestId = crypto.randomUUID();
   const head = request.method === "HEAD";
   try {
     if (url.pathname === "/healthz") return protocol(Response.json({ ok: true }));
-    if (/^\/_uls\/keys(?:\/[^/]+)?$/.test(url.pathname)) return protocol(await keyRoute(request, deps));
+    if (/^\/_(?:uls|s3sdk)\/keys(?:\/[^/]+)?$/.test(url.pathname)) {
+      const response = await keyRoute(request, deps);
+      response.headers.set("cache-control", "no-store");
+      return protocol(response);
+    }
     const auth = await authenticate(request, deps.resolver, deps.now());
+    // Verify the caller's original wire bytes before translating extension names.
+    request = extensionAliases(request);
+    url = new URL(request.url);
+    const state = deps.workspaceState?.(auth.key.orgId,auth.key.keyId) ?? deps.state;
     const { bucket, key } = address(url, deps.host);
     const q = url.searchParams, method = request.method;
     const response = await route();
@@ -72,7 +93,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
 
     async function route(): Promise<Response> {
       const ctxFor = (b: string): ObjectContext => ({
-        request, url, auth, key, now: deps.now, state: deps.state,
+        request, url, auth, key, now: deps.now, state,
         resolveSource: async bucket => {
           const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
           authorize(auth.key, info.driveId, "read");
@@ -89,15 +110,22 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
       authorize(auth.key, info.driveId, "read");
       const c = ctxFor(info.driveId);
       if (new TextEncoder().encode(key).length > 1024 || key.startsWith("/") || key.replace(/\/$/, "").split("/").some(p => p === "." || p === ".." || p === "")) throw new S3Error(400, "InvalidArgument");
+      if (["acl", "tagging", "torrent", "legal-hold", "retention", "attributes", "select", "restore"].some(name => q.has(name))) throw new S3Error(501, "NotImplemented", "This object operation is not supported");
       const write = (deleting = false): void => {
         authorize(auth.key, info.driveId, "write");
         if (info.access === "read") throw new S3Error(403, "AccessDenied");
         if (!deleting && !info.writable) throw new S3Error(403, "QuotaExceeded");
       };
-      if ([...q.keys()].some(k => k.startsWith("x-uls-") && k !== "x-uls-versions" && !EXTENSIONS.some(e => e === k))) throw new S3Error(501, "NotImplemented");
+      if ([...q.keys()].some(k => k.startsWith("x-uls-") && !["x-uls-versions", "x-uls-direct-plan", "x-uls-direct-commit"].includes(k) && !EXTENSIONS.some(e => e === k))) throw new S3Error(501, "NotImplemented");
       const extensions = EXTENSIONS.filter(e => q.has(e));
-      if (extensions.length + Number(q.has("x-uls-versions")) > 1) throw new S3Error(400, "InvalidArgument");
+      if (extensions.length + Number(q.has("x-uls-versions")) + Number(q.has("x-uls-direct-plan")) + Number(q.has("x-uls-direct-commit")) > 1) throw new S3Error(400, "InvalidArgument");
       const extension = extensions[0];
+      if (q.has("x-uls-direct-plan") || q.has("x-uls-direct-commit")) {
+        const plan = q.has("x-uls-direct-plan");
+        if (method !== (plan ? "POST" : "PUT")) throw new S3Error(405, "MethodNotAllowed");
+        write();
+        return plan ? directPlan(c,deps.publicDataEndpoint) : directCommit(c);
+      }
       if (q.has("x-uls-versions")) {
         if (method !== "GET") throw new S3Error(405, "MethodNotAllowed");
         return objectVersions(c);
@@ -153,11 +181,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
         ? await control(() => deps.controlPlane.forkDrive(auth.key.keyId, {source, alias: bucket}))
         : await control(() => deps.controlPlane.createDrive(auth.key.keyId, {alias: bucket, ...(displayName !== undefined ? {displayName} : {}), ...(placementHeader ? {placement: placements[placementHeader]} : {})}));
       if (sourceInfo) {
-        for (const prefix of ["version", "history", "archive"]) {
-          for (const [name, value] of await deps.state.list<unknown>(`${prefix}:${sourceInfo.driveId}:`)) {
-            await deps.state.put(name.replace(`${prefix}:${sourceInfo.driveId}:`, `${prefix}:${created.driveId}:`), value);
-          }
-        }
+        await c.state.put(`annotation-parent:${created.driveId}`,sourceInfo.driveId);
       }
       return new Response(null, {headers: {location: `/${bucket}`, "x-uls-drive-id": created.driveId,
         ...(sourceInfo && "forkPoint" in created ? {"x-uls-fork-source-id": sourceInfo.driveId, "x-uls-fork-point": new Date(created.forkPoint as number).toISOString()} : {})}});
@@ -171,7 +195,10 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
       return new Response(null, {status: 204});
     }
     if (method === "GET" && q.has("x-uls-drive")) return Response.json(await control(() => deps.controlPlane.describeDrive(auth.key.keyId, bucket)));
-    if (method === "GET" && q.has("x-uls-mount")) return Response.json(await control(() => deps.controlPlane.mintMountToken(auth.key.keyId, bucket)));
+    if (method === "GET" && q.has("x-uls-mount")) {
+      if (storageMount) throw new S3Error(501, "NotImplemented", "Use x-uls-mount for native drive tokens; raw storage credentials are unavailable");
+      return Response.json(await control(() => deps.controlPlane.mintMountToken(auth.key.keyId, bucket)));
+    }
     if (method === "HEAD" && !q.size) return new Response(null, {headers: {"x-amz-bucket-region": "auto", ...(info.placement ? {"x-uls-placement": info.placement} : {})}});
     if (method === "GET" && q.has("versioning")) {
       await c.dp.describe();
@@ -187,19 +214,23 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
 
   async function deleteObjects(c: ObjectContext, bucket: string): Promise<Response> {
     const body = new TextDecoder().decode(await collectBody(verifiedBody(request, c.auth, 4 * 1024 * 1024), 4 * 1024 * 1024));
-    let objects: { Key: string }[], quiet: boolean;
+    let objects: { Key: string; VersionId?: string }[], quiet: boolean;
     try {
-      const doc = xmlParser.parse(body) as { Delete?: { Object?: { Key: string }[]; Quiet?: string } };
+      const doc = xmlParser.parse(body) as { Delete?: { Object?: { Key: string; VersionId?: string }[]; Quiet?: string } };
       objects = doc.Delete?.Object ?? []; quiet = doc.Delete?.Quiet === "true";
       if (objects.some(o => typeof o.Key !== "string")) throw new Error("bad key");
     } catch { throw new S3Error(400, "MalformedXML"); }
     if (!objects.length || objects.length > 1000) throw new S3Error(400, "MalformedXML", "Between 1 and 1000 objects are required");
     const deleted: string[] = [], errors: string[] = [];
-    for (const { Key } of objects) {
-      try { await deleteKey({ ...c, key: Key }, Key, new Request(request.url)); if (!quiet) deleted.push(`<Deleted>${tag("Key", Key)}</Deleted>`); }
+    for (const { Key, VersionId } of objects) {
+      try {
+        if (VersionId !== undefined) throw new S3Error(501, "NotImplemented", "Version history is immutable");
+        await deleteKey({ ...c, key: Key }, Key, new Request(request.url));
+        if (!quiet) deleted.push(`<Deleted>${tag("Key", Key)}</Deleted>`);
+      }
       catch (e) {
         const err = e instanceof S3Error ? e : new S3Error(500, "InternalError");
-        errors.push(`<Error>${tag("Key", Key)}${tag("Code", err.code)}${tag("Message", err.message)}</Error>`);
+        errors.push(`<Error>${tag("Key", Key)}${VersionId !== undefined ? tag("VersionId", VersionId) : ""}${tag("Code", err.code)}${tag("Message", err.message)}</Error>`);
       }
     }
     void bucket;
@@ -217,12 +248,22 @@ async function objectVersions(c: ObjectContext): Promise<Response> {
   if (!versions.length) throw new S3Error(404, "NoSuchKey");
   const head = await c.dp.stat(c.key);
   const entries = [];
+  const annotationDrives = [c.dp.drive];
+  for (let depth = 0; depth < 8; depth++) {
+    const parent = await c.state.get<string>(`annotation-parent:${annotationDrives.at(-1)!}`);
+    if (!parent || annotationDrives.includes(parent)) break;
+    annotationDrives.push(parent);
+  }
   const current = versions.find(v => v.versionId === head.versionId);
   const latestContent = current?.op === "rename"
     ? versions.filter(v => !["rename", "delete", "mkdir"].includes(v.op)).at(-1)?.versionId
     : head.versionId;
   for (const v of versions) {
-    const saved = await c.state.get<VersionAnnotation>(`version:${c.dp.drive}:${v.versionId}`);
+    let saved: VersionAnnotation | undefined;
+    for (const drive of annotationDrives) {
+      saved = await c.state.get<VersionAnnotation>(`version:${drive}:${v.versionId}`);
+      if (saved) break;
+    }
     const operation = saved?.operation ?? v.operation ?? v.op;
     if (["rename", "delete", "mkdir"].includes(operation)) continue;
     entries.push({versionId: v.versionId, isLatest: v.versionId === latestContent, size: v.size,
@@ -237,22 +278,55 @@ export default {
     let deps: Deps;
     try { deps = depsFromEnv(env); }
     catch (e) { console.error("misconfigured", e); return protocol(errorResponse(new S3Error(503, "ServiceUnavailable", "Gateway is not configured"), crypto.randomUUID())); }
+    const internal = await handleIngressBridge(request, deps, env.ULS_INGRESS_SECRET);
+    if (internal) { internal.headers.set("cache-control","no-store"); return internal; }
     return handle(request, deps);
   },
 } satisfies ExportedHandler<Env>;
 export type { Access };
 
-function protocol(response: Response): Response { response.headers.set("x-uls-protocol", "1"); return response; }
+function protocol(response: Response): Response {
+  response.headers.set("x-uls-protocol", "1");
+  for (const [name, value] of [...response.headers]) {
+    if (name.startsWith("x-uls-")) response.headers.set(name.replace("x-uls-", "x-s3sdk-"), value);
+  }
+  return response;
+}
+
+function extensionAliases(request: Request): Request {
+  const url = new URL(request.url), headers = new Headers(request.headers);
+  let changed = false;
+  for (const [name, value] of request.headers) {
+    if (!name.startsWith("x-s3sdk-")) continue;
+    const native = name.replace("x-s3sdk-", "x-uls-");
+    if (headers.has(native)) throw new S3Error(400, "InvalidArgument", "Use one extension namespace per header");
+    headers.set(native, value);
+    changed = true;
+  }
+  for (const name of new Set(url.searchParams.keys())) {
+    if (!name.startsWith("x-s3sdk-") && !name.startsWith("x-uls-")) continue;
+    const native = name.replace("x-s3sdk-", "x-uls-");
+    if (url.searchParams.getAll(name).length !== 1 || (name !== native && url.searchParams.has(native))) throw new S3Error(400, "InvalidArgument", "Ambiguous extension parameter");
+    if (name !== native) {
+      url.searchParams.set(native, url.searchParams.get(name)!);
+      url.searchParams.delete(name);
+      changed = true;
+    }
+  }
+  return changed ? new Request(url, {method: request.method, headers, body: request.body, redirect: request.redirect, duplex:"half"} as RequestInit) : request;
+}
 
 async function keyRoute(request: Request, deps: Deps): Promise<Response> {
-  const url = new URL(request.url), root = url.pathname === "/_uls/keys";
+  const url = new URL(request.url), compatible = url.pathname.startsWith("/_s3sdk/"), root = /^\/_(?:uls|s3sdk)\/keys$/.test(url.pathname);
   try {
-    const session = request.headers.get("x-uls-login-authorization") ?? request.headers.get("authorization");
+    if (request.headers.has("x-uls-login-authorization") && request.headers.has("x-s3sdk-login-authorization")) throw new S3Error(400, "InvalidArgument");
+    const session = request.headers.get("x-s3sdk-login-authorization") ?? request.headers.get("x-uls-login-authorization") ?? request.headers.get("authorization");
     if (session?.startsWith("Bearer ")) {
       if (!(root && ["GET", "POST"].includes(request.method)) && !(!root && request.method === "DELETE")) return Response.json({error: "method_not_allowed"}, {status:405});
       const headers = new Headers({authorization: session});
       if (request.headers.has("content-type")) headers.set("content-type", request.headers.get("content-type")!);
-      const upstream = await deps.sessionAPI.fetch(new Request(`https://api.internal${url.pathname.replace("/_uls", "")}${url.search}`, {method:request.method, headers, body: request.method === "POST" ? request.body : null}));
+      const upstream = await deps.sessionAPI.fetch(new Request(`https://api.internal${url.pathname.replace(/^\/_(?:uls|s3sdk)/, "")}${url.search}`, {method:request.method, headers, body: request.method === "POST" ? request.body : null}));
+      if (compatible && request.method === "DELETE" && upstream.ok) return new Response(null, {status:204});
       return new Response(upstream.body, {status:upstream.status, headers:upstream.headers});
     }
     if (!root || request.method !== "POST") return Response.json({error:"access_denied"}, {status:403});
@@ -265,7 +339,11 @@ async function keyRoute(request: Request, deps: Deps): Promise<Response> {
     let body: {drives: string[]; access?: Access; label?: string; orgId?: string; workspaceId?: string};
     try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { throw new S3Error(400, "InvalidArgument"); }
     if (!body || !Array.isArray(body.drives) || !body.drives.length || body.drives.some(d => typeof d !== "string")) throw new S3Error(400, "InvalidArgument");
-    if ((body.orgId && body.orgId !== auth.key.orgId) || (body.workspaceId && body.workspaceId !== auth.key.orgId)) throw new S3Error(403, "AccessDenied");
+    for (const workspace of [body.orgId, body.workspaceId]) {
+      if (workspace === undefined) continue;
+      if (typeof workspace !== "string" || !workspace) throw new S3Error(400, "InvalidArgument");
+      if (workspace !== auth.key.orgId) throw new S3Error(403, "AccessDenied");
+    }
     if (body.label !== undefined && typeof body.label !== "string") throw new S3Error(400, "InvalidArgument");
     if (body.access !== undefined && !["read", "write", "admin"].includes(body.access)) throw new S3Error(400, "InvalidArgument");
     authorize(auth.key, null, body.access ?? auth.key.scope);
@@ -274,7 +352,8 @@ async function keyRoute(request: Request, deps: Deps): Promise<Response> {
     }
     const result = await control(() => deps.controlPlane.mintChildKey(auth.key.keyId, {drives:body.drives, ...(body.access ? {access:body.access} : {}), ...(body.label !== undefined ? {label:body.label} : {})}));
     await deps.resolver.recordUse?.(auth.key.keyId);
-    return Response.json(result, {status:201});
+    const minted = result as {key?: Record<string, unknown>; secretAccessKey?: string};
+    return Response.json(compatible && minted.key ? {...minted.key, secretAccessKey: minted.secretAccessKey} : result, {status:201});
   } catch (error) {
     const e = error instanceof S3Error ? error : new S3Error(503, "ServiceUnavailable");
     return Response.json({error:e.code === "XAmzContentSHA256Mismatch" || e.code === "BadDigest" ? "InvalidArgument" : e.code}, {status:e.code === "XAmzContentSHA256Mismatch" || e.code === "BadDigest" ? 400 : e.status});

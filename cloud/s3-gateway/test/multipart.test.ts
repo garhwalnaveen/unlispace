@@ -6,6 +6,23 @@ import { client, harness, makeBucket, randomBytes, readAll, readText } from "./h
 const code = (e: unknown): string => (e as { name: string }).name;
 
 describe("multipart upload", () => {
+	it("completes a manifest larger than a single state value and safely repeats completion",async()=>{
+		const h=await harness(),b=makeBucket(h),s3=await client(h.deps);
+		const {UploadId}=await s3.send(new CreateMultipartUploadCommand({Bucket:b,Key:"large-manifest"}));
+		const hash=createHash("sha256").update("x").digest("hex");
+		h.dp.shards.set(`${b}/${hash}`,new TextEncoder().encode("x"));
+		const etag='"'+createHash("md5").update("x".repeat(300)).digest("hex")+'"';
+		const parts:{PartNumber:number;ETag:string}[]=[];
+		for(let number=1;number<=100;number++) {
+			await h.deps.state.put(`part:${UploadId}:${String(number).padStart(5,"0")}`,{number,etag,size:300,shards:Array.from({length:300},()=>({h:hash,n:1})),modified:0});
+			parts.push({PartNumber:number,ETag:etag});
+		}
+		const command=()=>new CompleteMultipartUploadCommand({Bucket:b,Key:"large-manifest",UploadId,MultipartUpload:{Parts:parts}});
+		const done=await s3.send(command());
+		expect((await s3.send(command())).VersionId).toBe(done.VersionId);
+		expect(h.dp.drives.get(b)!.versions).toHaveLength(1);
+		expect((await s3.send(new HeadObjectCommand({Bucket:b,Key:"large-manifest"}))).ContentLength).toBe(30000);
+	});
 	it("runs create, upload parts (out of order), list, complete, read back", async () => {
 		const h = await harness();
 		const b = makeBucket(h), s3 = await client(h.deps);
@@ -92,4 +109,28 @@ describe("multipart upload", () => {
 		expect(code(wrongKey)).toBe("NoSuchUpload");
 		expect(await readText((await s3.send(new GetObjectCommand({ Bucket: b, Key: "taken" }))).Body)).toBe("existing");
 	});
+});
+
+it("recovers a lost completion response without writing a second version",async()=>{
+ const h=await harness();const b=makeBucket(h),s3=await client(h.deps);
+ const {UploadId}=await s3.send(new CreateMultipartUploadCommand({Bucket:b,Key:"recover"}));
+ const part=await s3.send(new UploadPartCommand({Bucket:b,Key:"recover",UploadId,PartNumber:1,Body:"retained"}));
+ const request=()=>new CompleteMultipartUploadCommand({Bucket:b,Key:"recover",UploadId,MultipartUpload:{Parts:[{PartNumber:1,ETag:part.ETag}]}});
+ const original=h.deps.state.multipart.bind(h.deps.state);let failed=false;
+ h.deps.state.multipart=async(id,action,value)=>{if(action==="finish"&&!failed){failed=true;throw new Error("lost completion response");}return original(id,action,value);};
+ await expect(s3.send(request())).rejects.toBeDefined();
+ expect(h.dp.drives.get(b)!.versions).toHaveLength(1);
+ const recovered=await s3.send(request());expect(recovered.VersionId).toBe(h.dp.drives.get(b)!.versions[0]!.id);
+ expect(h.dp.drives.get(b)!.versions).toHaveLength(1);
+ expect(await readText((await s3.send(new GetObjectCommand({Bucket:b,Key:"recover"}))).Body)).toBe("retained");
+});
+it("aborts an expired completion lock and rejects its old owner",async()=>{
+ const h=await harness();const b=makeBucket(h),s3=await client(h.deps);
+ const {UploadId}=await s3.send(new CreateMultipartUploadCommand({Bucket:b,Key:"abandoned"}));
+ await h.deps.state.multipart(UploadId!,"lock",{lease:"dead-worker"});
+ const upload=await h.deps.state.get<any>(`upload:${UploadId}`);
+ await h.deps.state.put(`upload:${UploadId}`,{...upload,lockedUntil:0});
+ expect((await s3.send(new AbortMultipartUploadCommand({Bucket:b,Key:"abandoned",UploadId}))).$metadata.httpStatusCode).toBe(204);
+ await expect(h.deps.state.multipart(UploadId!,"finish",{lease:"dead-worker",versionId:"ghost"})).rejects.toBeDefined();
+ expect(h.dp.drives.get(b)!.versions).toHaveLength(0);
 });

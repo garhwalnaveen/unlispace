@@ -155,24 +155,25 @@ describe("ControlPlane RPC", () => {
 	});
 });
 describe("M3 metering", () => {
-	it("uses own bytes, ignores deleted drives, handles quota and expiry, and wires scheduled", async () => {
+	it("uses authoritative bytes including retained deleted drives, handles quota and expiry, and wires scheduled", async () => {
 		const { w, cp, id, org, root, call } = await fixture();
 		w.dp.driveStats = async driveId => ({ headSeq: 0, fileCount: 1, bytes: 9_000_000_000_000, ownBytes: 123, lineage: driveId, depth: 0, forkOf: null });
+		w.dp.stats.set(root, 123);
 		await worker.scheduled({} as ScheduledController, w.env);
 		expect(await json(await call(`/orgs/${org.id}/billing`, {}, "GET"))).toMatchObject({ usedBytes: 123, writable: true });
 		expect((await cp.describeDrive(id, root)).usageBytes).toBe(123);
-		await w.env.DB.prepare("UPDATE drive_usage SET own_bytes=1000000000001 WHERE drive_id=?").bind(root).run();
+		w.dp.stats.set(root, 500000000001);
 		expect((await cp.resolveBucket(id, root)).writable).toBe(false);
 		expect((await cp.mintMountToken(id, root)).canWrite).toBe(false);
 		expect(await json(await call(`/drives/${root}/token`, { access: "write" }))).toEqual({ error: "over_quota" });
 		expect((await call(`/drives/${root}/token`, { access: "read" })).status).toBe(200);
-		await w.env.DB.prepare("UPDATE drive_usage SET own_bytes=1000000000000 WHERE drive_id=?").bind(root).run();
+		w.dp.stats.set(root, 500000000000);
 		expect((await cp.resolveBucket(id, root)).writable).toBe(true);
 		await w.env.DB.prepare("UPDATE orgs SET trial_ends_at=0 WHERE id=?").bind(org.id).run();
 		expect((await cp.resolveBucket(id, root)).writable).toBe(false);
 		expect((await call(`/drives/${root}/token`, { access: "write" })).status).toBe(403);
 		await cp.deleteDrive(id, root, { hard: false });
-		expect(await json(await call(`/orgs/${org.id}/billing`, {}, "GET"))).toMatchObject({ usedBytes: 0 });
+		expect(await json(await call(`/orgs/${org.id}/billing`, {}, "GET"))).toMatchObject({ usedBytes: 500000000000 });
 	});
 	it("limits each run to 500 oldest live drives", async () => {
 		const { w, org } = await fixture();

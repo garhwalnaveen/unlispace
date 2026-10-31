@@ -13,6 +13,8 @@ export const PLACEMENTS = ["wnam", "enam", "weur", "eeur", "apac", "oc"] as cons
 export type Placement = (typeof PLACEMENTS)[number];
 
 /** A validated commit operation. `key` is the path without trailing slash ("" is the root). */
+export type Xattrs = Record<string, [string, number][]>;
+
 export type NormOp =
 	| {
 			op: "put" | "restore";
@@ -24,8 +26,12 @@ export type NormOp =
 			size: number;
 			ctype: string;
 			mtimeMs: number;
+            generatedMtime?: boolean;
 			/** compact JSON `[[h,n],...]` */
 			manifest: string;
+			/** Absent on put preserves current attributes. Empty object clears them. */
+			xattrs?: string;
+			attributeShards?: [string, number][];
 			/** hashes referenced, for the shards_known check */
 			shards: [string, number][];
 	  }

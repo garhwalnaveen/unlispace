@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use uls_chunk::{Chunk, chunk_reader, sha256_hex};
 use uls_proto::{
-    ChangesResponse, CommitRequest, CommitResponse, CreateDriveRequest, DriveCreated, DriveInfo,
+    ChangesResponse, CommitResponse, CreateDriveRequest, DriveCreated, DriveInfo,
     ListEntry, ListResponse, ManifestResponse, MissingRequest, MissingResponse, NodeType, Op,
     PutShardResponse, RestoreRequest, ShardRef, StatResponse, VersionEntry, VersionsResponse,
     validate_path,
@@ -22,6 +22,28 @@ use crate::cache::ShardCache;
 use crate::error::{Error, Result};
 use crate::range::{ShardSlice, map_range};
 use crate::watch::WatchStream;
+
+fn encode_commit(ops: &[Op], request_id: Option<&str>) -> Result<(Vec<u8>, bool)> {
+    if ops.is_empty() || ops.len() > uls_proto::MAX_COMMIT_OPS {
+        return Err(Error::InvalidResponse("commit must contain 1..1000 operations".into()));
+    }
+    if request_id.is_some_and(|id| id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-:_".contains(&b))) {
+        return Err(Error::InvalidResponse("invalid commit request id".into()));
+    }
+    let mut value = serde_json::json!({"ops": ops});
+    if let Some(id) = request_id { value["requestId"] = id.into(); }
+    let json = serde_json::to_vec(&value).map_err(|e| Error::InvalidResponse(e.to_string()))?;
+    if json.len() <= 1024 * 1024 { return Ok((json, false)); }
+    let mut body = Vec::new();
+    for op in ops {
+        serde_json::to_writer(&mut body, op).map_err(|e| Error::InvalidResponse(e.to_string()))?;
+        body.push(b'\n');
+        if body.len() > 8 * 1024 * 1024 {
+            return Err(Error::InvalidResponse("file manifest exceeds the supported 8 MiB commit limit".into()));
+        }
+    }
+    Ok((body, true))
+}
 
 /// Exponential backoff for retryable failures (network errors, 429, 5xx).
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +76,23 @@ impl RetryPolicy {
     }
 }
 
+/// One connection pool per process. Clients are built per request in the daemon; sharing the
+/// pool keeps TCP/TLS sessions warm across them (a fresh handshake to the edge costs ~0.5 s).
+/// The pool holds no credentials: auth headers are set per request.
+fn shared_http() -> Result<reqwest::Client> {
+    static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(c) = HTTP.get() { return Ok(c.clone()); }
+    let c = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(300))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(30))
+        .tcp_nodelay(true)
+        .user_agent(concat!("uls-client/", env!("CARGO_PKG_VERSION")))
+        .build()?;
+    Ok(HTTP.get_or_init(|| c).clone())
+}
+
 pub struct ClientBuilder {
     endpoint: String,
     token: String,
@@ -62,6 +101,57 @@ pub struct ClientBuilder {
     retry: RetryPolicy,
     cache: Option<Arc<ShardCache>>,
     whole_shard_on_partial: bool,
+    upload_limiter: Option<Arc<UploadLimiter>>,
+}
+
+/// Shared upload bandwidth limit, in bytes per second (0 = unlimited). Cloned handles share one
+/// budget, so every shard PUT from every client holding it draws from the same bucket. The rate
+/// can be changed at any time and applies to the next reservation.
+#[derive(Debug, Default)]
+pub struct UploadLimiter {
+    bps: std::sync::atomic::AtomicU64,
+    /// Instant (ms since `epoch`) at which the already-reserved bytes will have been sent.
+    next_free_ms: std::sync::atomic::AtomicU64,
+    epoch: std::sync::OnceLock<std::time::Instant>,
+}
+
+impl UploadLimiter {
+    pub fn new(bps: u64) -> Arc<Self> {
+        let l = UploadLimiter::default();
+        l.bps.store(bps, std::sync::atomic::Ordering::SeqCst);
+        Arc::new(l)
+    }
+    pub fn set_bps(&self, bps: u64) {
+        self.bps.store(bps, std::sync::atomic::Ordering::SeqCst);
+        if bps == 0 { self.next_free_ms.store(0, std::sync::atomic::Ordering::SeqCst); }
+    }
+    pub fn bps(&self) -> u64 {
+        self.bps.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    /// How long a sender of `bytes` must wait before starting, reserving its slot. The
+    /// reservation is a leaky bucket with a one-second burst allowance.
+    pub fn reserve(&self, bytes: u64) -> Duration {
+        use std::sync::atomic::Ordering::SeqCst;
+        let bps = self.bps();
+        if bps == 0 { return Duration::ZERO; }
+        let epoch = *self.epoch.get_or_init(std::time::Instant::now);
+        let now = epoch.elapsed().as_millis() as u64;
+        let cost = bytes.saturating_mul(1000) / bps;
+        let mut cur = self.next_free_ms.load(SeqCst);
+        loop {
+            // Idle time earns at most one second of burst.
+            let start = cur.max(now.saturating_sub(1000));
+            let end = start.saturating_add(cost);
+            match self.next_free_ms.compare_exchange(cur, end, SeqCst, SeqCst) {
+                Ok(_) => return Duration::from_millis(start.saturating_sub(now)),
+                Err(v) => cur = v,
+            }
+        }
+    }
+    async fn acquire(&self, bytes: u64) {
+        let d = self.reserve(bytes);
+        if !d.is_zero() { tokio::time::sleep(d).await; }
+    }
 }
 
 impl ClientBuilder {
@@ -74,7 +164,13 @@ impl ClientBuilder {
             retry: RetryPolicy::default(),
             cache: None,
             whole_shard_on_partial: false,
+            upload_limiter: None,
         }
+    }
+    /// Throttle shard PUT bodies through a shared limiter.
+    pub fn upload_limiter(mut self, l: Arc<UploadLimiter>) -> Self {
+        self.upload_limiter = Some(l);
+        self
     }
     /// Resolve the bearer token (and optionally the endpoint) per request instead of using the
     /// static token. On a 401 the provider's `refresh()` is consulted once and the request is
@@ -103,13 +199,8 @@ impl ClientBuilder {
         self
     }
     pub fn build(self) -> Result<Client> {
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(300))
-            .user_agent(concat!("uls-client/", env!("CARGO_PKG_VERSION")))
-            .build()?;
         Ok(Client {
-            http,
+            http: shared_http()?,
             base: self.endpoint.trim_end_matches('/').to_string(),
             auth: match self.provider {
                 Some(p) => Auth::Provider(p),
@@ -120,6 +211,8 @@ impl ClientBuilder {
             cache: self.cache,
             whole_shard_on_partial: self.whole_shard_on_partial,
             ram: Arc::new(Ram::default()),
+            blocks: Arc::new(BlockUrls::default()),
+            upload_limiter: self.upload_limiter,
         })
     }
 }
@@ -134,6 +227,50 @@ pub struct Client {
     cache: Option<Arc<ShardCache>>,
     whole_shard_on_partial: bool,
     ram: Arc<Ram>,
+    blocks: Arc<BlockUrls>,
+    upload_limiter: Option<Arc<UploadLimiter>>,
+}
+
+/// Signed edge-cache URLs learned from manifests, keyed by (drive, shard hash). Never persisted.
+#[derive(Default)]
+struct BlockUrls {
+    map: std::sync::Mutex<HashMap<(String, String), (String, i64)>>,
+}
+
+/// URLs this close to expiry are not used (clock skew, transfer time).
+const BLOCK_URL_MARGIN_SECS: i64 = 30;
+const BLOCK_URL_MAX_ENTRIES: usize = 20_000;
+
+fn unix_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+impl BlockUrls {
+    fn remember(&self, drive: &str, m: &ManifestResponse) {
+        let Some(exp) = m.block_urls_expire_at else { return };
+        if m.block_urls.is_empty() || exp <= unix_secs() + BLOCK_URL_MARGIN_SECS { return; }
+        let mut g = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        let now = unix_secs();
+        if g.len() + m.block_urls.len() > BLOCK_URL_MAX_ENTRIES {
+            g.retain(|_, (_, e)| *e > now + BLOCK_URL_MARGIN_SECS);
+            if g.len() + m.block_urls.len() > BLOCK_URL_MAX_ENTRIES { g.clear(); }
+        }
+        for (h, u) in &m.block_urls {
+            g.insert((drive.to_string(), h.clone()), (u.clone(), exp));
+        }
+    }
+    fn get(&self, drive: &str, hash: &str) -> Option<String> {
+        let mut g = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        let key = (drive.to_string(), hash.to_string());
+        match g.get(&key) {
+            Some((u, exp)) if *exp > unix_secs() + BLOCK_URL_MARGIN_SECS => Some(u.clone()),
+            Some(_) => { g.remove(&key); None }
+            None => None,
+        }
+    }
+    fn forget(&self, drive: &str, hash: &str) {
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).remove(&(drive.to_string(), hash.to_string()));
+    }
 }
 
 // Deliberately does not print the token.
@@ -190,6 +327,11 @@ impl Client {
         ClientBuilder::new(endpoint, token)
     }
 
+    /// Configured concurrent shard transfer bound (always at least 1).
+    pub fn parallelism(&self) -> usize {
+        self.parallelism
+    }
+
     /// Control-plane request with this client's bearer, without data-plane path rewriting.
     /// Mutations are never retried after an ambiguous transport failure.
     pub async fn control_request(&self, method: &str, path: &str, body: Option<&serde_json::Value>) -> Result<serde_json::Value> {
@@ -241,6 +383,17 @@ impl Client {
         }
     }
 
+    async fn request_creds(&self, write: bool, refresh: bool) -> Result<(String, String)> {
+        match &self.auth {
+            Auth::Static(t) => Ok((self.base.clone(), t.clone())),
+            Auth::Provider(p) => {
+                let token = if refresh { p.refresh().await? } else { p.token().await? };
+                if write && token.read_only { return Err(Error::WriteDenied); }
+                Ok(self.resolve(token))
+            }
+        }
+    }
+
     /// Send a request to `/v0/drives/{drive}{rest}`. With a token provider, a 401 triggers one
     /// refresh and one retry (a 401 means the request was not processed, so this is safe even
     /// for commits). `f` adds query, headers and body, and may run twice.
@@ -252,10 +405,11 @@ impl Client {
         f: impl Fn(RequestBuilder) -> RequestBuilder,
     ) -> Result<Response> {
         let build = |base: &str, tok: &str| f(self.http.request(m.clone(), format!("{base}/v0/drives/{drive}{rest}")).bearer_auth(tok));
-        let (base, tok) = self.creds().await?;
+        let write = m != reqwest::Method::GET && rest != "/shards/missing";
+        let (base, tok) = self.request_creds(write, false).await?;
         let resp = build(&base, &tok).send().await?;
         if resp.status() == StatusCode::UNAUTHORIZED && matches!(self.auth, Auth::Provider(_)) {
-            let (base, tok) = self.refreshed_creds().await?;
+            let (base, tok) = self.request_creds(write, true).await?;
             return Ok(build(&base, &tok).send().await?);
         }
         Ok(resp)
@@ -336,6 +490,7 @@ impl Client {
     pub async fn put_shard(&self, drive: &str, hash: &str, data: Bytes) -> Result<PutShardResponse> {
         check_hash(hash)?;
         self.retrying(|| async {
+            if let Some(l) = &self.upload_limiter { l.acquire(data.len() as u64).await; }
             let r = self
                 .send(reqwest::Method::PUT, drive, &format!("/shards/{hash}"), |b| {
                     b.header(header::CONTENT_TYPE, "application/octet-stream").body(data.clone())
@@ -350,6 +505,7 @@ impl Client {
     async fn get_shard_raw(&self, drive: &str, hash: &str, range: Option<(u64, u64)>) -> Result<(StatusCode, Bytes)> {
         check_hash(hash)?;
         self.retrying(|| async {
+            let started = std::time::Instant::now();
             let r = self
                 .send(reqwest::Method::GET, drive, &format!("/shards/{hash}"), |rb| match range {
                     Some((a, b)) => rb.header(header::RANGE, format!("bytes={a}-{b}")),
@@ -358,27 +514,77 @@ impl Client {
                 .await?;
             let r = Self::check(r).await?;
             let status = r.status();
-            Ok((status, r.bytes().await?))
+            let first_byte_ms = started.elapsed().as_millis() as u64;
+            let server = r.headers().get("server-timing").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+            let body = r.bytes().await?;
+            // Timings and sizes only; the hash is content-addressed, not secret, but is shortened.
+            tracing::debug!(target: "uls_client::shard_get", shard = &hash[..12], bytes = body.len(),
+                first_byte_ms, total_ms = started.elapsed().as_millis() as u64, server = %server, "shard GET");
+            Ok((status, body))
         })
         .await
+    }
+
+    /// Whole-shard GET through a signed edge-cache URL from the manifest, without a bearer token.
+    /// Returns bytes that match `hash`, or `None` on any problem (no URL, expired, 401/403/404,
+    /// network error, wrong bytes) so the caller falls back to the authenticated route.
+    async fn fetch_via_block(&self, drive: &str, hash: &str) -> Option<Bytes> {
+        let url = self.blocks.get(drive, hash)?;
+        let started = std::time::Instant::now();
+        let resp = match self.http.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(target: "uls_client::shard_get", "block GET failed: {}", e.without_url());
+                return None;
+            }
+        };
+        let status = resp.status();
+        if status != StatusCode::OK {
+            if matches!(status.as_u16(), 401 | 403 | 404) { self.blocks.forget(drive, hash); }
+            return None;
+        }
+        let body = resp.bytes().await.ok()?;
+        if sha256_hex(&body) != hash {
+            self.blocks.forget(drive, hash);
+            return None;
+        }
+        tracing::debug!(target: "uls_client::shard_get", shard = &hash[..12], bytes = body.len(),
+            total_ms = started.elapsed().as_millis() as u64, "shard GET via block url");
+        Some(body)
     }
 
     /// Whole shard, verified. Looks in RAM, then the disk cache, then the network. Concurrent
     /// requests for the same shard share one download.
     pub async fn fetch_shard(&self, drive: &str, hash: &str) -> Result<Bytes> {
+        self.fetch_shard_with(drive, hash, false).await
+    }
+
+    /// `fetch_shard`, but only returns once the shard is durable in the disk cache. Used for
+    /// offline pins, whose contract is that pinned bytes survive a restart once reported cached.
+    pub async fn fetch_shard_durable(&self, drive: &str, hash: &str) -> Result<Bytes> {
+        let data = self.fetch_shard_with(drive, hash, true).await?;
+        if let Some(c) = &self.cache && !c.contains(hash) {
+            let (c, h, d) = (c.clone(), hash.to_string(), data.clone());
+            tokio::task::spawn_blocking(move || c.put_verified(&h, &d)).await
+                .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))??;
+        }
+        Ok(data)
+    }
+
+    async fn fetch_shard_with(&self, drive: &str, hash: &str, durable: bool) -> Result<Bytes> {
         check_hash(hash)?;
         if let Some(b) = self.ram.get(hash) {
             return Ok(b);
         }
         let gate = self.ram.gate(hash);
         let _held = gate.lock().await;
-        let res = self.fetch_shard_locked(drive, hash).await;
+        let res = self.fetch_shard_locked(drive, hash, durable).await;
         drop(_held);
         self.ram.release_gate(hash, gate);
         res
     }
 
-    async fn fetch_shard_locked(&self, drive: &str, hash: &str) -> Result<Bytes> {
+    async fn fetch_shard_locked(&self, drive: &str, hash: &str, durable: bool) -> Result<Bytes> {
         if let Some(b) = self.ram.get(hash) {
             return Ok(b);
         }
@@ -390,29 +596,73 @@ impl Client {
                 return Ok(b);
             }
         }
-        let (_, data) = self.get_shard_raw(drive, hash, None).await?;
-        let actual = sha256_hex(&data);
-        if actual != hash {
-            return Err(Error::HashMismatch { expected: hash.to_string(), actual });
-        }
+        // `fetch_via_block` returns only bytes it already verified against `hash`.
+        let data = match self.fetch_via_block(drive, hash).await {
+            Some(b) => b,
+            None => {
+                let data = self.get_shard_raw(drive, hash, None).await?.1;
+                let actual = sha256_hex(&data);
+                if actual != hash {
+                    return Err(Error::HashMismatch { expected: hash.to_string(), actual });
+                }
+                data
+            }
+        };
+        // Insert into RAM before the disk write so concurrent readers are served immediately.
+        self.ram.insert(hash, data.clone());
         if let Some(c) = &self.cache {
             let c = c.clone();
             let (h, d) = (hash.to_string(), data.clone());
-            // A cache write failure must never fail a read.
-            if let Ok(Err(e)) = tokio::task::spawn_blocking(move || c.put(&h, &d)).await {
-                tracing::warn!("shard cache write failed: {e}");
+            // Ordinary reads persist in the background: an fsync per shard must not sit on the read
+            // path, and a crash only loses a cache entry. Durable (pin) fetches wait and report errors.
+            let write = tokio::task::spawn_blocking(move || c.put_verified(&h, &d));
+            if durable {
+                write.await.map_err(|e| Error::Io(std::io::Error::other(e.to_string())))??;
+            } else {
+                tokio::spawn(async move {
+                    if let Ok(Err(e)) = write.await { tracing::warn!("shard cache write failed: {e}"); }
+                });
             }
         }
-        self.ram.insert(hash, data.clone());
         Ok(data)
+    }
+
+    /// Start fetching shards a sequential reader will want next, without waiting for them.
+    /// Bounded by `parallelism`; already-cached or in-flight shards are skipped.
+    pub fn prefetch(&self, drive: &str, shards: &[ShardRef], from_index: usize, count: usize) {
+        let mut started = 0;
+        for s in shards.iter().skip(from_index) {
+            if started >= count.min(self.parallelism) { break; }
+            if self.ram.contains(&s.h) || self.ram.inflight(&s.h) { continue; }
+            if self.cache.as_ref().is_some_and(|c| c.contains(&s.h)) { continue; }
+            let (me, drive, hash) = (self.clone(), drive.to_string(), s.h.clone());
+            tokio::spawn(async move { let _ = me.fetch_shard(&drive, &hash).await; });
+            started += 1;
+        }
     }
 
     // ---- commit -----------------------------------------------------------------------------
 
     /// Not retried automatically: a retry after an ambiguous failure could double-apply.
     pub async fn commit(&self, drive: &str, ops: Vec<Op>) -> Result<CommitResponse> {
-        let body = CommitRequest { ops };
-        let r = self.send(reqwest::Method::POST, drive, "/commit", |b| b.json(&body)).await?;
+        self.commit_with_id(drive, ops, None).await
+    }
+
+    pub fn preflight_commit(ops: &[Op]) -> Result<()> {
+        encode_commit(ops, None).map(|_| ())
+    }
+
+    pub async fn commit_with_id(&self, drive: &str, ops: Vec<Op>, request_id: Option<&str>) -> Result<CommitResponse> {
+        let (body, streamed) = encode_commit(&ops, request_id)?;
+        if ops.iter().any(|o| matches!(o, Op::Put {xattrs: Some(_), ..}))
+            && !self.drive_info(drive).await?.features.iter().any(|f| f == "xattrs") {
+            return Err(Error::InvalidResponse("Server upgrade required to save Mac extended attributes; local changes are retained".into()));
+        }
+        let r = self.send(reqwest::Method::POST, drive, "/commit", |b| {
+            let b = b.header(header::CONTENT_TYPE, if streamed { "application/x-ndjson" } else { "application/json" });
+            let b = if streamed { if let Some(id) = request_id { b.header("x-uls-request-id", id) } else { b } } else { b };
+            b.body(body.clone())
+        }).await?;
         Self::json(r).await
     }
 
@@ -447,6 +697,13 @@ impl Client {
         self.get_json(drive, "/stat", &[("path", p)]).await
     }
 
+    /// One page of indexed filename matches, including full current paths.
+    pub async fn search(&self, drive: &str, query: &str, cursor: Option<&str>) -> Result<serde_json::Value> {
+        let mut params = vec![("q", query.to_string()), ("limit", "50".to_string())];
+        if let Some(cursor) = cursor { params.push(("cursor", cursor.to_string())); }
+        self.get_json(drive, "/search", &params).await
+    }
+
     /// One page of a folder listing.
     pub async fn list_page(&self, drive: &str, path: &str, cursor: Option<&str>, limit: usize) -> Result<ListResponse> {
         let mut q = vec![("path", norm_folder_path(path)?), ("limit", limit.clamp(1, 1000).to_string())];
@@ -472,11 +729,57 @@ impl Client {
 
     pub async fn manifest(&self, drive: &str, path: &str, version: Option<&str>) -> Result<ManifestResponse> {
         let p = norm_file_path(path)?;
-        let mut q = vec![("path", p)];
+        #[derive(serde::Deserialize)]
+        struct Page {
+            #[serde(flatten)]
+            manifest: ManifestResponse,
+            #[serde(rename = "nextShardCursor")]
+            next: Option<u64>,
+        }
+        let mut q = vec![("path", p.clone()), ("shardCursor", "0".into())];
         if let Some(v) = version {
             q.push(("versionId", v.to_string()));
         }
-        self.get_json(drive, "/manifest", &q).await
+        let first: Page = self.get_json(drive, "/manifest", &q).await?;
+        let mut manifest = first.manifest;
+        if manifest.path != p || manifest.version_id.is_empty() || version.is_some_and(|v| v != manifest.version_id) {
+            return Err(Error::InvalidResponse("manifest identity changed".into()));
+        }
+        let mut total = 0u64;
+        let mut count = 0usize;
+        let mut validate = |page: &ManifestResponse| -> Result<()> {
+            for shard in &page.shards {
+                check_hash(&shard.h).map_err(|_| Error::InvalidResponse("invalid manifest shard hash".into()))?;
+                if shard.n == 0 || shard.n > 16 * 1024 * 1024 { return Err(Error::InvalidResponse("invalid manifest shard length".into())); }
+                total = total.checked_add(shard.n).ok_or_else(|| Error::InvalidResponse("manifest size overflow".into()))?;
+            }
+            count += page.shards.len();
+            if total > page.size || count > 400_000 { return Err(Error::InvalidResponse("manifest exceeds supported size".into())); }
+            Ok(())
+        };
+        validate(&manifest)?;
+        self.blocks.remember(drive, &manifest);
+        let mut cursor = 0;
+        let mut next = first.next;
+        while let Some(current) = next {
+            if current <= cursor || current > 1_000_000 {
+                return Err(Error::InvalidResponse("invalid manifest cursor".into()));
+            }
+            let page: Page = self.get_json(drive, "/manifest", &[
+                ("path", p.clone()), ("versionId", manifest.version_id.clone()), ("shardCursor", current.to_string()),
+            ]).await?;
+            if page.manifest.path != p || page.manifest.version_id != manifest.version_id || page.manifest.size != manifest.size ||
+                page.manifest.content_type != manifest.content_type || page.manifest.mtime_ms != manifest.mtime_ms || page.manifest.xattrs != manifest.xattrs || page.manifest.shards.is_empty() {
+                return Err(Error::InvalidResponse("manifest identity changed between pages".into()));
+            }
+            validate(&page.manifest)?;
+            self.blocks.remember(drive, &page.manifest);
+            manifest.shards.extend(page.manifest.shards);
+            cursor = current;
+            next = page.next;
+        }
+        if total != manifest.size { return Err(Error::InvalidResponse("manifest shard lengths do not match file size".into())); }
+        Ok(manifest)
     }
 
     /// Full history of `path`, oldest first. Follows the server's cursor until it is exhausted.
@@ -571,6 +874,9 @@ impl Client {
 
         let mut uploaded = 0usize;
         let mut bytes_uploaded = 0u64;
+        Self::preflight_commit(&[Op::Put { path: remote.clone(), if_version: if_version.map(str::to_string),
+            if_absent: false, size, content_type: "application/octet-stream".into(), mtime_ms,
+            shards: chunks.iter().map(|c| ShardRef { h: c.hash.clone(), n: c.length as u64 }).collect(), xattrs: None }])?;
         let mut to_upload = self.missing(drive, &unique).await?;
 
         let ctype = mime_guess::from_path(&remote).first_or_octet_stream().essence_str().to_string();
@@ -589,6 +895,7 @@ impl Client {
                 content_type: ctype.clone(),
                 mtime_ms,
                 shards: shards.clone(),
+                xattrs: None,
             };
             match self.commit(drive, vec![op]).await {
                 Err(Error::MissingShards { hashes }) if rounds < 3 => {
@@ -741,7 +1048,9 @@ impl Client {
             None => None,
         };
         if let Some(b) = cached {
-            return slice_checked(&b, s.shard_len, start, len);
+            let slice = slice_checked(&b, s.shard_len, start, len)?;
+            self.ram.insert(&s.hash, b);
+            return Ok(slice);
         }
         if s.is_whole_shard() || self.whole_shard_on_partial {
             let b = self.fetch_shard(drive, &s.hash).await?;
@@ -826,6 +1135,14 @@ impl Ram {
 
     fn gate(&self, hash: &str) -> Arc<tokio::sync::Mutex<()>> {
         self.lock().gates.entry(hash.to_string()).or_default().clone()
+    }
+
+    fn contains(&self, hash: &str) -> bool {
+        self.lock().map.contains_key(hash)
+    }
+
+    fn inflight(&self, hash: &str) -> bool {
+        self.lock().gates.contains_key(hash)
     }
 
     fn release_gate(&self, hash: &str, gate: Arc<tokio::sync::Mutex<()>>) {

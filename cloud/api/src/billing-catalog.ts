@@ -6,6 +6,7 @@ export type Cadence = "monthly" | "annual";
 export type BillingProducts = Record<Plan | "storage", Record<Cadence, string>>;
 export const TB = 1_000_000_000_000;
 export const STORAGE_ADDON_BYTES = 500_000_000_000;
+export const INDIVIDUAL_BYTES = 500_000_000_000;
 
 export function products(env: AppEnv): BillingProducts | null {
 	if (!env.DODO_PRODUCTS) return null;
@@ -21,18 +22,40 @@ export function products(env: AppEnv): BillingProducts | null {
 	} catch { throw new HttpError(503, "billing_not_configured"); }
 }
 
+export interface Price { amount: number; currency: string }
+export type BillingPrices = Record<Plan | "storage", Record<Cadence, Price>>;
+
+/** Operator-configured prices (minor currency units), or null unless every price is valid and one currency is used. */
+export function prices(env: AppEnv): BillingPrices | null {
+	if (!env.DODO_PRICES) return null;
+	try {
+		const p = JSON.parse(env.DODO_PRICES) as BillingPrices;
+		const currencies = new Set<string>();
+		for (const name of ["individual", "teams", "storage"] as const) {
+			for (const cadence of ["monthly", "annual"] as const) {
+				const v = p[name]?.[cadence];
+				if (!v || !Number.isSafeInteger(v.amount) || v.amount < 0 || typeof v.currency !== "string" || !/^[A-Z]{3}$/.test(v.currency)) return null;
+				currencies.add(v.currency);
+			}
+		}
+		return currencies.size === 1 ? p : null;
+	} catch { return null; }
+}
+
 export function catalog(env: AppEnv) {
 	const p = products(env);
 	return {
 		provider: "dodo", trialDays: 7, trialRequiresCard: false,
+		checkoutStartsImmediately: true, checkoutEndsTrial: true,
 		plans: [
-			{ id: "individual", name: "Individual", minSeats: 1, maxSeats: 1, bytesPerSeat: TB },
+			{ id: "individual", name: "Individual", minSeats: 1, maxSeats: 1, bytesPerSeat: INDIVIDUAL_BYTES },
 			{ id: "teams", name: "Teams", minSeats: 1, maxSeats: 1000, bytesPerSeat: TB },
 		],
 		storageAddon: { bytes: STORAGE_ADDON_BYTES, maxQuantity: 1000 },
 		cadences: ["monthly", "annual"],
+		prices: prices(env),
 		// Prices are intentionally decided by configured Dodo products, not copied from Space.
-		checkoutAvailable: p !== null && !!env.DODO_PAYMENTS_API_KEY && ["test_mode", "live_mode"].includes(env.DODO_PAYMENTS_ENVIRONMENT ?? ""),
+		checkoutAvailable: p !== null && !!env.DODO_PAYMENTS_API_KEY && !!env.DODO_PAYMENTS_WEBHOOK_KEY && ["test_mode", "live_mode"].includes(env.DODO_PAYMENTS_ENVIRONMENT ?? ""),
 	};
 }
 

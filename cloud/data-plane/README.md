@@ -69,3 +69,18 @@ paths as they existed then; folders end in `/`. Root is `path=`. Pages sort by p
 `cursor` is null on the last page. Equal timestamps include the whole millisecond.
 History and path logs survive forks and snapshots; legacy state is migrated on load/import.
 GC marks every retained version, including versions written before a rename.
+
+## Indexed filename search
+
+`GET /v0/drives/{id}/search?q=<3–256 characters>&limit=50&cursor=<decimal>` requires
+read access. It returns `{entries:[{path,type,versionId,size,contentType,mtimeMs,seq}],cursor}`.
+Search is a case-insensitive literal substring of the filename (not file contents or the
+ancestor path). A derived trigram FTS index follows node inserts/renames/deletes and is
+rebuilt from legacy/imported node rows; it is not copied as snapshot payload.
+
+Each page scans at most `limit` indexed candidates (maximum 100) and resolves only their
+ancestor chains, bounded to 1024 levels. Detached/deleted trees are excluded. A page can
+have no entries and still have a cursor: continue until `cursor` is null. The cursor is
+the last scanned SQLite row ID, expressed as a decimal string. Entries within a page are
+sorted by path; pagination across pages follows node insertion order. Pagination is best
+effort during concurrent changes; start a new search after changing the query.

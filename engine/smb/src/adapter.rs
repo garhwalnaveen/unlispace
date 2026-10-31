@@ -129,6 +129,20 @@ async fn set_stream(
 }
 #[async_trait]
 impl ShareBackend for Adapter {
+    /// Report the drive's plan quota and remaining space instead of the server default, so
+    /// Finder shows real capacity. Unknown capacity keeps the default.
+    async fn volume_info(&self) -> SmbResult<smb_server::VolumeInfo> {
+        let mut v = smb_server::VolumeInfo::default();
+        if let Some((total, available)) = self.shared.backend.volume().await {
+            let unit = u64::from(v.sectors_per_allocation_unit) * u64::from(v.bytes_per_sector);
+            if unit > 0 && total > 0 {
+                v.total_allocation_units = total / unit;
+                v.caller_available_allocation_units = available.min(total) / unit;
+                v.actual_available_allocation_units = v.caller_available_allocation_units;
+            }
+        }
+        Ok(v)
+    }
     async fn open(
         &self,
         path: &SmbPath,

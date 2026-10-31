@@ -101,7 +101,7 @@ Version ids look like `v_` + 26-char ULID. Clients treat them as opaque.
 
 `GET /v0/drives/{driveId}/versions?path=<p>` returns `200 {"versions":[{"versionId","op","size","seq","ts","actor"}]}`, oldest first.
 
-`POST /v0/drives/{driveId}/restore` with body `{"path","versionId","ifVersion"?}` returns the same shape as commit. It creates a new head version with the old manifest.
+`POST /v0/drives/{driveId}/restore` with body `{"path","versionId","ifVersion"?,"ifAbsent"?:boolean}` returns the same shape as commit. It creates a new head version with the old manifest. `ifAbsent:true` requires the destination to remain absent at the atomic restore commit; a concurrent restoration returns 412 without overwriting it.
 
 ### 3.5 Changes
 

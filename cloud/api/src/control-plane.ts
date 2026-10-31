@@ -5,13 +5,13 @@ import { selectSender } from "./email";
 import { HttpError } from "./http";
 import { createKey, recordAccessKeyUse, resolveAccessKey, type PublicKey } from "./access-keys";
 import * as R from "./resources";
-import { entitlements, storageUsage } from "./entitlements";
+import { configureStorageQuota, entitlements, storageUsage } from "./entitlements";
 import { mintDriveToken } from "./session";
 
 export function rpcContext(env: AppEnv): Ctx {
 	const req = new Request("https://internal/");
 	const f = fetch.bind(globalThis);
-	return { env, req, url: new URL(req.url), now: Date.now(), fetch: f, email: selectSender(env, f) };
+	return { env, req, url: new URL(req.url), now: Date.now(), clock: Date.now, fetch: f, email: selectSender(env, f) };
 }
 type Key = NonNullable<Awaited<ReturnType<ControlPlane["resolveKey"]>>>;
 type Options = Record<string, unknown>;
@@ -42,7 +42,9 @@ export class ControlPlane extends WorkerEntrypoint<AppEnv> {
 	}
 	async #info(ctx: Ctx, k: Key, d: R.DriveRow) {
 		const e = await entitlements(ctx, k.orgId);
-		return { driveId: d.id, alias: d.alias, displayName: d.name, placement: d.placement, createdAt: d.created_at, access: k.access, writable: k.access !== "read" && e.writable && await storageUsage(ctx, k.orgId) <= e.quotaBytes };
+		const writable = d.status === "ready" && e.writable && k.access !== "read";
+		if (writable) await configureStorageQuota(ctx, k.orgId, e.quotaBytes);
+		return { driveId: d.id, alias: d.alias, displayName: d.name, placement: d.placement, createdAt: d.created_at, access: k.access, writable: writable && await storageUsage(ctx, k.orgId) <= e.quotaBytes };
 	}
 	#authed(k: Key) { return { userId: k.userId, email: "", sid: k.accessKeyId }; }
 	#body(ctx: Ctx, body: Options, hard = false) {

@@ -110,9 +110,14 @@ PATCH, DELETE and headers `authorization, content-type`.
 `Session` = `{"accessToken","refreshToken","expiresIn":900,"user":{"id","email"},"accountCreated":bool}`
 
 The first sign-in for an email creates: the user, a personal org `"My Space"` (role `owner`, tier
-`individual`, `trialEndsAt = now + 7 d`), and a drive `"Space"` (via `DATA_PLANE.createDrive`).
-This all happens in one D1 batch, plus the RPC call. If the RPC fails, the drive row is marked
-`status: "provisioning_failed"` and retried lazily on `GET /orgs`.
+`individual`, `trialEndsAt = null`, `trialPending = true`), and a drive `"Space"` (via
+`DATA_PLANE.createDrive`). The account rows are created in one D1 batch before the RPC call.
+Only the first successful storage provisioning starts the seven-day trial, measured from
+readiness. Drive readiness and trial activation are recorded together in a D1 batch.
+Concurrent/repeated retries cannot extend a trial. Failed provisioning leaves the trial
+pending and is retried lazily on `GET /orgs`; the same response contains the activated trial
+when a retry succeeds. Paid activation consumes the pending trial. Migration defaults leave
+all existing paid, active-trial, expired, or null-trial organizations unchanged.
 
 ### 5.2 Resources
 
@@ -120,7 +125,7 @@ This all happens in one D1 batch, plus the RPC call. If the RPC fails, the drive
 |---|---|
 | `GET /me` | `{"id","email","displayName":string\|null,"createdAt"}` |
 | `PATCH /me` | `{displayName}` → same shape as `GET /me` |
-| `GET /orgs` | `{"orgs":[Org]}`, where `Org` = `{"id","name","role":"owner"\|"admin"\|"member"\|"viewer","tier":"individual"\|"teams","trialEndsAt":ms\|null,"drives":[Drive]}` |
+| `GET /orgs` | `{"orgs":[Org]}`, where `Org` = `{"id","name","role":"owner"\|"admin"\|"member"\|"viewer","tier":"individual"\|"teams","trialEndsAt":ms\|null,"trialPending":bool,"drives":[Drive]}` |
 | `POST /orgs/{orgId}/drives` | `{name, placement?}` → `201 Drive`. Owner or admin only; `individual` tier is limited to 1 drive → `403 {"error":"plan_limit"}` |
 | `GET /drives/{driveId}` | `Drive`. `Drive` = `{"id","orgId","name","placement","status":"ready"\|"provisioning_failed"\|"deleted","createdAt","access":"read"\|"write"\|"admin"}` |
 | `PATCH /drives/{driveId}` | `{name}` → `Drive` |
@@ -134,7 +139,7 @@ built in M1.
 
 ```sql
 CREATE TABLE users(id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, display_name TEXT, created_at INTEGER NOT NULL);
-CREATE TABLE orgs(id TEXT PRIMARY KEY, name TEXT NOT NULL, tier TEXT NOT NULL, trial_ends_at INTEGER, created_at INTEGER NOT NULL);
+CREATE TABLE orgs(id TEXT PRIMARY KEY, name TEXT NOT NULL, tier TEXT NOT NULL, trial_ends_at INTEGER, created_at INTEGER NOT NULL, trial_pending INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE memberships(org_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(org_id, user_id));
 CREATE TABLE drives(id TEXT PRIMARY KEY, org_id TEXT NOT NULL, name TEXT NOT NULL, placement TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, deleted_at INTEGER);
 CREATE TABLE sessions(id TEXT PRIMARY KEY, user_id TEXT NOT NULL, family TEXT NOT NULL, refresh_hash TEXT NOT NULL UNIQUE, prev_hash TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER, user_agent TEXT);
@@ -144,3 +149,40 @@ CREATE TABLE rate_limits(k TEXT PRIMARY KEY, window_start INTEGER NOT NULL, coun
 ```
 
 Hashes are SHA-256 hex. OTP codes are compared in constant time.
+
+### Readiness and checkout clarification (27 October 2026)
+
+`trialPending` is additive. Existing clients may ignore it; they still see `trialEndsAt = null`
+until ready. Billing entitlements add `trialPending` and use state `provisioning` while a new
+trial is pending (writes remain disabled). The public billing catalog exposes
+`checkoutStartsImmediately: true` and `checkoutEndsTrial: true`; no price is invented when
+configured provider products are the source of pricing. Web checkout review must state the
+selected billing cadence and quantities, that final amount/tax is shown at the provider before
+payment, and that paying starts the subscription immediately and ends any remaining trial.
+The browser cannot confirm a native connection; opening the custom scheme is only a request.
+
+### Launch correctness amendments (29 October 2026)
+
+- Organization `usedBytes` and over-quota decisions use the data plane's organization quota
+  authority, including staged chunks, retained history and spilled manifest/attribute metadata.
+  `quotaUsage(org,lineages)` reads/accounting-initializes without changing entitlement limits;
+  `configureQuota` changes those limits. Initialization is checkpointed and may return a
+  retryable 503 until complete. `reconcileQuota` is internal service-binding recovery, bounded
+  to one ledger page. Uncertain active upload reservations stay charged until fenced recovery.
+- A drive can read/discover/reference only shards it uploaded with a verified checksum or
+  inherited from retained versions. Physical presence in a shared lineage grants no permission.
+  Forks copy retained grants, excluding the source's unpublished uploads. Existing metadata
+  initializes grants in checkpointed batches; `references_initializing` is a retryable 503.
+- Drive descriptions advertise `features:["xattrs"]`. File `put` optionally accepts
+  `xattrs:{name:[{h,n},...]}`; omission preserves current attributes, `{}` clears them. Names
+  contain 1–255 UTF-8 bytes with no NUL; maximum 64 attributes and 50 MiB combined content.
+  Their bytes use the existing immutable shard/quota path. Manifests include this map;
+  versions, rename, restore, snapshots and forks retain it. Folder attribute mutation is
+  explicitly unsupported. Clients publishing attributes must check the capability first.
+- JSON commit bodies retain the 1 MiB cap. NDJSON commits permit 8 MiB, one operation per
+  line, with the same validation/atomicity. `X-Uls-Request-Id` supplies the request identifier
+  for NDJSON and is CORS-allowed; retries and cancellation use the persisted commit receipt.
+  Clients must preflight the publication payload before uploading chunks.
+- GC remains opt-in. It marks all retained content and attribute references, sweeps old
+  unreferenced chunks and spilled metadata in bounded phases, and returns quota through a
+  serialized verified deletion. File deletion alone retains version history and its charge.

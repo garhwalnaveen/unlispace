@@ -1,3 +1,7 @@
+Local release SMB acceptance — 26 October 2026
+Profile: release ulsd; E2E_SMB=1; E2E_STRESS_BYTES=1000000000; isolated local Workers
+Hosted Space benchmark is not rerun by this check.
+
 SETUP applying local D1 migrations (120 s deadline)
 SETUP starting isolated local Workers (45 s deadline)
 PASS  setup local Workers + D1: Wrangler 4.152.0; api :8788, data :8787, inspector :9230; s3 :8789, inspector :9232; migration 0003 applied; D1 migrated
@@ -13,6 +17,8 @@ PASS  cloud 09 commit
 PASS  cloud 10 version actor = token user id
 PASS  cloud 11 drive A token on B -> 404
 PASS  cloud 12 read token cannot commit -> 404
+PASS  cloud indexed filename search respects scoped read tokens
+PASS  cloud workspace management and configured web links
 PASS  cloud 13 API access token on data plane -> 401
 PASS  cloud 14 refresh rotates
 PASS  cloud 15 reused old refresh token -> 401
@@ -23,18 +29,34 @@ PASS  engine 4 KiB edit uploads exactly one shard: 4096 bytes edited; 1 of 3 sha
 PASS  engine CLI versions + historical get: three ordered versions; first version bytes verified
 PASS  engine CLI restore creates new head: new version; original bytes restored
 PASS  engine concurrent ifVersion has exactly one winner: exit codes 0,2; one new version; winner bytes verified
-PASS  engine second CLI client watches change in < 1 s: 105.7 ms from writer invocation to exact version observed
-FAIL  engine native read-only NFS mount + byte-identical read: NFS mount exited: NFS server for drive d-01m5t78epq973mhzg0dvy9z2dg listening on 127.0.0.1:53559 mount command: mount_nfs -o port=53559,mountport=53559,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/unlispace-e2e.Hedvs0/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server
-SMB phase disabled (E2E_SMB=1 enables it)
-PASS  m3 session key + ListBuckets alias (official AWS client): AWS CLI v2; real D1 access key
+PASS  engine second CLI client watches change in < 1 s: 103.4 ms from writer invocation to exact version observed
+PASS  engine native read-only NFS mount + byte-identical read: 8 MiB compared through kernel NFS; write rejected
+PASS  smb daemon auth.set + drives.list + native mount: memory secret store; isolated state; kernel smbfs confirmed
+PASS  smb daemon bridges indexed search and workspace management
+PASS  smb text save -> independent remote bytes within 10 s
+PASS  smb cp random 8 MiB -> independent remote bytes within 10 s: 8388608 random bytes compared through a fresh-token CLI client
+PASS  smb stress 1000000000 B native write + fsync + close: 1000000000 random bytes; local accept 15.11 s; fsync 2.82 s; close 0.01 s
+PASS  smb stress 1000000000 B publication + independent CLI SHA-256: journal empty; independent length and SHA-256 match; verification 140 s
+PASS  smb stress 1000000000 B cold remount + native SHA-256: empty isolated disk cache + new VFS/kernel mount; 1000000000 bytes/SHA-256 match; native read 20.19 s
+PASS  smb mkdir -p + mv -> remote bytes and old path gone
+PASS  smb rename over existing safe save -> remote replacement
+PASS  smb rm -> previously published remote file gone within 10 s
+PASS  smb xattr write/read preserves file bytes
+PASS  smb remote CLI commit -> mount + change event within 5 s: 67.6 ms including CLI commit; bytes compared
+PASS  smb concurrent edits -> conflict event + both remote contents survive: conflict event captured; remote head retained; local copy byte-identical
+PASS  smb offline pin survives cache pressure and data-plane outage: real prefetch; 1-byte cache cap; kernel SMB bytes matched while data-plane process group was suspended
+PASS  smb journal cap rejects upload without partial remote data
+DIAGNOSTIC scrubbed SMB trace: /tmp/unlispace-smb-diagnostic-1793038642902.log
+PASS  smb drive.unmount + daemon shutdown leaves no mounts
+PASS  m3 session key + ListBuckets alias (official AWS client): installed @aws-sdk/client-s3; real D1 access key
 PASS  m3 PutObject/GetObject random 8 MiB + aws-chunked: 8388608 random bytes compared; explicit aws-chunked SHA256 trailer verified
 PASS  m3 write + patch + splice exact bytes, ordered versions + restore
 PASS  m3 fork snapshot + zero R2 growth + fork of fork + lineage guard: two fork levels; R2 file set unchanged; lineage and hard-delete guard verified
 PASS  m3 fork and parent writes remain isolated
 PASS  m3 child SigV4 mint + read scope + hidden bucket + write denied
-FAIL  m3 native daemon-less CLI fork + get: daemon-less uls fork unavailable: ulsd: connect to ulsd; run `uls daemon start`: No such file or directory (os error 2)   1 !== 0
+PASS  m3 native daemon-less CLI fork + get
 PASS  m3 quota rejects writes + tokens; reads and deletes survive
-PASS  m3 parent revocation kills warmed child within 35 s: 37.6 ms after revocation; warmed child denied
+PASS  m3 parent revocation kills warmed child within 35 s: 11.9 ms after revocation; warmed child denied
 PASS  cleanup: owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
 
 STATUS | CHECK | DETAIL
@@ -52,6 +74,8 @@ PASS | cloud 09 commit |
 PASS | cloud 10 version actor = token user id |
 PASS | cloud 11 drive A token on B -> 404 |
 PASS | cloud 12 read token cannot commit -> 404 |
+PASS | cloud indexed filename search respects scoped read tokens |
+PASS | cloud workspace management and configured web links |
 PASS | cloud 13 API access token on data plane -> 401 |
 PASS | cloud 14 refresh rotates |
 PASS | cloud 15 reused old refresh token -> 401 |
@@ -62,16 +86,32 @@ PASS | engine 4 KiB edit uploads exactly one shard | 4096 bytes edited; 1 of 3 s
 PASS | engine CLI versions + historical get | three ordered versions; first version bytes verified
 PASS | engine CLI restore creates new head | new version; original bytes restored
 PASS | engine concurrent ifVersion has exactly one winner | exit codes 0,2; one new version; winner bytes verified
-PASS | engine second CLI client watches change in < 1 s | 105.7 ms from writer invocation to exact version observed
-FAIL | engine native read-only NFS mount + byte-identical read | NFS mount exited: NFS server for drive d-01m5t78epq973mhzg0dvy9z2dg listening on 127.0.0.1:53559 mount command: mount_nfs -o port=53559,mountport=53559,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/unlispace-e2e.Hedvs0/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server
-PASS | m3 session key + ListBuckets alias (official AWS client) | AWS CLI v2; real D1 access key
+PASS | engine second CLI client watches change in < 1 s | 103.4 ms from writer invocation to exact version observed
+PASS | engine native read-only NFS mount + byte-identical read | 8 MiB compared through kernel NFS; write rejected
+PASS | smb daemon auth.set + drives.list + native mount | memory secret store; isolated state; kernel smbfs confirmed
+PASS | smb daemon bridges indexed search and workspace management |
+PASS | smb text save -> independent remote bytes within 10 s |
+PASS | smb cp random 8 MiB -> independent remote bytes within 10 s | 8388608 random bytes compared through a fresh-token CLI client
+PASS | smb stress 1000000000 B native write + fsync + close | 1000000000 random bytes; local accept 15.11 s; fsync 2.82 s; close 0.01 s
+PASS | smb stress 1000000000 B publication + independent CLI SHA-256 | journal empty; independent length and SHA-256 match; verification 140 s
+PASS | smb stress 1000000000 B cold remount + native SHA-256 | empty isolated disk cache + new VFS/kernel mount; 1000000000 bytes/SHA-256 match; native read 20.19 s
+PASS | smb mkdir -p + mv -> remote bytes and old path gone |
+PASS | smb rename over existing safe save -> remote replacement |
+PASS | smb rm -> previously published remote file gone within 10 s |
+PASS | smb xattr write/read preserves file bytes |
+PASS | smb remote CLI commit -> mount + change event within 5 s | 67.6 ms including CLI commit; bytes compared
+PASS | smb concurrent edits -> conflict event + both remote contents survive | conflict event captured; remote head retained; local copy byte-identical
+PASS | smb offline pin survives cache pressure and data-plane outage | real prefetch; 1-byte cache cap; kernel SMB bytes matched while data-plane process group was suspended
+PASS | smb journal cap rejects upload without partial remote data |
+PASS | smb drive.unmount + daemon shutdown leaves no mounts |
+PASS | m3 session key + ListBuckets alias (official AWS client) | installed @aws-sdk/client-s3; real D1 access key
 PASS | m3 PutObject/GetObject random 8 MiB + aws-chunked | 8388608 random bytes compared; explicit aws-chunked SHA256 trailer verified
 PASS | m3 write + patch + splice exact bytes, ordered versions + restore |
 PASS | m3 fork snapshot + zero R2 growth + fork of fork + lineage guard | two fork levels; R2 file set unchanged; lineage and hard-delete guard verified
 PASS | m3 fork and parent writes remain isolated |
 PASS | m3 child SigV4 mint + read scope + hidden bucket + write denied |
-FAIL | m3 native daemon-less CLI fork + get | daemon-less uls fork unavailable: ulsd: connect to ulsd; run `uls daemon start`: No such file or directory (os error 2)   1 !== 0
+PASS | m3 native daemon-less CLI fork + get |
 PASS | m3 quota rejects writes + tokens; reads and deletes survive |
-PASS | m3 parent revocation kills warmed child within 35 s | 37.6 ms after revocation; warmed child denied
+PASS | m3 parent revocation kills warmed child within 35 s | 11.9 ms after revocation; warmed child denied
 PASS | cleanup | owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
-RESULT: 33 passed, 2 failed
+RESULT: 53 passed, 0 failed

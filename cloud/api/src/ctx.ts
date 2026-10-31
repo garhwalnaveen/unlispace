@@ -15,6 +15,7 @@ export interface Ctx {
 	req: Request;
 	url: URL;
 	now: number;
+	clock?: () => number;
 	fetch: typeof fetch;
 	email: EmailSender;
 	dodo?: DodoPayments;

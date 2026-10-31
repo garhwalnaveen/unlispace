@@ -282,3 +282,53 @@ private actor FlakyClient: DaemonClient {
         #expect(!LogFormat.describe(Leaky(tok: "Bearer \(jwt)")).contains(jwt))
     }
 }
+
+@Suite struct UploadPhaseAndAccessTests {
+    @Test func switchParameterOnlyWhenRequested() throws {
+        let api = URL(string: "https://api.unlispace.com")!
+        let plain = try DesktopAuthWire.startURL(api: api, challenge: "CH", state: "ST")
+        #expect(!plain.absoluteString.contains("switch="))
+        let sw = try DesktopAuthWire.startURL(api: api, challenge: "CH", state: "ST", switchAccount: true)
+        let c = try #require(URLComponents(url: sw, resolvingAgainstBaseURL: false))
+        #expect(c.queryItems?.contains(URLQueryItem(name: "switch", value: "1")) == true)
+        #expect(c.queryItems?.contains(URLQueryItem(name: "state", value: "ST")) == true)
+    }
+
+    @Test func pendingUploadDecodesNewAndOldShapes() throws {
+        let new = Data(#"{"pending":[{"driveId":"d","path":"a","bytes":10,"phase":"uploading","bytesSent":5,"bytesTotal":10}],"journalBytes":10,"journalCapBytes":100}"#.utf8)
+        let s = try JSONDecoder().decode(UploadsSnapshot.self, from: new)
+        #expect(s.pending[0].stage == .uploading)
+        #expect(s.pending[0].uploadProgress == 0.5)
+        let old = Data(#"{"pending":[{"driveId":"d","path":"a","bytes":10}],"journalBytes":10,"journalCapBytes":100}"#.utf8)
+        let o = try JSONDecoder().decode(UploadsSnapshot.self, from: old)
+        #expect(o.pending[0].stage == .unknown)
+        #expect(o.pending[0].uploadProgress == nil)
+        let local = Data(#"{"pending":[{"driveId":"d","path":"a","bytes":10,"phase":"saved_locally"}],"journalBytes":10,"journalCapBytes":100}"#.utf8)
+        #expect(try JSONDecoder().decode(UploadsSnapshot.self, from: local).pending[0].stage == .savedLocally)
+    }
+
+    @Test func statusAndConfigBandwidth() throws {
+        let st = try JSONDecoder().decode(DaemonStatus.self, from: Data(#"{"version":"1","state":"idle","uploadBandwidthBps":5000000}"#.utf8))
+        #expect(st.uploadBandwidthBps == 5_000_000)
+        let none = try JSONDecoder().decode(DaemonStatus.self, from: Data(#"{"version":"1","state":"idle"}"#.utf8))
+        #expect(none.uploadBandwidthBps == nil)
+        let line = try DaemonCodec.encodeRequest(id: 1, method: "config.set", params: DaemonConfig(uploadBandwidthBps: 0))
+        #expect(String(decoding: line, as: UTF8.self).contains(#""uploadBandwidthBps":0"#))
+        #expect(UploadLimit.option(for: 4_900_000) == 5_000_000)
+        #expect(UploadLimit.isUnsupported(DaemonClientError.remote(DaemonError(code: "bad_request", message: "unknown field"))))
+        #expect(!UploadLimit.isUnsupported(DaemonClientError.disconnected))
+    }
+
+    @Test func meAccessDecodes() throws {
+        let json = #"{"user":{"id":"u","email":"a@b.c"},"workspaces":[{"id":"w","name":"W","role":"owner","tier":"pro","state":"trial_active","trialPending":false,"trialEndsAt":1800000000000,"writable":true,"storageReady":true,"quotaBytes":100,"usedBytes":1}]}"#
+        let r = try JSONDecoder().decode(MeAccess.self, from: Data(json.utf8))
+        #expect(r.workspaces[0].storageReady)
+        #expect(r.workspaces[0].state == "trial_active")
+        #expect(r.workspaces[0].trialEndDate == Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    @Test func copyConfirmationText() {
+        let t = CopyConfirmation.details(name: "a.txt", size: 2048, driveName: "Docs")
+        #expect(t.contains("a.txt") && t.contains("Docs") && t.contains("The original stays where it is."))
+    }
+}

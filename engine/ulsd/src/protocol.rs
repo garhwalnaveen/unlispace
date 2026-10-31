@@ -33,12 +33,17 @@ pub enum MountState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_retry_sign_in: Option<bool>,
     pub version: String,
     pub state: State,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_ops: Option<i64>,
+    /// Current upload bandwidth limit in bytes per second; 0 = unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_bandwidth_bps: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,7 +172,13 @@ pub struct ConfigParams {
     pub token: Option<String>,
     pub cache_cap_bytes: Option<i64>,
     pub journal_cap_bytes: Option<u64>,
+    /// Bytes per second across all shard uploads; 0 or absent = unlimited. Must be a
+    /// non-negative integer (anything else is `bad_request`).
+    pub upload_bandwidth_bps: Option<u64>,
 }
+
+/// Highest accepted `uploadBandwidthBps` (1 TB/s); larger values are almost certainly mistakes.
+pub const MAX_UPLOAD_BANDWIDTH_BPS: u64 = 1_000_000_000_000;
 
 impl fmt::Debug for ConfigParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -175,6 +186,7 @@ impl fmt::Debug for ConfigParams {
             .field("endpoint", &self.endpoint)
             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
             .field("cache_cap_bytes", &self.cache_cap_bytes)
+            .field("upload_bandwidth_bps", &self.upload_bandwidth_bps)
             .finish()
     }
 }

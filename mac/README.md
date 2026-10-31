@@ -119,13 +119,14 @@ Protocol: see `DAEMON-PROTOCOL.md`.
 
 `bash mac/scripts/release.sh` tests, bundles, signs inside-out, creates a compressed read-only
 DMG with an Applications shortcut, and verifies the mounted copy before detaching. It never
-launches the app. Default signing is ad-hoc for local development; no credentials are needed. Developer ID builds enable hardened runtime.
-`ULSD_BIN` optionally embeds an existing daemon binary. `ULS_VERSION` (default `0.2.0`) and
-`ULS_BUILD` (default `1`) set bundle versions and the versioned DMG name.
+launches the app. It requires `ULSD_BIN`, `ULS_VERSION`, `ULS_BUILD`, and a production
+API endpoint (`ULS_API_URL` or `ULS_WORKERS_DOMAIN`). Default signing is ad-hoc; the
+unnotarized app requires users to explicitly allow it in macOS settings. Developer ID
+builds enable hardened runtime.
 
 Set `ULS_SIGN_IDENTITY` to a Developer ID Application identity for real signing, and
 `ULS_NOTARY_PROFILE` to an existing notarytool profile for submission, waiting, and stapling.
-Without a profile, notarization explicitly skips. Provision credentials separately.
+Supply both values together; without either, notarization and appcast generation are skipped.
 Set both `ULS_SU_FEED_URL` (HTTPS) and `ULS_SU_PUBLIC_ED_KEY` at bundle time to enable Sparkle;
 otherwise both plist keys are omitted and Check for Updates is hidden. Sparkle is pinned to
 2.6.4 and copied from its resolved XCFramework, with an executable-relative framework rpath.
@@ -172,8 +173,13 @@ Cancellation also stops service preparation.
 
 `Unlispace.app/Contents/MacOS/Unlispace --engine-status`, `--enable-engine`, and
 `--disable-engine` provide ServiceManagement operations for installation/support tools.
+Disabling waits up to 15 seconds for macOS's unregistration completion callback before
+reporting success, so a subsequent registration does not race service shutdown.
 `bash mac/scripts/check-installation.sh` validates the actual shipped helper signature in a
-separate temporary app, registering an isolated memory-store daemon and unregistering it.
+separate temporary app, registering an isolated memory-store daemon, requiring valid `status`
+and signed-out `auth.status` RPC responses, and unregistering it. Release packaging runs this
+gate before creating the DMG. This isolated check does not establish same-identity installed
+upgrade behavior; the installed app must still pass restart and saved sign-in acceptance.
 For installed updates, replace the app bundle with fresh files rather than overwriting executable
 inodes in place; macOS can retain invalid code-signing state for an overwritten helper.
 
@@ -195,3 +201,18 @@ and progress, with Finder and stop-offline actions. Drive filters combine name s
 All/Mounted/Not mounted/Needs attention and offer Clear filters recovery. Keyboard shortcuts:
 ⌘1 My drives, ⌘2 Transfers, ⌘3 Offline files, ⌘F focus the drive filter, ⌘R refresh.
 Drive operations reject duplicate in-flight requests and mock connections.
+
+
+## Shared desktop styling
+
+`Sources/Unlispace/DesignSystem.swift` defines the neutral light/dark palette, panel borders,
+and heading scale used by the workspace, setup, settings, and menu-bar UI. Buttons and group
+boxes use native SwiftUI styles.
+System typography, SF Symbols, native navigation and form controls remain in use. Drive
+and offline-file actions stack when horizontal space is limited. Increased Contrast uses
+stronger panel borders; status labels retain their semantic colors.
+
+`DesignSystemTests` checks AA text contrast in both appearances.
+`WorkspaceRenderTests` renders window-backed fixtures, including the 800 × 580 workspace,
+compact offline actions, setup, and menu-bar UI. Images are written under the system
+temporary directory at `unlispace-ui-review/`. These fixtures do not sign in or mount drives.

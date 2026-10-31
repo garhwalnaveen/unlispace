@@ -7,7 +7,7 @@ export async function getShard(request: Request, env: Env, driveId: string, hash
 	const rangeHeader = request.headers.get("Range");
 	const key = shardKey(driveId, hash);
 	const headers = new Headers({
-		"Cache-Control": "public, max-age=31536000, immutable",
+		"Cache-Control": "private, no-store",
 		ETag: `"${hash}"`,
 		"Accept-Ranges": "bytes",
 		"Content-Type": "application/octet-stream",
@@ -62,7 +62,7 @@ export async function signBlocks(origin: string, drive: string, shards: { h: str
 
 export async function serveBlock(
 	request: Request, env: Env, ctx: ExecutionContext,
-	describe: (drive: string) => Promise<Result<{lineage: string}>>,
+	describe: (drive: string, hash: string) => Promise<Result<{lineage: string}>>,
 ): Promise<Response> {
 	if (request.method !== "GET") return err(405, "method_not_allowed");
 	const url = new URL(request.url);
@@ -76,16 +76,28 @@ export async function serveBlock(
 	if (!env.ULS_BLOCK_KEY) return err(503, "block_signing_unavailable");
 	const signature = Uint8Array.from(sig.match(/../g)!, (s) => parseInt(s, 16));
 	if (!await crypto.subtle.verify("HMAC", await keyFor(env.ULS_BLOCK_KEY), signature, payload(parts[1]!, parts[2]!, drive, exp))) return err(401, "unauthorized");
-	const info = await describe(drive);
+	// Deliberately no per-isolate cache of this lookup: `describe` here is the cheap `locate()` (one
+	// SQL read on a warm Durable Object), and a memory cache would keep serving a deleted or
+	// revoked drive's blocks for its whole TTL on every isolate that cannot see the delete. The
+	// signed URL already bounds exposure to 15 minutes; this check is what makes deletion immediate.
+	const info = await describe(drive, parts[2]!);
 	if (!info.ok) return Response.json(info.body, { status: info.status });
 	if (info.data.lineage !== parts[1]) return err(401, "unauthorized");
 	// Authenticate every hit. The cached bytes are independent of URL expiry and bearer identity.
 	const cacheUrl = new URL(url.origin + url.pathname);
 	const lookup = new Request(cacheUrl, { headers: request.headers.has("Range") ? { Range: request.headers.get("Range")! } : {} });
 	const hit = await caches.default.match(lookup);
-	if (hit) return hit;
+	if (hit) {
+        const response = new Response(hit.body, hit);
+        response.headers.set("Cache-Control", "private, no-store");
+        return response;
+    }
 	const response = await getShard(request, env, parts[1]!, parts[2]!);
 	// Never cache partial responses or errors; Cache.match can slice a cached complete object for ranges.
-	if (response.status === 200) ctx.waitUntil(caches.default.put(new Request(cacheUrl), response.clone()));
+	if (response.status === 200) {
+        const cached = new Response(response.clone().body, response);
+        cached.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+        ctx.waitUntil(caches.default.put(new Request(cacheUrl), cached));
+    }
 	return response;
 }

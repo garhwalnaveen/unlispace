@@ -2,23 +2,8 @@
 
 # dependencies
 /node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
 # testing
 /coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
 
 # misc
 .DS_Store
@@ -35,16 +20,15 @@ yarn-error.log*
 .env.local
 .env.production
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
 # unlispace cloud + engine
 cloud/**/node_modules
 cloud/**/.wrangler
 cloud/**/.dev.vars
+cloud/s3-gateway/node/dist
 engine/target
 /.wrangler
+.npm-cache/
+cloud/api/.wrangler-production-*.jsonc

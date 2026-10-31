@@ -11,13 +11,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.model?.start()
-        Self.showWorkspace()
-        if !UserDefaults.standard.bool(forKey: "onboardingCompleted") { Self.showOnboarding() }
+        if UserDefaults.standard.bool(forKey: "onboardingCompleted") { Self.showWorkspace() }
+        else { Self.showOnboarding() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        Self.showWorkspace()
+        if UserDefaults.standard.bool(forKey: "onboardingCompleted") { Self.showWorkspace() }
+        else { Self.showOnboarding() }
         return true
+    }
+
+    @MainActor static func openFromShortcut() {
+        if onboardingWindow?.isVisible == true || !UserDefaults.standard.bool(forKey: "onboardingCompleted") {
+            showOnboarding()
+            NotificationCenter.default.post(name: .workspaceShortcutPressed, object: nil)
+        } else { showWorkspace() }
     }
 
     @MainActor static func showWorkspace() {
@@ -42,16 +50,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let view = OnboardingView(model: model) {
                 onboardingWindow?.close()
                 onboardingWindow = nil
+                showWorkspace()
             }
             let window = NSWindow(contentViewController: NSHostingController(rootView: view))
             window.title = "Set up Unlispace"
-            window.styleMask = [.titled, .closable]
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.isReleasedWhenClosed = false
+            window.setContentSize(NSSize(width: 1100, height: 760))
+            window.contentMinSize = NSSize(width: 800, height: 640)
             window.center()
             onboardingWindow = window
         }
         onboardingWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Self.model?.stopWorkspaceShortcut()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -99,7 +114,7 @@ struct UnlispaceApp: App {
                 .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
         } label: {
             Image(systemName: model.symbolName)
-                .accessibilityLabel("Unlispace: \(model.status.title)")
+                .accessibilityLabel("Unlispace: \(model.connectionTitle)")
         }
         .menuBarExtraStyle(.window)
         Settings {

@@ -86,10 +86,9 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
   The secret disappears on close/navigation and is never written to browser storage.
 - `/orgs/:id/billing`: current plan, trial days, used/quota bytes, seats, storage add-ons, monthly or
   annual checkout, paginated invoices, and the Dodo customer portal. Management controls and invoice
-  requests are limited to owners/admins. Checkout honors the catalog's availability flag. Final
-  prices are displayed by Dodo; the catalog currently provides no prices. Redirects require HTTPS.
+  requests are limited to owners/admins. Checkout honors the catalog's availability flag. Checkout opens from “Choose a plan”; its amount, tax, renewal and trial disclosures remain visible before continuing to Dodo. Redirects require HTTPS.
 - System/light/dark appearance selector follows OS changes in System mode and persists a manual choice. Mobile layouts
-  support 360 px. Native modal dialogs contain focus and Escape closes them. Inputs have labels,
+  support 360 px. Shadcn/Radix dialogs contain focus, close on Escape, and return focus to their opener. Inputs have labels,
   errors use live alerts, and status/progress updates are announced.
 
 ## Memory-only sessions and cookie migration
@@ -141,6 +140,18 @@ read-only controls, one-time key reveal/copy/revoke, checkout/portal requests, i
 cross-tab auth. The test suite uses one worker to limit shared-machine load. A 15-second test deadline
 accommodates existing UI tests under that load; golden fixtures have a 30-second deadline.
 
-UI styling was checked in desktop Chrome and at 360 px for sign-in, drive overview and folder listing; authenticated previews used temporary fixture data. The workspace uses a navigation rail on desktop and a compact navigation row on mobile. Drive management actions expand under Drive options.
+## UI components
+
+Use the shadcn components in `src/components/ui` for buttons, text inputs, native selects,
+dialogs and tables. `components.json` configures the registry and `@/` alias, so additional
+components can be added with `npx shadcn@latest add <component>`. Add only what a screen uses.
+The Button defaults to the outline variant; use `variant="default"` for the primary action.
+`src/styles.css` owns the shared neutral light/dark tokens and page layout. Avoid restyling controls
+there. Lucide provides the icons; the shared `Modal` connects existing screen state to Radix.
+
+The refresh was checked in Chrome at desktop and 375 px in light/dark mode using temporary
+sample data. Checkout lives in a dialog and invoices use a table. The web suite covers pricing
+and permission rules, drive confirmations, uploads, auth, plus dialog focus trapping, Escape
+and focus return. `npm run build` checks TypeScript and the production bundle.
 
 No live Worker/R2 upload, Dodo checkout/portal, cookie migration, or deployed CORS verification is claimed. No deployment is performed.

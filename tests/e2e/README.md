@@ -95,8 +95,8 @@ Ten additional checks exercise the actual daemon and macOS kernel SMB mount:
 5. Rename a temporary file over a previously published destination; verify the
    replacement bytes and absence of the temporary path remotely.
 6. Remove the previously published large file; require remote absence within 10 s.
-7. Set and read back an xattr; verify file bytes remain intact remotely. This does
-   not assert cross-client xattr persistence.
+7. Set and read an xattr and resource fork; wait for their versioned cloud manifest,
+   download every attribute chunk with an independent token, and compare exact bytes.
 8. Warm the local directory/negative lookup, commit a new file through the second
    CLI, then require identical mounted bytes and a daemon `change` event within
    5 s, including the CLI invocation.
@@ -207,3 +207,18 @@ group suspended, then resumes it independently of blocked kernel I/O. A journal-
 an oversized queued upload and verifies that no partial object was published. Owned services and
 mounts are cleaned up after the gate. Installed LaunchAgent validation is separate:
 `bash mac/scripts/check-installation.sh`.
+
+### Optional native stress
+
+`E2E_SMB=1 E2E_STRESS_BYTES=50000000 bash tests/e2e/run.sh` adds streamed random
+50 MB write/fsync/close, independent CLI SHA-256 verification, and cold native remount
+verification. `1000000000` opts into the separate 1 GB workload. Payloads, cache removal and
+mounts stay inside the owned temporary Worker/daemon state; cleanup removes them. SMB
+signing stays enabled. This local Worker test is a reliability check, not a hosted Space
+throughput comparison. `node --test tests/e2e/stress.test.mjs` checks the streaming helper
+and its explicit opt-in/deadline behavior without mounting anything.
+
+The quota integration check injects a deliberately stale per-drive D1 measurement and requires
+organization billing/token/S3 access to continue using the authoritative data-plane ledger.
+Deleting a current file must retain its historical storage charge. Atomic over-quota rejection
+and reclamation races are covered by data-plane Workers tests with small real byte budgets.

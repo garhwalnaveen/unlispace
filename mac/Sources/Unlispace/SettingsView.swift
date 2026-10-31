@@ -14,7 +14,7 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
 
     private enum SettingsPage: String, CaseIterable, Identifiable {
-        case general = "General", account = "Account", cache = "Cache", permissions = "Permissions", advanced = "Advanced"
+        case general = "General", account = "Account", cache = "Storage & uploads", permissions = "Permissions", advanced = "Advanced"
         var id: Self { self }
         var symbol: String {
             switch self {
@@ -30,8 +30,15 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             List(SettingsPage.allCases, selection: $page) { item in
-                Label(item.rawValue, systemImage: item.symbol).tag(item).padding(.vertical, 4)
+                Label {
+                    Text(item.rawValue)
+                } icon: {
+                    Image(systemName: item.symbol).foregroundStyle(AppDesign.muted)
+                }.tag(item).padding(.vertical, 5)
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(AppDesign.surface)
             .navigationTitle("Settings")
             .navigationSplitViewColumnWidth(190)
         } detail: {
@@ -43,13 +50,17 @@ struct SettingsView: View {
                 case .permissions: permissions
                 case .advanced: advanced
                 }
-                if let message { Section { Text(message).foregroundStyle(.secondary).textSelection(.enabled) } }
+                if let message { Section { Text(message).foregroundStyle(AppDesign.muted).textSelection(.enabled) } }
                 if let error = model.lastError { Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(AppDesign.canvas)
             .navigationTitle((page ?? .general).rawValue)
         }
         .frame(minWidth: 780, idealWidth: 860, minHeight: 560, idealHeight: 620)
+        .appStyle()
+        .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
         .task { await model.refreshPermissions() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refreshPermissions() }
@@ -58,14 +69,14 @@ struct SettingsView: View {
 
     private var general: some View {
         Group {
-            Section("Make yourself at home") {
+            Section("General") {
                 Toggle("Launch at login", isOn: Binding(
                     get: { model.loginAccess == .enabled },
                     set: { model.setLaunchAtLogin($0) }
                 ))
                 .disabled(model.loginAccess == .checking || model.loginAccess == .unavailable)
-                if let message = model.permissionMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
-                Text("Keep Unlispace ready in your menu bar when you sign in to your Mac.").font(.caption).foregroundStyle(.secondary)
+                if let message = model.permissionMessage { Text(message).font(.caption).foregroundStyle(AppDesign.muted) }
+                Text("Keep Unlispace ready in your menu bar when you sign in to your Mac.").font(.caption).foregroundStyle(AppDesign.muted)
                 Picker("Appearance", selection: $appearance) {
                     Text("System").tag("system")
                     Text("Light").tag("light")
@@ -74,7 +85,7 @@ struct SettingsView: View {
             }
             Section("Setup") {
                 LabeledContent("Drives in Finder") { Button("Open setup…") { AppDelegate.showOnboarding() } }
-                Text("Sign in, choose drives, and learn about macOS access permissions.").foregroundStyle(.secondary)
+                Text("Sign in, choose drives, and learn about macOS access permissions.").foregroundStyle(AppDesign.muted)
             }
             Section("Unlispace") {
                 LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
@@ -87,10 +98,21 @@ struct SettingsView: View {
         Section("Your account") {
             if let acct = model.account {
                 LabeledContent("Signed in as", value: acct.email)
-                if model.sessionPending { Text("Signed in. Waiting for the engine to connect.").foregroundStyle(.secondary) }
+                if model.sessionPending { Text("Signed in. Waiting for the engine to connect.").foregroundStyle(AppDesign.muted) }
                 Button("Sign out") { model.signOut() }
+                Button("Use a different account…") { model.useDifferentAccount() }
+                    .disabled(model.signingIn)
+                    .accessibilityHint("Signs out of this account and opens your browser to choose another")
+                if model.signingIn {
+                    Button("Open browser") { model.openSignInBrowser() }
+                    Button("Cancel sign-in") { model.cancelSignIn() }
+                }
             } else {
-                Text("Sign in to access your Unlispace drives on this Mac.").foregroundStyle(.secondary)
+                Text("Sign in to access your Unlispace drives on this Mac.").foregroundStyle(AppDesign.muted)
+                if let message = model.stateMessage { Text(message).foregroundStyle(AppDesign.muted) }
+                if model.canRetrySignIn {
+                    Button("Retry saved sign-in") { model.retrySavedSignIn() }.disabled(model.retryingSavedSignIn)
+                }
                 Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
                     .disabled(model.signingIn).buttonStyle(.borderedProminent)
                 if model.signingIn {
@@ -104,23 +126,27 @@ struct SettingsView: View {
     private var cache: some View {
         Group {
             Section("Local storage") {
-                Stepper("Cache size cap: \(cacheGB) GB", value: $cacheGB, in: 1...2000, step: 5)
+                Stepper("Downloaded files limit: \(cacheGB) GB", value: $cacheGB, in: 1...2000, step: 5)
                     .onChange(of: cacheGB) { _, v in AppSettings.cacheCapGB = v; model.pushCacheCap() }
-                Text("Files are downloaded as you open them. This cap controls how much disk space the cache can use.").foregroundStyle(.secondary)
+                Text("Files download as you open them. This limit controls disk space used by cached files.").foregroundStyle(AppDesign.muted)
+            }
+            Section("Uploads") {
+                Picker("Limit upload speed", selection: Binding(
+                    get: { UploadLimit.option(for: model.uploadBandwidthBps ?? 0) },
+                    set: { model.setUploadLimit($0) }
+                )) {
+                    ForEach(UploadLimit.options, id: \.bps) { Text($0.title).tag($0.bps) }
+                }
+                .disabled(model.usingMock || model.uploadLimitUnsupported)
+                .accessibilityValue(model.uploadLimitUnsupported ? "Requires a newer engine" : "")
+                if model.uploadLimitUnsupported { Text("Requires a newer engine").font(.caption).foregroundStyle(AppDesign.muted) }
+                else if model.usingMock { Text("Connect the engine to limit upload speed.").font(.caption).foregroundStyle(AppDesign.muted) }
+                else if model.uploadBandwidthBps == nil { Text("Current limit is not reported by this engine.").font(.caption).foregroundStyle(AppDesign.muted) }
+                if let message = model.uploadLimitMessage { Text(message).font(.caption).foregroundStyle(.red) }
+                Text("Slows uploads so they do not use all of your connection. Check Transfers to see when files are saved to the cloud.").font(.caption).foregroundStyle(AppDesign.muted)
             }
             Section("Available offline") {
-                Text("Use a drive’s offline options to keep files available without an internet connection.").foregroundStyle(.secondary)
-                if model.usingMock { Text("Connect the engine to see offline availability.") }
-                else if let pins = model.pins {
-                    if pins.isEmpty { Text("No files are kept offline yet.").foregroundStyle(.secondary) }
-                    ForEach(pins) { pin in
-                        VStack(alignment: .leading) {
-                            Text("\(pin.driveId) · \(pin.path)")
-                            ProgressView(value: pin.progress).accessibilityLabel("\(pin.path) cached").accessibilityValue("\(Int(pin.progress * 100)) percent")
-                            Button("Stop keeping offline") { model.setPin(driveId: pin.driveId, path: pin.path, pinned: false) }
-                        }
-                    }
-                } else { Text("Offline status is unavailable from this engine.") }
+                Text("Manage what stays on this Mac in Offline files in the main window.").foregroundStyle(AppDesign.muted)
             }
         }
     }
@@ -136,9 +162,9 @@ struct SettingsView: View {
                 if model.engineInstall == .notRegistered || model.engineInstall == .requiresApproval {
                     Button("Enable engine…") { model.installEngine() }
                 }
-                if model.engineInstall == .notInstalled { Text("Install a build that includes the engine to mount drives.").foregroundStyle(.secondary) }
+                if model.engineInstall == .notInstalled { Text("Install a build that includes the engine to mount drives.").foregroundStyle(AppDesign.muted) }
                 if case .failed(let error) = model.engineInstall {
-                    Text(error).foregroundStyle(.secondary)
+                    Text(error).foregroundStyle(AppDesign.muted)
                     Button("Enable engine…") { model.installEngine() }
                 }
                 Button("Refresh status") { Task { await model.refresh() } }

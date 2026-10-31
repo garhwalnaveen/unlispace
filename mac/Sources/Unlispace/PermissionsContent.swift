@@ -74,44 +74,49 @@ enum AccessStatus: Equatable {
 /// Shared, passive permission UI. OS prompts happen only from the action buttons.
 struct PermissionsContent: View {
     var model: AppModel
+    var onboarding = false
 
     var body: some View {
-        Section {
-            Label("Access on your terms", systemImage: "hand.raised.fill").font(.headline)
-            Text("Review what each feature needs. You choose when to enable access, and optional features can be set up later.")
-                .foregroundStyle(.secondary)
-            Button("Refresh access status", systemImage: "arrow.clockwise") {
-                Task { await model.refreshPermissions() }
+        if !onboarding {
+            Section {
+                Label("Access on your terms", systemImage: "hand.raised.fill").font(.headline)
+                Text("Review what each feature needs. You choose when to enable access, and optional features can be set up later.")
+                    .foregroundStyle(AppDesign.muted)
+                Button("Refresh access status", systemImage: "arrow.clockwise") {
+                    Task { await model.refreshPermissions() }
+                }
             }
         }
         Section("For your drives") {
             PermissionRow(title: "Background engine", symbol: "externaldrive.badge.checkmark", optional: false,
                           purpose: "Keeps your mounted drives available and synchronizes files you add or edit.",
                           status: .engine(model.engineInstall),
-                          actionTitle: engineAction) {
+                          actionTitle: engineAction, compact: onboarding) {
                 if model.engineInstall == .enabled || model.engineInstall == .requiresApproval {
                     DaemonLifecycle.openLoginItemsSettings()
                 } else { model.installEngine() }
             }
             if case .failed(let message) = model.engineInstall {
-                Text(message).font(.caption).foregroundStyle(.secondary)
+                Text(message).font(.caption).foregroundStyle(AppDesign.muted)
             } else if model.engineInstall == .notInstalled {
                 Text("Install a complete Unlispace app build with its engine to continue.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(AppDesign.muted)
             }
             PermissionRow(title: "Network volume access", symbol: "folder", optional: false,
                           purpose: "macOS treats Unlispace drives as network volumes. Finder, your editor, and other apps may each ask to open their files.",
-                          status: .managed, actionTitle: "Open settings") {
+                          status: .managed, actionTitle: "Open settings", compact: onboarding) {
                 openSettings(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")!)
             }
-            Text("Manage each app under Privacy & Security → Files and Folders. macOS does not provide Unlispace with one permission switch for every app.")
-                .font(.caption).foregroundStyle(.secondary)
+            if !onboarding {
+                Text("Manage each app under Privacy & Security → Files and Folders. macOS does not provide Unlispace with one permission switch for every app.")
+                    .font(.caption).foregroundStyle(AppDesign.muted)
+            }
         }
         Section("Optional conveniences") {
             PermissionRow(title: "Conflict notifications", symbol: "bell", optional: true,
                           purpose: "Get an alert when a conflicting edit is preserved as a separate copy. Conflict details also appear in Unlispace.",
                           status: model.notificationAccess,
-                          actionTitle: notificationAction) {
+                          actionTitle: notificationAction, compact: onboarding) {
                 if model.notificationAccess == .notRequested {
                     Task { await model.enableConflictNotifications() }
                 } else {
@@ -122,17 +127,19 @@ struct PermissionsContent: View {
             PermissionRow(title: "Launch at login", symbol: "sunrise", optional: true,
                           purpose: "Open Unlispace when you sign in to your Mac, ready in the menu bar.",
                           status: model.loginAccess,
-                          actionTitle: loginAction) {
+                          actionTitle: loginAction, compact: onboarding) {
                 if model.loginAccess == .notEnabled { model.setLaunchAtLogin(true) }
                 else { DaemonLifecycle.openLoginItemsSettings() }
             }
         }
         if let message = model.permissionMessage ?? model.notificationMessage {
-            Section { Text(message).font(.callout).foregroundStyle(.secondary).textSelection(.enabled) }
+            Section { Text(message).font(.callout).foregroundStyle(AppDesign.muted).textSelection(.enabled) }
         }
-        Section("What happens to your files") {
-            Text("Files you add to a mounted drive are uploaded to your configured Unlispace service. Each app controls its own access to that drive.")
-                .font(.callout).foregroundStyle(.secondary)
+        if !onboarding {
+            Section("What happens to your files") {
+                Text("Files you add to a mounted drive are uploaded to your configured Unlispace service. Each app controls its own access to that drive.")
+                    .font(.callout).foregroundStyle(AppDesign.muted)
+            }
         }
     }
 
@@ -177,19 +184,20 @@ private struct PermissionRow: View {
     var purpose: String
     var status: AccessStatus
     var actionTitle: String?
+    var compact = false
     var action: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol).font(.title3).foregroundStyle(.tint).frame(width: 28).padding(.top, 2)
+            Image(systemName: symbol).font(.title3).foregroundStyle(AppDesign.muted).frame(width: 28).padding(.top, 2)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: compact ? 5 : 8) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.headline)
+                    Text(title).font(.system(size: compact ? 14 : 13, weight: .semibold))
                     Spacer()
-                    Text(optional ? "Optional" : "Drive access").font(.caption).foregroundStyle(.secondary)
+                    Text(optional ? "Optional" : "Drive access").font(.caption).foregroundStyle(AppDesign.muted)
                 }
-                Text(purpose).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(purpose).font(.system(size: compact ? 12 : 13)).foregroundStyle(AppDesign.muted).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Label {
                         Text(status.label).foregroundStyle(.primary)

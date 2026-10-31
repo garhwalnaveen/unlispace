@@ -35,7 +35,27 @@ export interface Org {
   role: "owner" | "admin" | "member" | "viewer";
   tier: "individual" | "teams";
   trialEndsAt: number | null;
+  trialPending?: boolean;
+  quotaBytes?: number;
+  usedBytes?: number;
   drives: Drive[];
+}
+export interface Workspace {
+  id: string;
+  name: string;
+  role: Org["role"];
+  tier: "individual" | "teams";
+  state: "provisioning" | "trial_active" | "paid" | "expired";
+  trialPending: boolean;
+  trialEndsAt: number | null;
+  writable: boolean;
+  storageReady: boolean;
+  quotaBytes: number;
+  usedBytes: number;
+}
+export interface Access {
+  user: User;
+  workspaces: Workspace[];
 }
 export interface DriveToken {
   token: string;
@@ -118,6 +138,7 @@ export class Api {
   me = () => this.request<Profile>("/me");
   updateMe = (displayName: string) =>
     this.request<Profile>("/me", this.json("PATCH", { displayName }));
+  access = () => this.request<Access>("/me/access");
   orgs = () => this.request<{ orgs: Org[] }>("/orgs");
   drive = (id: string) =>
     this.request<Drive>(`/drives/${encodeURIComponent(id)}`);
@@ -257,7 +278,15 @@ export function errorMessage(error: unknown): string {
       quota_exceeded: "This organization has reached its storage quota. Open Billing to add storage.",
       forbidden: "You do not have permission to perform this action.",
       keys_not_configured: "Access keys are not configured on this server yet.",
+      checkout_pending: "A checkout is already in progress. Resume the same plan, or wait for its payment status to be confirmed.",
+      billing_rejected: "The payment provider could not create checkout. Please try again.",
       billing_not_configured: "Billing is not configured on this server yet. Please try again later.",
+      team_plan_required: "An active Teams plan is required to invite members.",
+      already_member: "That account is already a member of this workspace.",
+      invite_unavailable: "No free seat is available, the invitation is no longer valid, or your role changed. Refresh the team page.",
+      invalid_invite: "This invitation has expired, was revoked, or belongs to another email address.",
+      membership_protected: "Only owners may manage privileged members, and a workspace must retain an owner.",
+      email_unavailable: "The email could not be sent. Please try again later.",
       no_billing_customer: "A billing portal will be available after your first checkout.",
       subscription_exists: "You already have a subscription. Use Manage subscription to change it.",
       seats_below_members: "Choose enough seats for all current organization members.",

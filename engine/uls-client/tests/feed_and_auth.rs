@@ -64,7 +64,7 @@ impl Provider {
         })
     }
     fn tok(&self) -> ProviderToken {
-        ProviderToken { token: self.current.lock().unwrap().clone(), endpoint: self.endpoint.lock().unwrap().clone() }
+        ProviderToken { token: self.current.lock().unwrap().clone(), endpoint: self.endpoint.lock().unwrap().clone(), read_only: false }
     }
 }
 
@@ -265,7 +265,7 @@ async fn versions_follows_the_cursor_to_the_end() {
                 size: 0,
                 content_type: "text/plain".into(),
                 mtime_ms: 0,
-                shards: vec![],
+                shards: vec![], xattrs: None,
             })
             .collect();
         c.commit("demo", ops).await.unwrap();

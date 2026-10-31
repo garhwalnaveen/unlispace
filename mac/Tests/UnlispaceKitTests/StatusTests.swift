@@ -27,6 +27,14 @@ import Foundation
         #expect(line?.hasPrefix("1 file:") == true)
     }
 
+    @Test func uploadStatusReportsRecentFailure() {
+        let snapshot = UploadsSnapshot(pending: [], journalBytes: 10, journalCapBytes: 100)
+        let failure = TransferInfo(id: "1", driveId: "a", path: "/x", direction: .upload, bytesDone: 0, bytesTotal: 5, status: .failed)
+        #expect(TransferSummary.uploadTitle(uploads: snapshot, transfers: [], state: .idle, available: true) == "No uploads pending")
+        #expect(TransferSummary.uploadTitle(uploads: snapshot, transfers: [], state: .idle, available: true, recentUploads: [failure]) == "A recent upload failed")
+        #expect(TransferSummary.uploadTitle(uploads: snapshot, transfers: [], state: .offline, available: true, recentUploads: [failure]) == "Offline · Cloud save not confirmed")
+    }
+
     @Test func endpointValidation() {
         #expect(AppSettings.validateEndpoint("https://api.example.com") != nil)
         #expect(AppSettings.validateEndpoint("http://localhost:8787") != nil)

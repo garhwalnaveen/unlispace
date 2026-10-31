@@ -11,6 +11,8 @@ import { otpFromLog, uploadResult, watchHas, fixture } from './helpers.mjs';
 import { DaemonSocket, smbEnabled } from './daemon-socket.mjs';
 import { m3Checks } from './m3.mjs';
 import { desktopChecks } from './desktop.mjs';
+import { nativeStressChecks } from './stress.mjs';
+import { parityChecks } from './parity.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const work = process.argv[2];
@@ -93,6 +95,13 @@ function signal(record, value) {
 
 async function stop(record) {
   if (!record) return;
+  if (record === smbDaemon && process.env.E2E_SMB_DIAGNOSTIC === '1' && !record.diagnosticSaved) {
+    record.diagnosticSaved = true;
+    const path = `/tmp/unlispace-smb-diagnostic-${Date.now()}.log`;
+    const lines = (record.stdout + '\n' + record.stderr).split('\n').map(line => safe(line)).join('\n');
+    await writeFile(path, lines, {mode:0o600,flag:'wx'});
+    console.log(`DIAGNOSTIC scrubbed SMB trace: ${path}`);
+  }
   signal(record, 'SIGINT');
   const stopped = await Promise.race([record.done.then(() => true), delay(3000).then(() => false)]);
   // Kill the whole owned group, including a runtime orphaned by its wrapper.
@@ -207,6 +216,7 @@ async function setup() {
       if (m3Enabled) config.secrets.required.push('ULS_ACCESS_KEY_MASTERS');
     }
     else if (service === 'data-plane') config.vars.ULS_ALLOW_DEV_TOKEN = '0';
+    else if (service === 's3-gateway') config.vars.ULS_DATA_ENDPOINT = endpoint;
     await mkdir(join(work, service));
     await writeFile(join(work, service, 'wrangler.json'), JSON.stringify(config));
   }
@@ -325,6 +335,19 @@ async function cloudChecks() {
     assert(readToken);
     assert.equal((await request(endpoint, `/v0/drives/${drive}/commit`, { token: readToken, body: { ops: [{ op: 'mkdir', path: 'forbidden/' }] } })).status, 404);
   });
+  await check('cloud indexed filename search respects scoped read tokens', async () => {
+    const matches = await json(endpoint, `/v0/drives/${drive}/search?q=HELLO`, {token:readToken});
+    assert.deepEqual(matches.entries.map(entry => entry.path),['hello.txt']);
+    assert.equal((await request(endpoint, '/v0/drives/some-other-drive/search?q=hello', {token:readToken})).status,404);
+  });
+  await check('cloud workspace management and configured web links', async () => {
+    const org = (await json(api,'/orgs',{token:session.accessToken})).orgs[0];
+    const team = await json(api,`/orgs/${org.id}/members`,{token:session.accessToken});
+    assert.equal(team.members[0].userId,session.user.id);
+    assert.equal(team.role,'owner');
+    const config = await json(api,'/client-config');
+    assert(['http:','https:'].includes(new URL(config.webOrigin).protocol));
+  });
   await check('cloud 13 API access token on data plane -> 401', async () => {
     assert(drive && session, 'requires ready drive and session');
     assert.equal((await request(endpoint, `/v0/drives/${drive}`, { token: session.accessToken })).status, 401);
@@ -336,13 +359,22 @@ async function cloudChecks() {
     secrets.push(rotated.accessToken, rotated.refreshToken);
     assert(rotated.refreshToken && rotated.refreshToken !== session.refreshToken);
   });
-  await check('cloud 15 reused old refresh token -> 401', async () => {
+  // A retry with the just-rotated token inside the server's 60 s grace window is a lost response,
+  // not theft: it gets a fresh session and retires the unused successor. Theft detection after the
+  // window (and after the successor is used) is covered by cloud/api/test/auth.test.ts.
+  let retried;
+  await check('cloud 15 lost-response refresh retry recovers, unused successor retired', async () => {
     assert(rotated, 'requires rotated session');
-    assert.equal((await request(api, '/auth/refresh', { body: { refreshToken: session.refreshToken } })).status, 401);
-  });
-  await check('cloud 16 reuse revokes whole refresh family', async () => {
-    assert(rotated, 'requires rotated session');
+    retried = await json(api, '/auth/refresh', { body: { refreshToken: session.refreshToken } });
+    secrets.push(retried.accessToken, retried.refreshToken);
+    assert(retried.refreshToken && retried.refreshToken !== rotated.refreshToken);
     assert.equal((await request(api, '/auth/refresh', { body: { refreshToken: rotated.refreshToken } })).status, 401);
+  });
+  await check('cloud 16 reuse of a retired token revokes whole refresh family', async () => {
+    assert(retried, 'requires retried session');
+    // cloud 15 already presented the retired `rotated` token, which counts as reuse: the
+    // whole family, including the retry's fresh token, must be dead.
+    assert.equal((await request(api, '/auth/refresh', { body: { refreshToken: retried.refreshToken } })).status, 401);
   });
 }
 
@@ -510,7 +542,7 @@ async function smbChecks() {
     secrets.push(independentToken);
     assert(independentToken, 'requires fresh independent drive token');
     const socket = join(work, 'ulsd.sock');
-    smbDaemon = start(binary, ['daemon', '--state-dir', join(work, 'smb-state'), '--socket', socket, '--secret-store', 'memory'], { ULS_ENDPOINT: endpoint, RUST_LOG: 'warn' });
+    smbDaemon = start(binary, ['daemon', '--state-dir', join(work, 'smb-state'), '--socket', socket, '--secret-store', 'memory'], { ULS_ENDPOINT: endpoint, RUST_LOG: process.env.E2E_SMB_DIAGNOSTIC === '1' ? 'warn,uls_vfs::publisher=debug,smb_server::dispatch=debug,smb_server::handlers::close=debug,smb_server::conn=info' : 'warn' });
     await until(async () => {
       assert.equal(smbDaemon.child.exitCode, null, `daemon exited: ${safe(smbDaemon.stderr)}`);
       try { await access(socket); return true; } catch { return false; }
@@ -530,6 +562,15 @@ async function smbChecks() {
     smbMountpoint = mounted.mountPath;
     return 'memory secret store; isolated state; kernel smbfs confirmed';
   });
+  await check('smb daemon bridges indexed search and workspace management', async () => {
+    assert(control,'requires daemon');
+    const matches = await control.call('files.search',{driveId:drive,query:'hello'});
+    assert(matches.entries.some(entry => entry.path === 'hello.txt'));
+    const orgs = await control.call('api.request',{method:'GET',path:'/orgs'});
+    const members = await control.call('api.request',{method:'GET',path:`/orgs/${orgs.orgs[0].id}/members`});
+    assert.equal(members.role,'owner');
+    await assert.rejects(control.call('api.request',{method:'GET',path:'//example.com/orgs'}),/bad_request/);
+  });
   await check('smb text save -> independent remote bytes within 10 s', async () => {
     await writeFile(local, text);
     await copyIn(local, 'smb-text.txt');
@@ -541,6 +582,7 @@ async function smbChecks() {
     await remoteBytes('smb-big.bin', payload);
     return '8388608 random bytes compared through a fresh-token CLI client';
   });
+  await nativeStressChecks({work,drive,control,check,native,smbMountpoint,cli,independentToken,until});
   await check('smb mkdir -p + mv -> remote bytes and old path gone', async () => {
     assert(smbMountpoint, 'requires SMB mount');
     await native('/bin/mkdir', ['-p', join(smbMountpoint, 'a/b')]);
@@ -563,11 +605,25 @@ async function smbChecks() {
     await native('/bin/rm', [join(smbMountpoint, 'smb-big.bin')]);
     await until(() => gone('smb-big.bin'), 10000, 'removed file still exists remotely');
   });
-  await check('smb xattr write/read preserves file bytes', async () => {
+  await check('smb xattrs and resource fork publish through independent cloud reads', async () => {
     assert(smbMountpoint, 'requires SMB mount');
     const target = join(smbMountpoint, 'smb-safe.txt');
     await native('/usr/bin/xattr', ['-w', 'com.unlispace.e2e', 'metadata-value', target]);
     assert.equal((await native('/usr/bin/xattr', ['-p', 'com.unlispace.e2e', target])).trim(), 'metadata-value');
+    await native('/usr/bin/xattr', ['-w', 'com.apple.ResourceFork', 'resource-value', target]);
+    let published;
+    await until(async () => {
+      published = await dp('/manifest?path=smb-safe.txt');
+      return published.xattrs?.['com.unlispace.e2e']?.length && published.xattrs?.['com.apple.ResourceFork']?.length;
+    }, 10000, 'cloud manifest lost file attributes');
+    for (const [name, expected] of [['com.unlispace.e2e','metadata-value'],['com.apple.ResourceFork','resource-value']]) {
+      const parts = [];
+      for (const ref of published.xattrs[name]) {
+        const response = await fetch(`${endpoint}/v0/drives/${drive}/shards/${ref.h}`, {headers:{authorization:`Bearer ${independentToken}`},signal:AbortSignal.timeout(10000)});
+        assert.equal(response.status,200); parts.push(Buffer.from(await response.arrayBuffer()));
+      }
+      assert.equal(Buffer.concat(parts).toString(),expected, `independent cloud attribute differs: ${name}`);
+    }
     await remoteBytes('smb-safe.txt', replacement);
   });
   await check('smb remote CLI commit -> mount + change event within 5 s', async () => {
@@ -703,10 +759,13 @@ try {
       await desktopChecks({ root, work, api, endpoint, apiWorker, binary, check, json, until, start, stop, command, secrets });
     }
     await cloudChecks();
-    await engineChecks();
-    await smbChecks();
+    if (process.env.E2E_API_ONLY !== '1') {
+      await engineChecks();
+      await smbChecks();
+    } else console.log('Native checks skipped (E2E_API_ONLY=1)');
     if (m3Enabled) await m3Checks({ root, work, api, endpoint, s3, drive, session, apiWorker, binary, cacheSandbox, wrangler, check, command, request, json, until, secrets });
     else console.log('M3 phase disabled (E2E_M3=0)');
+    if (m3Enabled && process.env.E2E_PARITY === '1') await parityChecks({root,api,endpoint,s3,apiWorker,check,request,json,until,secrets});
   }
 } catch (error) {
   rows.push({ status: 'FAIL', check: 'harness', detail: safe(error.message) });

@@ -33,6 +33,8 @@ pub struct DriveInfo {
     pub head_seq: u64,
     pub file_count: u64,
     pub bytes: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
 }
 
 // ---- 3.2 shards -----------------------------------------------------------------------------
@@ -77,6 +79,8 @@ pub enum Op {
         content_type: String,
         mtime_ms: i64,
         shards: Vec<ShardRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        xattrs: Option<std::collections::BTreeMap<String, Vec<ShardRef>>>,
     },
     Mkdir {
         path: String,
@@ -175,6 +179,15 @@ pub struct ManifestResponse {
     #[serde(default)]
     pub mtime_ms: Option<i64>,
     pub shards: Vec<ShardRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xattrs: Option<std::collections::BTreeMap<String, Vec<ShardRef>>>,
+    /// Signed, edge-cacheable per-shard GET URLs (shard hash -> absolute URL). Absent from older
+    /// servers. Clients consume these and do not persist them.
+    #[serde(default, skip_serializing)]
+    pub block_urls: std::collections::HashMap<String, String>,
+    /// Unix seconds after which `block_urls` stop working.
+    #[serde(default, skip_serializing)]
+    pub block_urls_expire_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +383,13 @@ mod tests {
         let _: ManifestResponse = roundtrip(json!({
             "path":"a","versionId":"v_1","size":4,"contentType":"x/y","mtimeMs":1,
             "shards":[{"h":"ab","n":4}]}));
+        // Block URLs are read from the wire but never written back (journals must not keep them).
+        let m: ManifestResponse = serde_json::from_value(json!({
+            "path":"a","versionId":"v_1","size":4,"contentType":null,"mtimeMs":1,
+            "shards":[{"h":"ab","n":4}],
+            "blockUrls":{"ab":"https://x/_blocks/d/ab?exp=9&sig=00"},"blockUrlsExpireAt":9})).unwrap();
+        assert_eq!(m.block_urls_expire_at, Some(9));
+        assert!(serde_json::to_value(&m).unwrap().get("blockUrls").is_none());
         let _: VersionsResponse = roundtrip(json!({"versions":[
             {"versionId":"v_1","op":"put","size":4,"seq":1,"ts":9,"actor":"dev"}],
             "cursor":"MQ"}));

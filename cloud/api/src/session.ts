@@ -84,6 +84,32 @@ export async function revokeFamily(ctx: Ctx, family: string): Promise<void> {
 	await ctx.env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE family = ? AND revoked_at IS NULL").bind(ctx.now, family).run();
 }
 
+/**
+ * A rotated token presented again within this window is treated as a retry after a lost
+ * response, not theft: the client never received its successor. Outside it, reuse still
+ * revokes the family.
+ */
+export const REFRESH_RETRY_GRACE_MS = 60_000;
+
+/**
+ * Replay of a just-rotated token: hand out a fresh successor if the client plausibly never got
+ * the first response. Only an unused successor qualifies, and it is claimed atomically, so
+ * logout, an already-used successor, or a concurrent retry all fall through to theft handling.
+ */
+async function retryAfterLostResponse(ctx: Ctx, row: SessionRow, hash: string): Promise<Session | null> {
+	if (row.revoked_at === null || ctx.now - row.revoked_at > REFRESH_RETRY_GRACE_MS || row.expires_at <= ctx.now) return null;
+	const succ = await ctx.env.DB.prepare("SELECT id FROM sessions WHERE prev_hash = ? AND family = ? AND revoked_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1")
+		.bind(hash, row.family)
+		.first<{ id: string }>();
+	if (!succ) return null;
+	const claimed = await ctx.env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(ctx.now, succ.id).run();
+	if (claimed.meta.changes !== 1) return null;
+	const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.user_id).first<{ id: string; email: string }>();
+	if (!user) return null;
+	const next = await insertRefreshRow(ctx, user.id, row.family, hash);
+	return { accessToken: await mintAccess(ctx, user, row.family), refreshToken: next, expiresIn: ACCESS_TTL_S, user, accountCreated: false };
+}
+
 /** Rotate a refresh token. A token that was already rotated away revokes the whole family. */
 export async function refreshSession(ctx: Ctx, refreshToken: string): Promise<Session> {
 	const invalid = new HttpError(401, "invalid_refresh");
@@ -92,6 +118,8 @@ export async function refreshSession(ctx: Ctx, refreshToken: string): Promise<Se
 	const row = await ctx.env.DB.prepare("SELECT id, user_id, family, expires_at, revoked_at FROM sessions WHERE refresh_hash = ?").bind(hash).first<SessionRow>();
 	if (!row) throw invalid;
 	if (row.revoked_at !== null) {
+		const retried = await retryAfterLostResponse(ctx, row, hash);
+		if (retried) return retried;
 		// Presenting a rotated-away (or logged-out) token: assume theft, kill the family.
 		await revokeFamily(ctx, row.family);
 		throw invalid;

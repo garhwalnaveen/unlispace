@@ -8,6 +8,20 @@ const status = (e: unknown): number => (e as { $metadata: { httpStatusCode: numb
 const code = (e: unknown): string => (e as { name: string }).name;
 
 describe("objects", () => {
+	it("copies resource-fork chunks through the authorized destination and preserves attributes on edits",async()=>{
+		const h=await harness(),source=makeBucket(h),target=makeBucket(h),s3=await client(h.deps);
+		const put=await s3.send(new PutObjectCommand({Bucket:source,Key:"asset",Body:"main"}));
+		const bytes=new TextEncoder().encode("resource fork"),hash=createHash("sha256").update(bytes).digest("hex");
+		const attrs={"com.apple.ResourceFork":[{h:hash,n:bytes.length}]};
+		h.dp.shards.set(`${source}/${hash}`,bytes);
+		h.dp.drives.get(source)!.versions.find(v=>v.id===put.VersionId)!.xattrs=attrs;
+		await s3.send(new CopyObjectCommand({Bucket:target,Key:"asset-copy",CopySource:`${source}/asset`}));
+		expect(h.dp.shards.get(`${target}/${hash}`)).toEqual(bytes);
+		expect(h.dp.drives.get(target)!.versions.at(-1)!.xattrs).toEqual(attrs);
+		const edited=await handle(await rawSigned(h,"PUT",`/${target}/asset-copy?x-uls-write`,{headers:{"x-uls-offset":"0"},body:"M"}),h.deps);
+		expect(edited.status).toBe(200);
+		expect(h.dp.drives.get(target)!.versions.at(-1)!.xattrs).toEqual(attrs);
+	});
 	it("puts, heads and gets an object with metadata", async () => {
 		const h = await harness();
 		const b = makeBucket(h), s3 = await client(h.deps);
@@ -248,7 +262,7 @@ describe("listing", () => {
 		expect(xml).toContain("<EncodingType>url</EncodingType>");
 	});
 
-	it("ListObjectVersions returns every version newest-first plus delete markers", async () => {
+	it("ListObjectVersions returns live content versions newest-first without delete markers", async () => {
 		const h = await harness();
 		const b = makeBucket(h), s3 = await client(h.deps);
 		const v1 = await s3.send(new PutObjectCommand({ Bucket: b, Key: "k", Body: "one" }));
@@ -263,8 +277,8 @@ describe("listing", () => {
 		expect(k.map((v) => v.IsLatest)).toEqual([true, false]);
 		expect(k.map((v) => v.Size)).toEqual([6, 3]);
 		expect(k[0]!.ETag).toBe(v2.ETag);
-		expect(out.DeleteMarkers?.map((d) => [d.Key, d.IsLatest])).toEqual([["gone", true]]);
-		expect(out.Versions!.filter((v) => v.Key === "gone").length).toBe(1); // the pre-delete content version
+		expect(out.DeleteMarkers ?? []).toEqual([]);
+		expect(out.Versions!.filter((v) => v.Key === "gone")).toEqual([]);
 		expect(out.IsTruncated).toBe(false);
 
 		// pagination across versions
@@ -277,7 +291,7 @@ describe("listing", () => {
 			km = page.NextKeyMarker; vm = page.NextVersionIdMarker;
 		}
 		expect(new Set(seen).size).toBe(seen.length);
-		expect(seen.length).toBe(5);
+		expect(seen.length).toBe(3);
 
 		const prefixed = await s3.send(new ListObjectVersionsCommand({ Bucket: b, Prefix: "li" }));
 		expect(prefixed.Versions?.map((v) => v.Key)).toEqual(["live"]);

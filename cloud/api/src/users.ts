@@ -3,10 +3,6 @@ import { DAY, ulid } from "./ctx";
 import type { Placement } from "./env";
 import type { UserRow } from "./session";
 
-export async function setDriveStatus(ctx: Ctx, driveId: string, status: "ready" | "provisioning_failed"): Promise<void> {
-	await ctx.env.DB.prepare("UPDATE drives SET status = ? WHERE id = ? AND status != 'deleted'").bind(status, driveId).run();
-}
-
 /**
  * Call the data plane and record the outcome. The drive row exists beforehand as
  * `provisioning_failed`, so a crash between the RPC and the update is repaired by the lazy retry.
@@ -21,7 +17,13 @@ export async function provisionDrive(ctx: Ctx, driveId: string, placement: strin
 			return false;
 		}
 	}
-	await setDriveStatus(ctx, driveId, "ready");
+	// Readiness and one-time trial activation must not diverge on a retry or crash.
+	await ctx.env.DB.batch([
+		ctx.env.DB.prepare("UPDATE drives SET status = 'ready' WHERE id = ? AND status != 'deleted'").bind(driveId),
+		ctx.env.DB.prepare(`UPDATE orgs SET trial_ends_at = ?, trial_pending = 0
+			WHERE trial_pending = 1 AND id = (SELECT org_id FROM drives WHERE id = ? AND status = 'ready')`)
+			.bind((ctx.clock?.() ?? ctx.now) + 7 * DAY, driveId),
+	]);
 	return true;
 }
 
@@ -42,7 +44,7 @@ export async function findOrCreateUser(ctx: Ctx, email: string): Promise<{ user:
 	try {
 		await db.batch([
 			db.prepare("INSERT INTO users(id, email, display_name, created_at) VALUES(?,?,NULL,?)").bind(userId, email, ctx.now),
-			db.prepare("INSERT INTO orgs(id, name, tier, trial_ends_at, created_at) VALUES(?,?,?,?,?)").bind(orgId, "My Space", "individual", ctx.now + 7 * DAY, ctx.now),
+			db.prepare("INSERT INTO orgs(id, name, tier, trial_ends_at, created_at, trial_pending) VALUES(?,?,?,?,?,1)").bind(orgId, "My Space", "individual", null, ctx.now),
 			db.prepare("INSERT INTO memberships(org_id, user_id, role, created_at) VALUES(?,?,?,?)").bind(orgId, userId, "owner", ctx.now),
 			db.prepare("INSERT INTO drives(id, org_id, name, placement, status, created_at) VALUES(?,?,?,?,?,?)").bind(driveId, orgId, "Space", null, "provisioning_failed", ctx.now),
 		]);

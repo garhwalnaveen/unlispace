@@ -9,11 +9,12 @@
   ],
   "durable_objects": {
     "bindings": [
-      { "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }
+      { "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }, { "name": "STORAGE_QUOTA", "class_name": "StorageQuota" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["DriveAuthority"] }
+    { "tag": "v1", "new_sqlite_classes": ["DriveAuthority"] },
+    { "tag": "v2", "new_sqlite_classes": ["StorageQuota"] }
   ],
   "vars": {
     // Must equal the issuer's ULS_ISSUER (the `iss` claim of drive tokens). Local api default shown.
@@ -30,11 +31,12 @@
   "env": {
     "production": {
       "name": "unlispace-data-plane",
+      "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS", "ULS_BLOCK_KEY"] },
       "workers_dev": true,
       "preview_urls": false,
       "r2_buckets": [{ "binding": "SHARDS", "bucket_name": "unlispace-shards" }],
       "durable_objects": {
-        "bindings": [{ "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }]
+        "bindings": [{ "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }, { "name": "STORAGE_QUOTA", "class_name": "StorageQuota" }]
       },
       "vars": {
         "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",

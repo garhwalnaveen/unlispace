@@ -38,19 +38,50 @@ export async function checkout(ctx: Ctx, a: Authed, orgId: string): Promise<Resp
 	if (current?.subscription_id && !["cancelled", "expired", "failed"].includes(current.status)) throw new HttpError(409, "subscription_exists", "use the billing portal to manage an existing subscription");
 	const members = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM memberships WHERE org_id = ?").bind(orgId).first<{ n: number }>();
 	if ((members?.n ?? 0) > (seats as number)) throw new HttpError(409, "seats_below_members");
+	const db = ctx.env.DB;
+	const selection = JSON.stringify({ plan, cadence, seats, addons });
+	const existing = await db.prepare("SELECT c.* FROM billing_checkout_locks l JOIN billing_checkouts c ON c.id=l.intent_id WHERE l.org_id=?").bind(orgId).first<{id: string; checkout_url: string | null; session_id: string | null; selection: string | null; created_at: number}>();
+	if (existing) {
+		let expired = false;
+		if (existing.session_id && ctx.now > existing.created_at + 25 * 60 * 60 * 1000) {
+			const status = await dodo(ctx).checkoutStatus(existing.session_id);
+			// Dodo's unconfirmed sessions expire after 24h. A payment awaiting its webhook must keep the lock.
+			expired = !status.paymentId && !status.paymentStatus && ctx.now > Date.parse(status.createdAt) + 25 * 60 * 60 * 1000;
+		}
+		if (!expired) {
+			if (existing.checkout_url && existing.selection === selection) return json({url: existing.checkout_url});
+			throw new HttpError(409, "checkout_pending", "A checkout is already in progress. Resume the same plan, or wait for its payment status to be confirmed.");
+		}
+		await db.prepare("DELETE FROM billing_checkout_locks WHERE org_id=? AND intent_id=?").bind(orgId, existing.id).run();
+	}
 	const intent = "bc_" + ulid();
-	await ctx.env.DB.prepare("INSERT INTO billing_checkouts(id,org_id,created_at) VALUES(?,?,?)").bind(intent, orgId, ctx.now).run();
+	const inserted = await db.batch([
+		db.prepare("INSERT INTO billing_checkouts(id,org_id,created_at,selection) VALUES(?,?,?,?)").bind(intent, orgId, ctx.now, selection),
+		db.prepare(`INSERT OR IGNORE INTO billing_checkout_locks(org_id,intent_id)
+			SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM billing WHERE org_id=? AND subscription_id IS NOT NULL AND status NOT IN ('cancelled','expired','failed'))`).bind(orgId, intent, orgId),
+	]);
+	if (inserted[1]!.meta.changes !== 1) {
+		await db.prepare("DELETE FROM billing_checkouts WHERE id=?").bind(intent).run();
+		throw new HttpError(409, "checkout_pending");
+	}
 	try {
-		return json(await dodo(ctx).checkout({
+		const result = await dodo(ctx).checkout({
 			product_cart: [{ product_id: p[plan][cadence], quantity: seats as number, addons: addons ? [{ addon_id: p.storage[cadence], quantity: addons as number }] : [] }],
 			customer: current?.customer_id ? { customer_id: current.customer_id } : { email: a.email, name: a.email },
 			metadata: { org_id: orgId, checkout_intent: intent },
 			return_url: `${ctx.env.ULS_WEB_ORIGIN}/orgs/${encodeURIComponent(orgId)}/billing`,
-			// The no-card trial belongs to Unlispace; checkout converts immediately.
 			subscription_data: { trial_period_days: 0 },
-		}));
+		});
+		await db.prepare("UPDATE billing_checkouts SET checkout_url=?,session_id=? WHERE id=?").bind(result.url, result.sessionId, intent).run();
+		return json({url: result.url});
 	} catch (e) {
-		await ctx.env.DB.prepare("DELETE FROM billing_checkouts WHERE id = ?").bind(intent).run();
+		if (e instanceof HttpError && e.code === "billing_rejected") {
+			await db.batch([
+				db.prepare("DELETE FROM billing_checkout_locks WHERE org_id=? AND intent_id=?").bind(orgId, intent),
+				db.prepare("DELETE FROM billing_checkouts WHERE id=?").bind(intent),
+			]);
+		}
+		// shortcut: an ambiguous provider timeout blocks checkout until support reconciles it, until provider idempotency is available.
 		throw e;
 	}
 }
@@ -100,6 +131,7 @@ export async function webhook(ctx: Ctx): Promise<Response> {
 	// Existing subscriptions keep working even when metadata is absent on a later event.
 	const existing = await db.prepare("SELECT org_id FROM billing WHERE subscription_id = ? AND customer_id = ?").bind(subscriptionId, customerId).first<{ org_id: string }>();
 	let orgId = existing?.org_id;
+	let checkoutIntent: string | undefined;
 	if (!orgId) {
 		const metadata = object(data.metadata ?? {});
 		const intent = str(metadata.checkout_intent, 100);
@@ -107,6 +139,7 @@ export async function webhook(ctx: Ctx): Promise<Response> {
 		const known = intent && org ? await db.prepare("SELECT org_id FROM billing_checkouts WHERE id = ? AND org_id = ?").bind(intent, org).first<{ org_id: string }>() : null;
 		if (!known) { await remember.run(); return json({ ok: true, ignored: true }); }
 		orgId = known.org_id;
+		checkoutIntent = intent!;
 		const current = await billingRow(ctx, orgId);
 		if (current?.customer_id && current.customer_id !== customerId) throw new HttpError(400, "invalid_webhook");
 		if (current?.subscription_id && !["cancelled", "expired", "failed"].includes(current.status)) throw new HttpError(409, "subscription_exists");
@@ -129,6 +162,7 @@ export async function webhook(ctx: Ctx): Promise<Response> {
 	if (!Number.isFinite(periodEnd)) throw new HttpError(400, "invalid_webhook");
 	// D1 batch is transactional: entitlement mutation and receipt cannot diverge on retry.
 	await db.batch([
+		...(checkoutIntent ? [db.prepare("UPDATE billing_checkouts SET subscription_id=? WHERE id=? AND org_id=? AND (subscription_id IS NULL OR subscription_id=?)").bind(subscriptionId, checkoutIntent, orgId, subscriptionId)] : []),
 		db.prepare(`INSERT INTO billing(org_id,customer_id,subscription_id,status,plan,cadence,seats,storage_addons,current_period_end,cancel_at_period_end,event_at,event_id)
 			SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM dodo_events WHERE id = ?)
 			ON CONFLICT(org_id) DO UPDATE SET customer_id=excluded.customer_id, subscription_id=excluded.subscription_id,
@@ -137,9 +171,15 @@ export async function webhook(ctx: Ctx): Promise<Response> {
 			WHERE excluded.event_at > billing.event_at OR (excluded.event_at = billing.event_at AND excluded.event_id > billing.event_id)`)
 			.bind(orgId, customerId, subscriptionId, status, selection.plan, selection.cadence, seats, storageAddons, periodEnd, data.cancel_at_next_billing_date === true ? 1 : 0, eventAt, id, id),
 		db.prepare(`UPDATE orgs SET tier = (SELECT plan FROM billing WHERE org_id = ?),
-			trial_ends_at = CASE WHEN (SELECT status FROM billing WHERE org_id = ?) = 'active' THEN NULL ELSE trial_ends_at END
+			trial_ends_at = CASE WHEN (SELECT status FROM billing WHERE org_id = ?) = 'active' THEN NULL ELSE trial_ends_at END,
+			trial_pending = CASE WHEN (SELECT status FROM billing WHERE org_id = ?) = 'active' THEN 0 ELSE trial_pending END
 			WHERE id = ? AND EXISTS(SELECT 1 FROM billing WHERE org_id = ?)`)
-			.bind(orgId, orgId, orgId, orgId),
+			.bind(orgId, orgId, orgId, orgId, orgId),
+		db.prepare(`DELETE FROM billing_checkout_locks WHERE org_id=? AND intent_id IN (
+			SELECT id FROM billing_checkouts WHERE org_id=? AND subscription_id=?
+		) AND EXISTS(
+			SELECT 1 FROM billing WHERE org_id=? AND subscription_id=? AND status IN ('cancelled','expired','failed')
+		)`).bind(orgId, orgId, subscriptionId, orgId, subscriptionId),
 		remember,
 	]);
 	return json({ ok: true });

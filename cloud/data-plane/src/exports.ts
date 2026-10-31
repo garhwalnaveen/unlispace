@@ -1,8 +1,10 @@
 import type { Placement } from "./types";
 
 export const EXPORT_COLUMNS = {
+	retained_shards: ["h", "n"],
+	commit_receipts: ["actor", "id", "fingerprint", "response"],
 	meta: ["k", "v"], nodes: ["id", "parent_id", "name", "type", "head", "size", "ctype", "mtime", "seq"],
-	versions: ["id", "path", "op", "size", "manifest", "seq", "ts", "actor", "ctype", "mtime", "node_id", "restored_from"],
+	versions: ["id", "path", "op", "size", "manifest", "seq", "ts", "actor", "ctype", "mtime", "node_id", "restored_from", "xattrs"],
 	path_log: ["seq", "ts", "node_id", "path", "op"],
 	log: ["rowid", "seq", "path", "op", "version"],
 	shards_known: ["h", "n", "inherited"], lineage_members: ["drive_id", "added_at", "removed_at"],
@@ -15,6 +17,7 @@ export function validateExportRow(value: unknown): ExportRow {
 	const r = value as ExportRow;
 	if (!r || !Object.hasOwn(EXPORT_COLUMNS, r.table) || !r.row || typeof r.row !== "object") throw new Error("invalid snapshot row");
 	if (r.table === "versions") {
+		if (!Object.hasOwn(r.row,"xattrs")) r.row.xattrs=null;
 		if (!Object.hasOwn(r.row,"node_id")) r.row.node_id=null;
 		if (!Object.hasOwn(r.row,"restored_from")) r.row.restored_from=null;
 	}

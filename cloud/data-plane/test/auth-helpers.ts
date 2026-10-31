@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 
 const enc = new TextEncoder();
 export const ISS = "http://127.0.0.1:8788";
@@ -29,6 +29,7 @@ export function installJwks(...keys: TestKey[]): void {
 }
 
 export interface SignOpts {
+	org?: string;
 	sub?: string;
 	iss?: string;
 	typ?: string;
@@ -40,12 +41,13 @@ export interface SignOpts {
 
 export async function signToken(key: TestKey, o: SignOpts = {}): Promise<string> {
 	const now = Math.floor(Date.now() / 1000);
+	await (exports as any).DataPlaneAdmin.configureQuota(o.org ?? "o_TEST", 1_000_000_000_000, (o.drives ?? []).map(d => d.id));
 	const header = b64uJson({ alg: o.alg ?? "EdDSA", typ: "JWT", kid: o.kid ?? key.kid });
 	const payload = b64uJson({
 		iss: o.iss ?? ISS,
 		sub: o.sub ?? "u_TESTUSER",
 		sid: "s_TEST",
-		org: "o_TEST",
+		org: o.org ?? "o_TEST",
 		typ: o.typ ?? "drive",
 		drives: o.drives ?? [],
 		jti: crypto.randomUUID(),

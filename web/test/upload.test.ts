@@ -1,7 +1,7 @@
 import { File } from "node:buffer";
 import { expect, it, vi } from "vitest";
 import { Api, DriveApi } from "../src/api";
-import { uploadFile, type UploadProgress } from "../src/upload";
+import { MAX_WEB_UPLOAD, uploadFile, type UploadProgress } from "../src/upload";
 import { deferred, json } from "./fixtures";
 function driveApi() {
   return new DriveApi(new Api(async (_path, init) => {
@@ -10,6 +10,12 @@ function driveApi() {
   }), "d-test", "write");
 }
 const file = (bytes: Uint8Array<ArrayBuffer> = new Uint8Array([1, 2, 3])) => new File([bytes], "test.bin", { type: "application/test", lastModified: 1234 }) as unknown as globalThis.File;
+it("rejects above-limit files before hashing or requesting a token", async () => {
+  const api = {stat:vi.fn()} as unknown as DriveApi;
+  const oversized = {size:MAX_WEB_UPLOAD+1,slice:vi.fn()} as unknown as globalThis.File;
+  await expect(uploadFile(api,oversized,"large.bin",vi.fn())).rejects.toThrow("up to 3 GiB");
+  expect(api.stat).not.toHaveBeenCalled(); expect(oversized.slice).not.toHaveBeenCalled();
+});
 it("probes dedup, uploads with a write bearer and commits ifAbsent before reporting success", async () => {
   const calls: string[] = [];
   const states: UploadProgress[] = [];

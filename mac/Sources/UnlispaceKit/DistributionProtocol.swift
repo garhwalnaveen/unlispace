@@ -4,8 +4,28 @@ public struct PendingUpload: Codable, Sendable, Equatable {
     public var driveId: String
     public var path: String
     public var bytes: Int64
-    public init(driveId: String, path: String, bytes: Int64) {
+    /// `saved_locally` or `uploading`; absent on older engines. Kept a string so new phases don't break decoding.
+    public var phase: String?
+    public var bytesSent: Int64?
+    public var bytesTotal: Int64?
+    public init(driveId: String, path: String, bytes: Int64, phase: String? = nil, bytesSent: Int64? = nil, bytesTotal: Int64? = nil) {
         self.driveId = driveId; self.path = path; self.bytes = bytes
+        self.phase = phase; self.bytesSent = bytesSent; self.bytesTotal = bytesTotal
+    }
+
+    public enum Stage: Sendable, Equatable { case savedLocally, uploading, unknown }
+    public var stage: Stage {
+        switch phase {
+        case "saved_locally": .savedLocally
+        case "uploading": .uploading
+        default: .unknown
+        }
+    }
+
+    /// Determinate fraction when the engine reports byte counts.
+    public var uploadProgress: Double? {
+        guard let sent = bytesSent, let total = bytesTotal, total > 0 else { return nil }
+        return min(1, max(0, Double(sent) / Double(total)))
     }
 }
 

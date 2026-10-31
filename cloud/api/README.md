@@ -59,3 +59,18 @@ The sending domain must be onboarded first (`npx wrangler email sending enable <
 
 Gate (from this directory): `npx tsc --noEmit && npm test`. For a sandbox that cannot write the
 user's global Wrangler log folder, set `WRANGLER_LOG_PATH=./.wrangler/logs` for the gate.
+
+## Team management
+
+Apply `migrations/0004_team_invitations.sql` before deploying this API and the matching web app.
+`GET /client-config` returns the configured web origin for desktop handoffs.
+
+- `GET /orgs/:orgId/members` lists members, the caller's role, paid seat capacity, and whether Teams invitations are available. Only owners/admins receive pending invitation metadata.
+- `POST /orgs/:orgId/invites` accepts `{email, role}` (`admin`, `member`, or `viewer`), reserves one paid Teams seat and emails a seven-day invitation. Only a hash of the one-time token is stored; list/create responses never expose the token. Existing email-provider configuration is used, with an explicit 503 if delivery fails.
+- `DELETE /orgs/:orgId/invites/:id` revokes an invitation and releases its reserved seat.
+- `POST /invites/:token/accept` requires a signed-in account with the exact invited email. Expiry, revocation, replay, the inviter's current privileges, and current paid seat capacity are checked. D1 transactional admission prevents simultaneous accepts from overfilling seats.
+- `PATCH /orgs/:orgId/members/:userId` accepts `{role}`; `DELETE` removes the membership. Owners can manage all roles, admins can manage members/viewers, and the workspace must always retain at least one owner. These guards are rechecked in the mutation itself.
+
+The web overview links to `/orgs/:orgId/team`; invitation emails link to `/invites/:token`, which preserves its return path through sign-in and asks the recipient to accept explicitly. No production email, plan, membership, or deployment is changed by local tests.
+
+Membership removal blocks new grants immediately. Existing data-plane drive JWTs remain valid until their expiry (up to 15 minutes); warmed gateway credential caches may lag by 30 seconds.

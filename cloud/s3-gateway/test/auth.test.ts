@@ -101,11 +101,11 @@ describe("SigV4 auth", () => {
 		expect(await wrong.text()).toContain("XAmzContentSHA256Mismatch");
 	});
 
-	it("requires x-uls-* extension headers to be signed", async () => {
+	it.each(["x-uls", "x-s3sdk"])("requires %s-* extension headers to be signed", async (prefix) => {
 		const h = await harness();
 		const b = makeBucket(h);
 		const req = await rawSigned(h, "PUT", `/${b}/f?x-uls-write`, { body: "x" });
-		req.headers.set("x-uls-offset", "5");
+		req.headers.set(`${prefix}-offset`, "5");
 		const res = await handle(req, h.deps);
 		expect(res.status).toBe(403);
 	});

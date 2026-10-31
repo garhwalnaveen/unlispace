@@ -3,7 +3,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use futures_util::{stream, StreamExt, TryStreamExt};
 use bytes::Bytes;
 use uls_proto::{Change, CommitResponse, CommitResult, ManifestResponse, Op, ShardRef};
 use crate::journal::{Action, Batch, Node, Prepared, moved_path};
@@ -14,6 +15,8 @@ pub(crate) async fn run(weak: Weak<Inner>, wake: Arc<tokio::sync::Notify>) {
     let mut delay = Duration::ZERO;
     let mut retrying = false;
     loop {
+        tracing::debug!(phase = "schedule_wait", delay_ms = delay.as_millis() as u64,
+            retrying, "native publication phase");
         if retrying { tokio::time::sleep(delay).await; }
         else { tokio::select! { _ = tokio::time::sleep(delay) => (), _ = wake.notified() => () } }
         let Some(inner) = weak.upgrade() else { return; };
@@ -23,6 +26,7 @@ pub(crate) async fn run(weak: Weak<Inner>, wake: Arc<tokio::sync::Notify>) {
         match result {
             Ok(()) => { retrying = false; delay = next_delay(&c, &inner.opts); }
             Err(e) => {
+                if e == FsError::ReadOnly { c.write_blocked = true; }
                 tracing::debug!("publisher retained journal after: {e}");
                 if c.online != SyncState::Offline {
                     c.online = SyncState::Offline;
@@ -34,6 +38,11 @@ pub(crate) async fn run(weak: Weak<Inner>, wake: Arc<tokio::sync::Notify>) {
             }
         }
     }
+}
+/// Where the file will live once this batch's renames apply (the daemon stages uploads under a
+/// temporary name and renames them in the same batch).
+fn final_path_for_event(path: &str, batch: &Batch) -> String {
+    moved_path(path, &batch.actions).unwrap_or_else(|| path.to_string()).trim_end_matches('/').to_string()
 }
 fn ready(n: &Node, opts: &VfsOptions, now: i64) -> bool {
     n.dirty_since.is_none_or(|since| now.saturating_sub(since) as u128 >= opts.max_dirty_age.as_millis()
@@ -77,7 +86,17 @@ fn next_delay(c: &Core, opts: &VfsOptions) -> Duration {
 }
 impl Inner {
     pub(crate) async fn publish(&self, force: bool) -> Result<(), FsError> {
+        let waiting = Instant::now();
         let _publisher = self.publish_lock.lock().await;
+        struct Publishing<'a>(&'a Inner);
+        impl Drop for Publishing<'_> {
+            fn drop(&mut self) {
+                self.0.publishing.store(false, std::sync::atomic::Ordering::SeqCst);
+                self.0.progress.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            }
+        }
+        let _publishing = Publishing(self);
+        tracing::debug!(phase = "publisher_lock", elapsed_us = waiting.elapsed().as_micros() as u64, "native publication phase");
         loop {
             let (mut batch, dir) = {
                 let mut c = self.core.lock().await;
@@ -94,22 +113,30 @@ impl Inner {
                         || paths.get(id).is_some_and(|p| moved_path(p, &actions).as_ref() != Some(p)));
                     let mut s = c.state.clone();
                     s.batch = Some(Batch { actions, nodes, paths, prepared: vec![], conflicts: BTreeMap::new(),
-                        conflict_attempt: 0, cursor: None, attempted: false });
+                        conflict_attempt: 0, cursor: None, attempted: false, request_id: None });
                     c.install(s)?;
                 }
+                self.publishing.store(true, std::sync::atomic::Ordering::SeqCst);
                 (c.state.batch.clone().ok_or(FsError::Stale)?, c.journal.dir.clone())
             };
             if batch.prepared.is_empty() {
+                let has_attrs = batch.actions.iter().any(|a| matches!(a, Action::File { id, .. }
+                    if batch.nodes.get(id).is_some_and(|n| n.xattrs_dirty || !n.xattrs.is_empty())));
+                if has_attrs && !self.client.drive_info(&self.drive).await?.features.iter().any(|f| f == "xattrs") {
+                    return Err(FsError::Io("Server upgrade required to save Mac extended attributes; local changes are retained".into()));
+                }
                 for action in &batch.actions {
                     match action {
                         Action::Meta(op) => batch.prepared.push(Prepared { op: op.clone(), file: None }),
                         Action::File { id, path } => {
                             let n = batch.nodes.get(id).ok_or(FsError::NotFound)?;
-                            let shards = self.fold(&dir, n).await?;
+                            let xattrs = attribute_refs(n);
+                            let shards = self.fold(&dir, n, xattrs.as_ref(), path).await?;
+                            if let Some(refs) = &xattrs { self.upload_xattrs(n, refs).await?; }
                             batch.prepared.push(Prepared { file: Some(*id), op: Op::Put { path: path.clone(),
                                 if_version: n.version.clone(), if_absent: n.version.is_none(), size: n.attr.size,
                                 content_type: mime_guess::from_path(path).first_or_octet_stream().to_string(),
-                                mtime_ms: n.modified_ms, shards } });
+                                mtime_ms: n.modified_ms, shards, xattrs } });
                         }
                     }
                 }
@@ -127,8 +154,15 @@ impl Inner {
     async fn commit_batch(&self, batch: &mut Batch, dir: &Path) -> Result<CommitResponse, FsError> {
         if batch.attempted && let Some(response) = self.reconcile(batch).await? { return Ok(response); }
         loop {
+            if batch.request_id.is_none() {
+                batch.request_id = Some(uls_chunk::sha256_hex(&serde_json::to_vec(batch)?));
+            }
             batch.attempted = true; self.save_batch(batch).await?;
-            match self.client.commit(&self.drive, batch.prepared.iter().map(|p| p.op.clone()).collect()).await {
+            let started = Instant::now();
+            let result = self.client.commit_with_id(&self.drive, batch.prepared.iter().map(|p| p.op.clone()).collect(), batch.request_id.as_deref()).await;
+            tracing::debug!(phase = "commit", elapsed_us = started.elapsed().as_micros() as u64,
+                operations = batch.prepared.len(), success = result.is_ok(), "native publication phase");
+            match result {
                 Ok(response) => return Ok(response),
                 Err(uls_client::Error::PreconditionFailed { path: failed, .. }) => {
                     let original = batch.conflicts.remove(&failed).unwrap_or_else(|| failed.clone());
@@ -138,15 +172,23 @@ impl Inner {
                     uls_proto::validate_path(&copy).map_err(|_| FsError::Invalid)?;
                     let p = batch.prepared.iter_mut().find(|p| matches!(&p.op, Op::Put { path, .. } if path == &failed))
                         .ok_or(FsError::Stale)?;
-                    if let Op::Put { path, if_version, if_absent, .. } = &mut p.op {
+                    // A new path has no head to inherit attributes from; carry the edited version's.
+                    let inherited = p.file.and_then(|id| batch.nodes.get(&id)).and_then(|n| n.base.as_ref()).and_then(|m| m.xattrs.clone());
+                    if let Op::Put { path, if_version, if_absent, xattrs, .. } = &mut p.op {
                         *path = copy.clone(); *if_version = None; *if_absent = true;
+                        if xattrs.is_none() { *xattrs = inherited; }
                     }
-                    batch.conflicts.insert(copy, original); batch.attempted = false;
+                    batch.conflicts.insert(copy, original); batch.attempted = false; batch.request_id = None;
                     self.save_batch(batch).await?;
                 }
                 Err(uls_client::Error::MissingShards { .. }) => {
                     batch.attempted = false; self.save_batch(batch).await?;
-                    for p in &batch.prepared { if let Some(id) = p.file { self.fold(dir, &batch.nodes[&id]).await?; } }
+                    for p in &batch.prepared { if let Some(id) = p.file {
+                        let n = &batch.nodes[&id];
+                        let attrs = attribute_refs(n);
+                        self.fold(dir, n, attrs.as_ref(), op_key(&p.op).0).await?;
+                        if let Some(refs) = &attrs { self.upload_xattrs(n, refs).await?; }
+                    } }
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -182,10 +224,10 @@ impl Inner {
                 let found = changes[pos..].iter().position(|c| c.path == path && c.op == op).map(|i| i+pos);
                 if let Some(i) = found {
                     let ch = &changes[i]; pos = i+1;
-                    if let Op::Put { size, mtime_ms, shards, .. } = &p.op {
+                    if let Op::Put { size, mtime_ms, shards, xattrs, .. } = &p.op {
                         let Some(version) = &ch.version_id else { matches = false; break; };
                         let m = self.client.manifest(&self.drive, path, Some(version)).await?;
-                        if m.size != *size || m.mtime_ms != Some(*mtime_ms) || m.shards != *shards { matches = false; break; }
+                        if m.size != *size || m.mtime_ms != Some(*mtime_ms) || m.shards != *shards || xattrs.as_ref().is_some_and(|x| m.xattrs.as_ref() != Some(x)) { matches = false; break; }
                     }
                     results.push(CommitResult { path: path.into(), version_id: ch.version_id.clone().unwrap_or_default(), size: None });
                 } else if matches!(p.op, Op::Mkdir { .. }) {
@@ -222,11 +264,14 @@ impl Inner {
         let mut c = self.core.lock().await; let mut s = c.state.clone();
         s.actions.drain(..batch.actions.len()); s.batch = None;
         let mut bytes = 0;
+        let mut files: Vec<(String, u64)> = vec![];
         for (p, result) in batch.prepared.iter().zip(&response.results) {
             let Some(id) = p.file else { continue; };
             let snapshot = &batch.nodes[&id];
-            let Op::Put { path, size, mtime_ms, content_type, shards, .. } = &p.op else { return Err(FsError::Stale); };
+            let Op::Put { path, size, mtime_ms, content_type, shards, xattrs, .. } = &p.op else { return Err(FsError::Stale); };
             bytes += size;
+            files.push((final_path_for_event(path, &batch), *size));
+            self.progress.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
             let original = batch.conflicts.get(path).unwrap_or(path);
             let final_path = moved_path(path, &batch.actions);
             if batch.conflicts.contains_key(path) {
@@ -250,7 +295,8 @@ impl Inner {
             if let Some(n) = n {
                 if n.revision == snapshot.revision {
                     clean(n, ManifestResponse { path: final_path.clone().unwrap_or_else(|| path.clone()), version_id: version,
-                        size: *size, mtime_ms: Some(*mtime_ms), content_type: Some(content_type.clone()), shards: shards.clone() });
+                        size: *size, mtime_ms: Some(*mtime_ms), content_type: Some(content_type.clone()), shards: shards.clone(),
+                        block_urls: Default::default(), block_urls_expire_at: None, xattrs: xattrs.clone() });
                 } else {
                     // Retain the original base and all overlays: they still describe the latest
                     // local bytes, including a truncate that happened while uploading this snapshot.
@@ -278,13 +324,17 @@ impl Inner {
         if had_meta {
             let stale: Vec<_> = s.nodes.keys().filter(|p| !p.is_empty() && !s.pinned(p)).cloned().collect();
             for p in stale { if let Some(n) = s.nodes.get_mut(&p) { n.valid = false; } }
+            // An invalid node under a still-cached listing reads as "known absent" (`load`), so drop
+            // the listings with the nodes; otherwise existing files report ENOENT until re-listed.
+            let keep: std::collections::BTreeSet<_> = s.listings.iter().filter(|p| s.pinned(p)).cloned().collect();
+            s.listings = keep;
         }
         if s.actions.is_empty() { s.retired.clear(); s.hidden.clear(); s.listings.clear(); }
-        c.install(s)?; c.journal.collect(&c.state)?;
+        c.install(s)?; c.journal.collect(&c.state)?; c.write_blocked = false;
         if c.online != SyncState::Online { c.online = SyncState::Online; let _ = self.events.send(VfsEvent::State(SyncState::Online)); }
         drop(c);
         let paths = batch.prepared.iter().map(|p| op_key(&p.op).0.trim_end_matches('/').to_string()).collect::<Vec<_>>();
-        let _ = self.events.send(VfsEvent::Transfer { paths: paths.clone(), bytes });
+        let _ = self.events.send(VfsEvent::Transfer { paths: paths.clone(), bytes, files });
         let _ = self.events.send(VfsEvent::Changed { paths });
         for (copy, path) in batch.conflicts {
             let copy = moved_path(&copy, &batch.actions).unwrap_or(copy);
@@ -293,7 +343,8 @@ impl Inner {
         Ok(())
     }
     /// Re-chunk the dirty window; old boundaries beyond it allow the untouched suffix to be reused.
-    async fn fold(&self, dir: &Path, n: &Node) -> Result<Vec<ShardRef>, FsError> {
+    async fn fold(&self, dir: &Path, n: &Node, xattrs: Option<&BTreeMap<String, Vec<ShardRef>>>, path: &str) -> Result<Vec<ShardRef>, FsError> {
+        let started = Instant::now();
         let base = n.base.as_ref().map_or(&[][..], |m| m.shards.as_slice());
         let mut boundaries = BTreeMap::new();
         let mut base_size = 0;
@@ -319,6 +370,7 @@ impl Inner {
             if end > first || (end == base_size && n.attr.size > base_size) { break; }
             shards.push(shard.clone()); off = end;
         }
+        self.progress.lock().unwrap_or_else(|e| e.into_inner()).insert(n.attr.id, 0);
         let scratch = Scratch(dir.join(format!("fold-{}-{}.tmp", n.attr.id, n.revision)));
         let mut f = File::create(&scratch.0)?;
         let mut locations = BTreeMap::new();
@@ -326,6 +378,8 @@ impl Inner {
         let mut read_off = off;
         let mut stored = 0;
         while off < n.attr.size {
+            // Local overlays/CDC can otherwise run an entire large file without polling SMB work.
+            tokio::task::yield_now().await;
             if let Some(len) = uls_chunk::first_chunk_length(&buffer, read_off == n.attr.size) {
                 let hash = uls_chunk::sha256_hex(&buffer[..len]);
                 f.write_all(&buffer[..len])?;
@@ -346,24 +400,74 @@ impl Inner {
             }
         }
         drop(f);
+        tracing::debug!(phase = "fold_stage", file_id = n.attr.id, revision = n.revision,
+            bytes = stored, shards = shards.len(), elapsed_us = started.elapsed().as_micros() as u64,
+            "native publication phase");
+        uls_client::Client::preflight_commit(&[Op::Put { path: path.into(), if_version: n.version.clone(),
+            if_absent: n.version.is_none(), size: n.attr.size, content_type: "application/octet-stream".into(),
+            mtime_ms: n.modified_ms, shards: shards.clone(), xattrs: xattrs.cloned() }])?;
         // Probe on every attempt, including after process restart or an upload with a lost ACK.
         let hashes = shards.iter().map(|s| s.h.clone()).collect::<std::collections::BTreeSet<_>>()
             .into_iter().collect::<Vec<_>>();
-        let missing = self.client.missing(&self.drive, &hashes).await?;
-        let mut f = File::open(&scratch.0)?;
-        for hash in missing {
-            let data = if let Some(&(off, len)) = locations.get(&hash) {
-                let mut data = vec![0; len]; f.seek(SeekFrom::Start(off))?; f.read_exact(&mut data)?;
-                Bytes::from(data)
-            } else {
-                // A reused shard may have been forgotten by the server since the base manifest.
-                // fetch_shard verifies it and can recover it from the client's local cache.
-                if !shards.iter().any(|s| s.h == hash) { return Err(FsError::Io("unknown missing shard".into())); }
-                self.client.fetch_shard(&self.drive, &hash).await?
-            };
-            self.client.put_shard(&self.drive, &hash, data).await?;
-        }
+        let probe = Instant::now();
+        let missing_result = self.client.missing(&self.drive, &hashes).await;
+        tracing::debug!(phase = "missing", file_id = n.attr.id, revision = n.revision,
+            elapsed_us = probe.elapsed().as_micros() as u64, success = missing_result.is_ok(),
+            "native publication phase");
+        let missing = missing_result?;
+        // Bound both requests and shard buffers (each at most MAX_SIZE), even if a client was
+        // configured for higher CLI concurrency. Staging remains on disk, not in whole-file RAM.
+        let parallelism = self.client.parallelism().min(8);
+        let uploads = Instant::now();
+        let (locations, scratch, shards_ref) = (&locations, &scratch, &shards);
+        let result = stream::iter(missing.iter())
+            .map(Ok::<_, FsError>)
+            .try_for_each_concurrent(parallelism, |hash| async move {
+                let data = if let Some(&(off, len)) = locations.get(hash) {
+                    let path = scratch.0.clone();
+                    tokio::task::spawn_blocking(move || -> std::io::Result<Bytes> {
+                        let mut f = File::open(path)?;
+                        f.seek(SeekFrom::Start(off))?;
+                        let mut data = vec![0; len];
+                        f.read_exact(&mut data)?;
+                        Ok(Bytes::from(data))
+                    }).await.map_err(|e| FsError::Io(e.to_string()))??
+                } else {
+                    // Reused shards may have been forgotten since the base manifest. The
+                    // verified fetch can recover them from cache without mutating the snapshot.
+                    if !shards_ref.iter().any(|s| &s.h == hash) { return Err(FsError::Io("unknown missing shard".into())); }
+                    self.client.fetch_shard(&self.drive, hash).await?
+                };
+                let put = Instant::now();
+                let bytes = data.len();
+                let result = self.client.put_shard(&self.drive, hash, data).await;
+                tracing::debug!(phase = "shard_put", file_id = n.attr.id, revision = n.revision,
+                    bytes, elapsed_us = put.elapsed().as_micros() as u64, success = result.is_ok(),
+                    "native publication phase");
+                result?;
+                *self.progress.lock().unwrap_or_else(|e| e.into_inner()).entry(n.attr.id).or_insert(0) += bytes as u64;
+                Ok(())
+            }).await;
+        tracing::debug!(phase = "uploads", file_id = n.attr.id, revision = n.revision,
+            shards = missing.len(), parallelism, elapsed_us = uploads.elapsed().as_micros() as u64,
+            success = result.is_ok(), "native publication phase");
+        result?;
         Ok(shards)
+    }
+    async fn upload_xattrs(&self, n: &Node, refs: &BTreeMap<String, Vec<ShardRef>>) -> Result<(), FsError> {
+        let hashes: Vec<_> = refs.values().flatten().map(|s| s.h.clone()).collect();
+        let mut missing: std::collections::BTreeSet<_> = self.client.missing(&self.drive, &hashes).await?.into_iter().collect();
+        for (name, shards) in refs {
+            let mut offset = 0;
+            for shard in shards {
+                let end = offset + shard.n as usize;
+                if missing.remove(&shard.h) {
+                    self.client.put_shard(&self.drive, &shard.h, Bytes::copy_from_slice(&n.xattrs[name][offset..end])).await?;
+                }
+                offset = end;
+            }
+        }
+        Ok(())
     }
     fn conflict_path(&self, path: &str, attempt: usize) -> String {
         let (dir,name) = path.rsplit_once('/').map_or(("",path), |(d,n)| (d,n));
@@ -383,9 +487,14 @@ fn op_key(op: &Op) -> (&str, &str) {
     match op { Op::Put { path,.. } => (path,"put"), Op::Mkdir { path } => (path,"mkdir"),
         Op::Delete { path,.. } => (path,"delete"), Op::Rename { to,.. } => (to,"rename") }
 }
+fn attribute_refs(n: &Node) -> Option<BTreeMap<String, Vec<ShardRef>>> {
+    (n.xattrs_dirty || !n.xattrs.is_empty()).then(|| n.xattrs.iter().map(|(name, data)| {
+        (name.clone(), uls_chunk::chunk_slice(data).into_iter().map(|c| ShardRef { h: c.hash, n: c.length as u64 }).collect())
+    }).collect())
+}
 fn clean(n: &mut Node, base: ManifestResponse) {
-    n.version = Some(base.version_id.clone()); n.base_limit = base.size; n.base = Some(base);
-    n.extents.clear(); n.dirty_since = None; n.flushed = false;
+    n.version = Some(base.version_id.clone()); n.base_limit = base.size; n.base = if base.xattrs.is_none() && !n.xattrs_loaded { None } else { Some(base) };
+    n.extents.clear(); n.dirty_since = None; n.flushed = false; n.xattrs_dirty = false;
 }
 // Gregorian civil date from days since the Unix epoch (400-year era arithmetic).
 fn timestamp(ms: i64) -> String {
@@ -410,6 +519,100 @@ mod tests {
         assert_eq!(super::timestamp(0), "1970-01-01 000000");
         assert_eq!(super::timestamp(1_709_251_199_000), "2024-02-29 235959");
     }
+    #[tokio::test(flavor = "current_thread")]
+    async fn local_fold_yields_before_its_first_network_request() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        struct Observer { armed: AtomicBool, heartbeat: Arc<AtomicBool>, saw_heartbeat: AtomicBool }
+        impl uls_client::TokenProvider for Observer {
+            fn token<'a, 'f>(&'a self) -> std::pin::Pin<Box<dyn std::future::Future<Output = uls_client::Result<uls_client::ProviderToken>> + Send + 'f>>
+            where 'a: 'f, Self: 'f {
+                Box::pin(async move {
+                    if self.armed.swap(false, Ordering::SeqCst) {
+                        self.saw_heartbeat.store(self.heartbeat.load(Ordering::SeqCst), Ordering::SeqCst);
+                    }
+                    Ok(uls_client::ProviderToken::new("test"))
+                })
+            }
+        }
+        let server = uls_mock::MockServer::start("test").await;
+        let heartbeat = Arc::new(AtomicBool::new(false));
+        let observer = Arc::new(Observer { armed: false.into(), heartbeat: heartbeat.clone(), saw_heartbeat: false.into() });
+        let client = uls_client::Client::builder(server.url(), "test").token_provider(observer.clone()).build().unwrap();
+        client.create_drive("drive", None).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let vfs = crate::Vfs::open(client, "drive", dir.path(), crate::VfsOptions {
+            quiet_window: std::time::Duration::from_secs(3600), max_dirty_age: std::time::Duration::from_secs(3600),
+            ..crate::VfsOptions::default()
+        }).await.unwrap();
+        vfs.create("local", crate::Kind::File).await.unwrap();
+        vfs.write("local", 0, &vec![7; 4 * 1024 * 1024]).await.unwrap();
+        let node = vfs.inner.core.lock().await.state.nodes["local"].clone();
+        observer.armed.store(true, Ordering::SeqCst);
+        let sibling = tokio::spawn(async move { heartbeat.store(true, Ordering::SeqCst); });
+        let shards = vfs.inner.fold(dir.path(), &node, None, "local").await.unwrap();
+        sibling.await.unwrap();
+        assert_eq!(shards.iter().map(|s| s.n).sum::<u64>(), node.attr.size);
+        assert!(observer.saw_heartbeat.load(Ordering::SeqCst), "local chunking must schedule sibling socket work before reaching HTTP");
+        vfs.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn native_shard_uploads_overlap_with_a_bounded_client_limit() {
+        use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
+        struct Gate {
+            armed: AtomicBool, requests: AtomicUsize, active: AtomicUsize, peak: AtomicUsize,
+            resume: tokio::sync::Notify,
+        }
+        struct Active<'a>(&'a AtomicUsize);
+        impl Drop for Active<'_> { fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); } }
+        impl uls_client::TokenProvider for Gate {
+            fn token<'a, 'f>(&'a self) -> std::pin::Pin<Box<dyn std::future::Future<Output = uls_client::Result<uls_client::ProviderToken>> + Send + 'f>>
+            where 'a: 'f, Self: 'f {
+                Box::pin(async move {
+                    // The first fold request is the missing-shard probe; hold only the PUTs.
+                    if self.armed.load(Ordering::SeqCst) && self.requests.fetch_add(1, Ordering::SeqCst) > 0 {
+                        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+                        let _active = Active(&self.active);
+                        self.peak.fetch_max(active, Ordering::SeqCst);
+                        self.resume.notified().await;
+                    }
+                    Ok(uls_client::ProviderToken::new("test"))
+                })
+            }
+        }
+        let server = uls_mock::MockServer::start("test").await;
+        let gate = Arc::new(Gate { armed: false.into(), requests: 0.into(), active: 0.into(), peak: 0.into(), resume: tokio::sync::Notify::new() });
+        let client = uls_client::Client::builder(server.url(), "test").parallelism(3).token_provider(gate.clone()).build().unwrap();
+        client.create_drive("drive", None).await.unwrap();
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let vfs = crate::Vfs::open(client.clone(), "drive", dir.path(), crate::VfsOptions {
+            quiet_window: std::time::Duration::from_secs(3600), max_dirty_age: std::time::Duration::from_secs(3600), ..crate::VfsOptions::default()
+        }).await.unwrap();
+        let mut random = 0x1234_5678_9abc_def0_u64;
+        let data = (0..16 * 1024 * 1024).map(|_| {
+            random ^= random << 13; random ^= random >> 7; random ^= random << 17; random as u8
+        }).collect::<Vec<_>>();
+        vfs.create("parallel", crate::Kind::File).await.unwrap();
+        vfs.write("parallel", 0, &data).await.unwrap();
+        let node = vfs.inner.core.lock().await.state.nodes["parallel"].clone();
+        gate.armed.store(true, Ordering::SeqCst);
+        let worker = vfs.clone(); let path = dir.path().to_path_buf();
+        let publishing = tokio::spawn(async move { worker.inner.fold(&path, &node, None, "parallel").await });
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            while gate.active.load(Ordering::SeqCst) < 3 { tokio::time::sleep(std::time::Duration::from_millis(5)).await; }
+        }).await.expect("three independent PUT requests should overlap");
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert_eq!(gate.peak.load(Ordering::SeqCst), 3);
+        assert_eq!(server.stats.shard_puts.load(Ordering::SeqCst), 0, "held requests must not have reached storage");
+        gate.armed.store(false, Ordering::SeqCst);
+        assert_eq!(client.drive_info("drive").await.unwrap().head_seq, 0, "no commit before shard upload completion");
+        gate.resume.notify_waiters();
+        let shards = publishing.await.unwrap().unwrap();
+        assert!(shards.len() > 3, "the fixture must exceed the concurrency bound");
+        assert_eq!(shards.iter().map(|s| s.n).sum::<u64>(), data.len() as u64);
+        assert!(server.stats.shard_puts.load(Ordering::SeqCst) > 3);
+        vfs.shutdown().await.unwrap();
+        assert_eq!(client.read_range("drive", "parallel", 0, data.len() as u64).await.unwrap().as_ref(), data);
+    }
     async fn committed_without_ack(v: &crate::Vfs) {
         use crate::journal::{Action, Batch, Prepared};
         use std::collections::BTreeMap;
@@ -426,16 +629,16 @@ mod tests {
                 Action::Meta(op) => prepared.push(Prepared { op: op.clone(), file: None }),
                 Action::File { id,path } => {
                     paths.insert(*id,path.clone());
-                    let n = &nodes[id]; let shards = v.inner.fold(&dir,n).await.unwrap();
+                    let n = &nodes[id]; let shards = v.inner.fold(&dir,n,None,path).await.unwrap();
                     prepared.push(Prepared { file: Some(*id), op: uls_proto::Op::Put { path: path.clone(),
                         if_version: n.version.clone(), if_absent: n.version.is_none(), size: n.attr.size,
-                        content_type: "application/octet-stream".into(), mtime_ms: n.modified_ms, shards } });
+                        content_type: "application/octet-stream".into(), mtime_ms: n.modified_ms, shards, xattrs: None } });
                 }
             }
         }
         let cursor = v.inner.client.changes("drive",0,1).await.unwrap().last_ev;
         let batch = Batch { actions,nodes,paths,prepared,conflicts: BTreeMap::new(), conflict_attempt: 0,
-            cursor: Some(cursor),attempted: true };
+            cursor: Some(cursor),attempted: true,request_id: None };
         v.inner.save_batch(&batch).await.unwrap();
         // Deliberately leave the durable outbox untouched after a successful server commit.
         v.inner.client.commit("drive",batch.prepared.iter().map(|p| p.op.clone()).collect()).await.unwrap();
