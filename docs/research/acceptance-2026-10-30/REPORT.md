@@ -8,7 +8,7 @@ production recovery checks pass. This is accepted as a local preview, not a paid
 The production preview `0.2.3-preview` build 3 was installed from the provided DMG after
 signing out through the old app and verifying `pendingOps=0` and an empty upload queue.
 The previous app, preferences, state and 8.8 GB cache were archived under
-`~/Unlispace-deploy-backup-2026-10-29/local-install-before-preview/`, preserving recovery.
+`~/Orbit-deploy-backup-2026-10-29/local-install-before-preview/`, preserving recovery.
 No Keychain item was read or wiped directly and no macOS protection was disabled.
 
 Installer SHA-256: `ccd0ad15807bd5ecc768f982d0648a040c76b0568ed0654eaeb0ccc0fe110d25`.
@@ -45,9 +45,9 @@ in this continuation.
 
 ## Evidence and follow-up
 
-Private local evidence is under `~/Unlispace-deploy-backup-2026-10-29/acceptance/` and
+Private local evidence is under `~/Orbit-deploy-backup-2026-10-29/acceptance/` and
 `/tmp/uls-installed-acceptance-20261029/`. Earlier continuation gates under
-`/tmp/unlispace-final-review-2026-10-29/continue/` passed 191 Rust tests (2 ignored), 815 SMB
+`/tmp/orbit-final-review-2026-10-29/continue/` passed 191 Rust tests (2 ignored), 815 SMB
 tests, the Mac suite, and 53 local end-to-end checks including 50 MB stress. Those gates
 preceded the installed failures above.
 
@@ -92,7 +92,7 @@ DMG SHA-256: `8d6f4e6ce7b7c07787e2eb12a56d1306c48ef66076aef5fa92e5524b4568cb38`.
 The installed helper matched the signed bundle:
 `6521653bb3624feff67b946e9efe82107ba68d32c5c7fc46918c51c54bddb14d`.
 The prior 0.2.3 app and persistent files were retained in
-`~/Unlispace-deploy-backup-2026-10-29/acceptance/before-0.2.4-preview/`.
+`~/Orbit-deploy-backup-2026-10-29/acceptance/before-0.2.4-preview/`.
 The first backup attempt stopped on a stale Unix socket; the corrected copy explicitly
 excluded that transient socket before replacing the app. Both journals were clean.
 
@@ -121,14 +121,14 @@ retained alongside the passing evidence in `/tmp/uls-final-acceptance-20261030/`
 
 The successful SIGKILL drill also exposed two kernel shares stacked at the same mount path.
 They detached during the subsequent supported service stop. A further source fix is under
-validation: inspect the mount table before probing a dead root, recognize only exact Unlispace
+validation: inspect the mount table before probing a dead root, recognize only exact Orbit
 loopback shares, refuse live/unreachable/unrelated mounts, and bound stale-share detachment
 before mounting again.
 
 ## Stale-mount and service lifecycle completion
 
 The SMB preparation hook now runs before the engine probes the requested root. It only
-force-detaches exact Unlispace loopback shares whose listening port refuses connections;
+force-detaches exact Orbit loopback shares whose listening port refuses connections;
 live, unreachable, unrelated or changed shares stop recovery. Command execution is bounded.
 The failed-mount path no longer probes a potentially dead root to remove a directory.
 Eighteen library tests, 20 engine caller tests, and an explicitly executed real-Mac stale/live
@@ -157,7 +157,7 @@ DMG SHA-256: `e32eb4cc454c1de8ff447caa8741bcf6d42e350152335e3241fb635e490cb6c2`.
 Helper SHA-256: `fdb43f30327ec36f347e3820d08cae4e22b5b67c8619b08eb09694d0d401fb59`.
 Installed app SHA-256: `c7ac61eb264db5bcb402554891afc582eb0762b8ed5790daecaaae51fdf81332`.
 The previous app and persistent state are retained under
-`~/Unlispace-deploy-backup-2026-10-29/acceptance/before-0.2.6-preview/`.
+`~/Orbit-deploy-backup-2026-10-29/acceptance/before-0.2.6-preview/`.
 
 Completion-based unregister returned successfully before first registration of this build.
 The new service started on its first registration, restored the user's selected account and
@@ -178,7 +178,7 @@ mounted Space. Final installed production checks passed:
 All seven latest acceptance checks pass. The earlier harness parsing error remains in raw
 evidence and is superseded by passing reruns. Persistent final evidence, scripts, test logs
 and `final-summary.json` are under
-`~/Unlispace-deploy-backup-2026-10-29/acceptance/final-0.2.6-evidence/`.
+`~/Orbit-deploy-backup-2026-10-29/acceptance/final-0.2.6-evidence/`.
 The connected-app screenshot is `../final-0.2.6.png` relative to that directory.
 
 ## Limits before a paid launch

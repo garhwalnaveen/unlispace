@@ -55,11 +55,13 @@ describe("M3 drive routes", () => {
 		expect((await call(`/drives/${root}/fork`, { alias: "slow-fork" })).status).toBe(503);
 		expect(await w.env.DB.prepare("SELECT 1 FROM drives WHERE alias='slow-fork'").first()).toBeNull();
 	});
-	it("preserves soft deletion on upstream failure and propagates hard-delete failure", async () => {
+	it("retries soft deletion after an upstream failure and propagates hard-delete failure", async () => {
 		const { w, root, call } = await fixture();
 		w.dp.failDelete = true;
 		expect((await call(`/drives/${root}?hard=1`, {}, "DELETE")).status).toBe(500);
 		expect((await call(`/drives/${root}`, {}, "GET")).status).toBe(200);
+		expect((await call(`/drives/${root}`, {}, "DELETE")).status).toBe(503);
+		w.dp.failDelete = false;
 		expect((await call(`/drives/${root}`, {}, "DELETE")).status).toBe(200);
 		expect((await call(`/drives/${root}`, {}, "GET")).status).toBe(404);
 	});

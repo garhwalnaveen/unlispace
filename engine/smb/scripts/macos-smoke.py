@@ -152,7 +152,7 @@ def main():
                     require(run("xattr", "-p", "com.test", file).strip() == value, "xattr differs")
             check("xattr write/read + shorter overwrite", xattr)
 
-            resource = b"Unlispace resource fork\x00\xff"
+            resource = b"Orbit resource fork\x00\xff"
 
             def resource_fork():
                 setxattr(file, "com.apple.ResourceFork", resource)

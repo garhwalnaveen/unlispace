@@ -50,7 +50,7 @@ export async function invite(ctx: Ctx, a: Authed, orgId: string): Promise<Respon
 			orgId, a.userId, role, orgId, orgId, ctx.now, orgId, ctx.now, orgId, email, ctx.now).run();
 	if (!result.meta.changes) throw new HttpError(409, "invite_unavailable", "No seat available, an invitation is already pending, or your role changed. Refresh the team page.");
 	try {
-		await ctx.email.send(email, `Join ${org.name} on Unlispace`, `You have been invited to ${org.name} as ${role}. Sign in with ${email} to accept within seven days:\n${ctx.env.ULS_WEB_ORIGIN}/invites/${token}`);
+		await ctx.email.send(email, `Join ${org.name} on Orbit`, `You have been invited to ${org.name} as ${role}. Sign in with ${email} to accept within seven days:\n${ctx.env.ULS_WEB_ORIGIN}/invites/${token}`);
 	} catch {
 		await ctx.env.DB.prepare("UPDATE invitations SET revoked_at=? WHERE id=? AND used_at IS NULL").bind(ctx.now, id).run();
 		throw new HttpError(503, "email_unavailable", "The invitation could not be sent. Please try again later.");

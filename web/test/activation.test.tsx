@@ -52,11 +52,11 @@ it("preserves the desktop state and challenge through changing email and OTP ver
   await user.click(screen.getByRole("button", { name: "Continue with email" }));
   await user.type(await screen.findByLabelText("Verification code"), "123456");
   await user.click(screen.getByRole("button", { name: "Verify & sign in" }));
-  expect(await screen.findByRole("heading", { name: "Your Unlispace is ready" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Your Orbit is ready" })).toBeInTheDocument();
   expect(screen.getByText("Account verified")).toBeInTheDocument();
   expect(screen.getByText("Drive ready")).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "Main navigation" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Open Unlispace" }));
+  await user.click(screen.getByRole("button", { name: "Open Orbit" }));
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   const request = fetcher.mock.calls.find(([url]) => url.endsWith("/desktop/code"));
   expect(JSON.parse(String(request?.[1]?.body))).toEqual({ state, codeChallenge: challenge });
@@ -64,12 +64,12 @@ it("preserves the desktop state and challenge through changing email and OTP ver
 
 it("keeps the saved desktop return target when returning from a failed Google callback", async () => {
   const target = `/desktop?state=original&code_challenge=${"a".repeat(43)}`;
-  sessionStorage.setItem("unlispace.return", target);
+  sessionStorage.setItem("orbit.return", target);
   await renderApp("/auth/callback", false);
   const link = await screen.findByRole("link", { name: "Return to sign in" });
   expect(link).toHaveAttribute("href", `/login?${new URLSearchParams({ return: target })}`);
   await userEvent.click(link);
-  expect(await screen.findByRole("heading", { name: "Welcome to Unlispace" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Continue with Google" })).toBeInTheDocument();
 });
 
@@ -85,4 +85,24 @@ it("returns from a deployed billing route to the working drives route", async ()
   await userEvent.click(within(screen.getByRole("main")).getByRole("link", { name: "Your drives" }));
   expect(await screen.findByRole("heading", { name: "Your drives" })).toBeInTheDocument();
   expect(screen.queryByText("That page could not be found.")).not.toBeInTheDocument();
+});
+
+it("shows the public landing page at the root and keeps drive routes protected", async () => {
+  await renderApp("/", false);
+  expect(await screen.findByRole("navigation", { name: "Product navigation" })).toBeInTheDocument();
+  for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
+  expect(screen.queryByRole("navigation", { name: "Main navigation" })).not.toBeInTheDocument();
+});
+
+it("renders the public overview before session recovery finishes", () => {
+  const auth = new AuthStore(localStorage, null); stores.push(auth);
+  render(<MemoryRouter initialEntries={["/overview"]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
+  expect(screen.getByRole("heading", { name: "All your files. Within reach." })).toBeInTheDocument();
+  expect(screen.queryByText("Loading your account…")).not.toBeInTheDocument();
+});
+
+it("redirects signed-out drive visitors to sign in with their destination", async () => {
+  await renderApp("/drives/d-test/", false);
+  expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Continue with email" })).toBeInTheDocument();
 });

@@ -1,4 +1,4 @@
-# Unlispace engine (M0)
+# Orbit engine (M0)
 
 Rust workspace: chunker, wire types, HTTP/WebSocket client, shard cache, and the `ulsd` / `uls` binary
 (CLI plus a read-only loopback NFSv3 mount). Contract: `../docs/design/m0-contract.md`.
@@ -30,7 +30,7 @@ cargo test
 | `ULS_DEV_TOKEN` | required | static bearer token; never printed or logged |
 | `RUST_LOG` | `warn` | e.g. `uls_client=debug` |
 
-Shard cache: `~/Library/Caches/com.unlispace/shards/<sha256>`, 20 GB cap, LRU by mtime, atomic writes, verified on read.
+Shard cache: `~/Library/Caches/com.orbit/shards/<sha256>`, 20 GB cap, LRU by mtime, atomic writes, verified on read.
 Used by `get` and `mount`.
 
 ## CLI
@@ -58,15 +58,15 @@ Exit code 2 means the server rejected the request (412 precondition, not found, 
 `ulsd daemon` is what the Mac app talks to. It is also the default when `ulsd` runs with no
 arguments, which is how a LaunchAgent starts it. Protocol: `../mac/DAEMON-PROTOCOL.md`.
 
-- Socket: `~/Library/Application Support/Unlispace/ulsd.sock` (directory 0700, socket 0600). A stale
+- Socket: `~/Library/Application Support/Orbit/ulsd.sock` (directory 0700, socket 0600). A stale
   socket is removed on start; a live one makes the new daemon exit. Connections from another uid
   are dropped.
 - Sign-in: the app hands over its session with `auth.set`. The refresh token is kept in the macOS
-  Keychain (service `com.unlispace.ulsd`, account = user id) and rotated on refresh. Access tokens
+  Keychain (service `com.orbit.ulsd`, account = user id) and rotated on refresh. Access tokens
   stay in memory. Drive tokens come from `POST /drives/{id}/token`. Tokens are never logged.
-- `drive.mount` mounts at `~/Unlispace/<Drive name>` using the read-only NFS adapter behind the
+- `drive.mount` mounts at `~/Orbit/<Drive name>` using the read-only NFS adapter behind the
   `MountAdapter` trait (`ulsd/src/mount.rs`). Mounts are remembered in
-  `~/Library/Application Support/Unlispace/state.json` (also holds per-drive watch cursors as the
+  `~/Library/Application Support/Orbit/state.json` (also holds per-drive watch cursors as the
   last `ev`; no tokens) and restored on start. SIGTERM unmounts everything and keeps the list.
 - Each mounted drive runs a change watch and emits `change` events.
 - `uls login [--api URL]` signs in from a terminal: prints the `/auth/desktop/start` PKCE URL, you

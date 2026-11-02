@@ -30,9 +30,9 @@ pub struct ShardCache {
     scan_lock: Mutex<()>,
 }
 
-/// `~/Library/Caches/com.unlispace/shards` on macOS.
+/// `~/Library/Caches/com.orbit/shards` on macOS.
 pub fn default_cache_dir() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("com.unlispace").join("shards"))
+    dirs::cache_dir().map(|d| d.join("com.orbit").join("shards"))
 }
 
 fn is_hash(s: &str) -> bool {

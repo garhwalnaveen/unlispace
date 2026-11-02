@@ -9,7 +9,7 @@ import {
   type User,
 } from "./api";
 
-export const REFRESH_KEY = "unlispace.refreshToken";
+export const REFRESH_KEY = "orbit.refreshToken";
 interface MemorySession {
   familyId: string;
   accessToken: string;
@@ -43,7 +43,7 @@ export class AuthStore {
     storage: Storage = localStorage,
     channel: BroadcastChannel | null = typeof BroadcastChannel === "undefined"
       ? null
-      : new BroadcastChannel("unlispace.auth"),
+      : new BroadcastChannel("orbit.auth"),
   ) {
     // Discard legacy persisted credentials; never read them back into a session.
     storage.removeItem(REFRESH_KEY);
@@ -145,7 +145,7 @@ export class AuthStore {
           throw new Error(
             "This browser cannot safely refresh sessions across tabs. Use a current browser with Web Locks support.",
           );
-        await navigator.locks.request("unlispace.auth.refresh", rotate);
+        await navigator.locks.request("orbit.auth.refresh", rotate);
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) this.clear();
         this.emit({
@@ -186,7 +186,7 @@ export class AuthStore {
   }
   async logout() {
     // Logout and rotation share a lock so logout always revokes the latest refresh token.
-    await navigator.locks.request("unlispace.auth.refresh", async () => {
+    await navigator.locks.request("orbit.auth.refresh", async () => {
       await this.requestSession();
       const refreshToken = this.memoryRefreshToken;
       if (refreshToken) await publicPost("/auth/logout", { refreshToken });

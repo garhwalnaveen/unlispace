@@ -46,7 +46,7 @@ PASS  smb remote CLI commit -> mount + change event within 5 s: 67.6 ms includin
 PASS  smb concurrent edits -> conflict event + both remote contents survive: conflict event captured; remote head retained; local copy byte-identical
 PASS  smb offline pin survives cache pressure and data-plane outage: real prefetch; 1-byte cache cap; kernel SMB bytes matched while data-plane process group was suspended
 PASS  smb journal cap rejects upload without partial remote data
-DIAGNOSTIC scrubbed SMB trace: /tmp/unlispace-smb-diagnostic-1793038642902.log
+DIAGNOSTIC scrubbed SMB trace: /tmp/orbit-smb-diagnostic-1793038642902.log
 PASS  smb drive.unmount + daemon shutdown leaves no mounts
 PASS  m3 session key + ListBuckets alias (official AWS client): installed @aws-sdk/client-s3; real D1 access key
 PASS  m3 PutObject/GetObject random 8 MiB + aws-chunked: 8388608 random bytes compared; explicit aws-chunked SHA256 trailer verified

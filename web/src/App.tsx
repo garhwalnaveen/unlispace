@@ -13,6 +13,8 @@ import { Callback, Desktop, Embed, Login } from "./AuthPages";
 import { useAuth } from "./context";
 import { DriveBrowser } from "./DriveBrowser";
 import { Home } from "./Home";
+import { Landing, LandingNavigation } from "./Landing";
+import { OrbitMark } from "./OrbitMark";
 import { AccessKeys } from "./AccessKeys";
 import { Billing } from "./Billing";
 import { AcceptInvitation, TeamPage } from "./Team";
@@ -36,11 +38,12 @@ export function App() {
   const { auth, ready, user, error } = useAuth();
   const location = useLocation();
   const authPage = ["/login", "/auth/callback", "/desktop"].includes(location.pathname);
+  const marketing = location.pathname === "/overview" || (location.pathname === "/" && ready && !user);
   // Pages embedded in the desktop app render without the web chrome; the app supplies its own.
   const embedded = location.pathname.startsWith("/embed/");
   const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem("unlispace.theme");
-    return saved === "light" || saved === "dark" ? saved : "system";
+    const saved = localStorage.getItem("orbit.theme");
+    return saved === "light" || saved === "dark" || saved === "system" ? saved : "dark";
   });
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -49,7 +52,7 @@ export function App() {
         ? (media.matches ? "dark" : "light") : theme;
     };
     apply();
-    localStorage.setItem("unlispace.theme", theme);
+    localStorage.setItem("orbit.theme", theme);
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
@@ -68,17 +71,21 @@ export function App() {
       </main>
     );
   return (
-    <div className={`app ${user && !authPage ? "workspace" : "welcome"}`}>
+    <div className={`app ${marketing ? "marketing" : user && !authPage ? "workspace" : "welcome"}`}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <header className="topbar">
-        <Link className="brand" to="/" aria-label="Unlispace home">
-          <span className="brand-mark" aria-hidden="true"><Icon name="drive" /></span>
-          <span className="brand-name">Unlispace</span>
+        <Link className="brand" to={user ? "/" : "/overview"} aria-label="Orbit home">
+          <OrbitMark className="brand-mark" />
+          <span className="brand-name">orbit</span>
         </Link>
+        {marketing && <LandingNavigation />}
         <div className="topbar-right">
-          <div className="theme-switch" role="group" aria-label="Appearance">
+          {marketing ? (user ? <Link className="marketing-signin" to="/">Open workspace</Link> : <>
+            <Link className="marketing-signin" to="/login">Sign in</Link>
+            <Button asChild variant="default"><Link to="/login">Get started</Link></Button>
+          </>) : <div className="theme-switch" role="group" aria-label="Appearance">
             {(["system", "light", "dark"] as const).map((value) => (
               <Button
                 key={value}
@@ -91,10 +98,10 @@ export function App() {
                 <Icon name={value === "system" ? "monitor" : value === "light" ? "sun" : "moon"} />
               </Button>
             ))}
-          </div>
+          </div>}
         </div>
       </header>
-      {user && !authPage && (
+      {user && !authPage && !marketing && (
         <aside className="sidebar">
           <nav aria-label="Main navigation">
             <NavLink to="/" end className={location.pathname.startsWith("/drives/") ? "active" : undefined}><Icon name="drive" />Your drives</NavLink>
@@ -118,15 +125,16 @@ export function App() {
             Retry session
           </Button>
         )}
-        {!ready ? (
+        {!ready && location.pathname !== "/overview" ? (
           <Loading>Loading your account…</Loading>
         ) : (
           <Routes>
+            <Route path="/" element={user ? <Home /> : <Landing />} />
+            <Route path="/overview" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/auth/callback" element={<Callback />} />
             <Route path="/desktop" element={<Desktop />} />
             <Route element={<Protected />}>
-              <Route path="/" element={<Home />} />
               <Route path="/drives/:id/*" element={<DriveBrowser />} />
               <Route path="/ai" element={askAI} />
               <Route path="/settings" element={<Settings />} />

@@ -21,7 +21,7 @@ pub async fn serve(backend: Arc<dyn SmbBackend>, encrypt: bool) -> io::Result<Ru
     let server = SmbServer::builder()
         .listen("127.0.0.1:0".parse().unwrap())
         .user(&user, &password)
-        .netbios_name("UNLISPACE")
+        .netbios_name("ORBIT")
         .require_signing(true)
         .encrypt_data(encrypt)
         .share_listing(false)

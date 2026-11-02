@@ -1,7 +1,7 @@
 #!/bin/bash
 # Launch one Codex agent per task brief. Usage: launch.sh 01 02 ...
 CODEX=/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex
-REPO=/Users/naveen/unlispace
+REPO=/Users/naveen/orbit
 mkdir -p /tmp/codex-runs
 for n in "$@"; do
   f=$(ls $REPO/docs/agents/tasks/${n}-*.md)

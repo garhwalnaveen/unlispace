@@ -2,7 +2,7 @@
 
 - Deployment/config agent: set production `ULS_WEB_ORIGINS` to the exact deployed web origin.
   The only production value visible in `cloud/api/wrangler.jsonc` is the unresolved
-  `https://unlispace-web.__WORKERS_DOMAIN__`; production is intentionally empty. Dev allows
+  `https://orbit-web.__WORKERS_DOMAIN__`; production is intentionally empty. Dev allows
   `http://localhost:5173`. The allowlist accepts exact origins only, never wildcard patterns.
 - Control-plane agent: consume `forkDrive`, `deleteDrive(id, {hard})`, and extended `driveStats`
   from `DataPlaneAdmin`. Enforce the control-plane live-fork hard-delete restriction before

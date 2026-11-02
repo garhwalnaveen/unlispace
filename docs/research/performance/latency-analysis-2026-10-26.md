@@ -1,4 +1,4 @@
-# Where Unlispace loses time against Space
+# Where Orbit loses time against Space
 
 Reviewed 27 October 2026 against the retained comparison, native follow-up logs, and current source in this checkout. This is an analysis; no product code or deployment changed, and no new hosted transfer was run.
 
@@ -6,7 +6,7 @@ Reviewed 27 October 2026 against the retained comparison, native follow-up logs,
 
 The successful 50 MB comparison is the clearest baseline because both applications completed the write and full cold read with matching SHA-256.
 
-| Phase | Space | Unlispace | Extra time for Unlispace |
+| Phase | Space | Orbit | Extra time for Orbit |
 | --- | ---: | ---: | ---: |
 | Local write + fsync + close | 0.765 s | 37.171 s | 36.406 s; 48.6× duration |
 | Of that, fsync | 0.750 s | 37.074 s | 36.324 s |
@@ -18,9 +18,9 @@ The successful 50 MB comparison is the clearest baseline because both applicatio
 
 **About 64% of the observed upload-completion gap is the difference in local acceptance time.** This is a decomposition of elapsed milestones, not proof that network publication waited until fsync returned. Queue observations are sampled upper bounds, and the remaining interval includes whatever publication work was still outstanding plus observation delay. It is not pure network time.
 
-The original 1 GB queue-drain observations were 1,180.21 s for Space and 2,169.27 s for Unlispace: an extra 989.06 s, or about 16 min 29 s. Unlispace's local operation failed after 688.38 s with `EBADF`; this is a reliability failure, not a valid successful-save speed. Both initial isolated native 1 GB cloud reads failed, so there is no successful cold-download speed ratio for that workload.
+The original 1 GB queue-drain observations were 1,180.21 s for Space and 2,169.27 s for Orbit: an extra 989.06 s, or about 16 min 29 s. Orbit's local operation failed after 688.38 s with `EBADF`; this is a reliability failure, not a valid successful-save speed. Both initial isolated native 1 GB cloud reads failed, so there is no successful cold-download speed ratio for that workload.
 
-Baseline limitations: Space shipped release versus Unlispace debug; signing active on Unlispace and not reported active on Space; different hosted accounts/deployments; fixed test order; one payload per size. These measurements describe those installations, not current release parity.
+Baseline limitations: Space shipped release versus Orbit debug; signing active on Orbit and not reported active on Space; different hosted accounts/deployments; fixed test order; one payload per size. These measurements describe those installations, not current release parity.
 
 ## What caused the original delays, and what changed
 
@@ -98,8 +98,8 @@ The strongest current target is native serial publication, followed by durable p
 
 ## Evidence
 
-- [50 MB report](space-vs-unlispace-50mb-2026-10-26.md) and [machine-readable results](space-vs-unlispace-50mb-2026-10-26.json).
-- [Original 1 GB comparison](space-vs-unlispace-1gb-2026-10-26.md).
+- [50 MB report](space-vs-orbit-50mb-2026-10-26.md) and [machine-readable results](space-vs-orbit-50mb-2026-10-26.json).
+- [Original 1 GB comparison](space-vs-orbit-1gb-2026-10-26.md).
 - [Implementation and native follow-up](follow-up-2026-10-26.md).
 - [Retained successful local release run](../../../tests/e2e/last-run.txt).
-- Local sanitized traces: `/tmp/unlispace-smb-diagnostic-1793035605365.log`, `/tmp/unlispace-smb-diagnostic-1793036459672.log`, `/tmp/unlispace-smb-diagnostic-1793038642902.log`; process sample `/tmp/unlispace-large-close-flush-sample.txt`. Temporary artifacts may not survive cleanup/reboot.
+- Local sanitized traces: `/tmp/orbit-smb-diagnostic-1793035605365.log`, `/tmp/orbit-smb-diagnostic-1793036459672.log`, `/tmp/orbit-smb-diagnostic-1793038642902.log`; process sample `/tmp/orbit-large-close-flush-sample.txt`. Temporary artifacts may not survive cleanup/reboot.

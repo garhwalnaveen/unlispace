@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${1:-$ROOT/build/Unlispace.app}"
+APP="${1:-$ROOT/build/Orbit.app}"
 IDENTITY="${ULS_SIGN_IDENTITY:--}"
 OPTIONS=(--force --sign "$IDENTITY")
 # Ad-hoc builds have no team identity for validating the embedded Sparkle framework.

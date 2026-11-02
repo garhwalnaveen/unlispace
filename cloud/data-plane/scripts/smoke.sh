@@ -24,7 +24,7 @@ code=$(curl -s -o "$TMP/out" -w '%{http_code}' "${AUTH[@]}" -X PUT -H 'Content-T
 cat "$TMP/out"; echo; expect_status 201 "$code" "create drive"
 
 step "upload shard"
-printf 'hello unlispace smoke test\n' > "$TMP/shard.bin"
+printf 'hello orbit smoke test\n' > "$TMP/shard.bin"
 HASH="$(shasum -a 256 "$TMP/shard.bin" | cut -d' ' -f1)"
 SIZE="$(wc -c < "$TMP/shard.bin" | tr -d ' ')"
 code=$(curl -s -o "$TMP/out" -w '%{http_code}' "${AUTH[@]}" -X PUT --data-binary @"$TMP/shard.bin" "$BASE/v0/drives/$DRIVE/shards/$HASH")

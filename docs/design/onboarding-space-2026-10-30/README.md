@@ -1,16 +1,16 @@
 # Space-based onboarding — 30 October 2026
 
-Rebuilt in the existing product worktree at `/Users/naveen/.codex/worktrees/unlispace-engine/unlispace`. The chat checkout is the older subscription starter and was left unchanged.
+Rebuilt in the existing product worktree at `/Users/naveen/.codex/worktrees/orbit-engine/orbit`. The chat checkout is the older subscription starter and was left unchanged.
 
-The reference is the saved [27 October Space signup and first-use research](/Users/naveen/Documents/Codex/2026-10-26/se/projects/unlispace/docs/space-audit-2026-10-27/REPORT.md), including its native tour, permission and shortcut screenshots. The current request to match that onboarding supersedes the audit's earlier recommendation for a shorter setup.
+The reference is the saved [27 October Space signup and first-use research](/Users/naveen/Documents/Codex/2026-10-26/se/projects/orbit/docs/space-audit-2026-10-27/REPORT.md), including its native tour, permission and shortcut screenshots. The current request to match that onboarding supersedes the audit's earlier recommendation for a shorter setup.
 
 ## Flow and layout
 
-Sign in with browser → cloud files in Finder → search → feature overview → Ask AI → permissions and drive selection → shortcut and Open Unlispace.
+Sign in with browser → cloud files in Finder → search → feature overview → Ask AI → permissions and drive selection → shortcut and Open Orbit.
 
 The native window opens at 1100 × 760, resizes down to 800 × 640, and scrolls its content while keeping Back, centered progress marks and Continue available. Large system-font headings, centered product previews, split feature/access pages, and the final keycaps follow the researched Space screens. The palette reuses the native design system: light canvas `#FAFAFA`, surface `#FFFFFF`, subtle `#F2F2F2`, border `#E0E0E0`, foreground `#171717`, muted `#666666`; dark appearance uses the existing semantic alternatives. Blue folders and familiar window controls appear only inside the Finder illustration.
 
-The browser handoff now prepares storage before enabling Open Unlispace. It checks the existing organization/drive endpoint at most ten times, two seconds apart after responses, then offers an explicit retry. The final connection remains a separate step. Authentication pages have no workspace sidebar, and moving keyboard focus no longer scrolls away the header.
+The browser handoff now prepares storage before enabling Open Orbit. It checks the existing organization/drive endpoint at most ten times, two seconds apart after responses, then offers an explicit retry. The final connection remains a separate step. Authentication pages have no workspace sidebar, and moving keyboard focus no longer scrolls away the header.
 
 ## Behavior retained or completed
 
@@ -20,7 +20,7 @@ The browser handoff now prepares storage before enabling Open Unlispace. It chec
 - The final screen opens the mounted drive in Finder and leads into the existing first-file checklist.
 - A global Option–Space shortcut opens the workspace; Control–Option–Space and Command–Option–Space are alternate choices. Registration failure is shown rather than stealing a conflicting shortcut. Command–Space remains Spotlight's shortcut. Recording suspends the current registration and cancellation restores it.
 - Pressing the shortcut on the final screen completes setup. Earlier onboarding screens retain focus.
-- Only actual Unlispace features are described. Search is online and filename-based, cache/offline storage uses local disk, and AI requires an explicitly chosen provider and selected text. The previews are labeled illustrations.
+- Only actual Orbit features are described. Search is online and filename-based, cache/offline storage uses local disk, and AI requires an explicitly chosen provider and selected text. The previews are labeled illustrations.
 
 ## Verification
 

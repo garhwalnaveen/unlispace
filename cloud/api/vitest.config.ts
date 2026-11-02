@@ -13,7 +13,7 @@ export default defineConfig(async () => {
 					// Stand-in for the real data plane so the service binding resolves without it.
 					workers: [
 						{
-							name: "unlispace-data-plane",
+							name: "orbit-data-plane",
 							modules: true,
 							script: `import { WorkerEntrypoint } from "cloudflare:workers";
 export class DataPlaneAdmin extends WorkerEntrypoint {

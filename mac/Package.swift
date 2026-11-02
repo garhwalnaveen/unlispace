@@ -2,24 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "Unlispace",
+    name: "Orbit",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Unlispace", targets: ["Unlispace"]),
-        .library(name: "UnlispaceKit", targets: ["UnlispaceKit"]),
+        .executable(name: "Orbit", targets: ["Orbit"]),
+        .library(name: "OrbitKit", targets: ["OrbitKit"]),
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.6.4"),
     ],
     targets: [
         // All logic lives in the library so it is unit-testable.
-        .target(name: "UnlispaceKit"),
+        .target(name: "OrbitKit"),
         // Thin SwiftUI/AppKit shell.
-        .executableTarget(name: "Unlispace", dependencies: ["UnlispaceKit", .product(name: "Sparkle", package: "Sparkle")],
+        .executableTarget(name: "Orbit", dependencies: ["OrbitKit", .product(name: "Sparkle", package: "Sparkle")],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
-        .testTarget(name: "UnlispaceKitTests", dependencies: ["UnlispaceKit"]),
-        .testTarget(name: "DaemonIntegrationTests", dependencies: ["UnlispaceKit"]),
-        .testTarget(name: "UnlispaceAppTests", dependencies: ["Unlispace"]),
+        .testTarget(name: "OrbitKitTests", dependencies: ["OrbitKit"]),
+        .testTarget(name: "DaemonIntegrationTests", dependencies: ["OrbitKit"]),
+        .testTarget(name: "OrbitAppTests", dependencies: ["Orbit"]),
     ],
     swiftLanguageModes: [.v6]
 )

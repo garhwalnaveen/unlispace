@@ -1,11 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "unlispace-data-plane",
+  "name": "orbit-data-plane",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": true },
   "r2_buckets": [
-    { "binding": "SHARDS", "bucket_name": "unlispace-shards-dev" }
+    { "binding": "SHARDS", "bucket_name": "orbit-shards-dev" }
   ],
   "durable_objects": {
     "bindings": [
@@ -30,20 +30,20 @@
   "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS", "ULS_BLOCK_KEY"] },
   "env": {
     "production": {
-      "name": "unlispace-data-plane",
+      "name": "orbit-data-plane",
       "secrets": { "required": ["ULS_JWT_PUBLIC_JWKS", "ULS_BLOCK_KEY"] },
       "workers_dev": true,
       "preview_urls": false,
-      "r2_buckets": [{ "binding": "SHARDS", "bucket_name": "unlispace-shards" }],
+      "r2_buckets": [{ "binding": "SHARDS", "bucket_name": "orbit-shards" }],
       "durable_objects": {
         "bindings": [{ "name": "DRIVE_AUTHORITY", "class_name": "DriveAuthority" }, { "name": "STORAGE_QUOTA", "class_name": "StorageQuota" }]
       },
       "vars": {
-        "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
+        "ULS_ISSUER": "https://orbit-api.__WORKERS_DOMAIN__",
         "ULS_ALLOW_DEV_TOKEN": "0",
         "ULS_GC_DELETE": "0",
         // Fill the exact deployed web origin; no wildcard or unresolved domain is allowed.
-        "ULS_WEB_ORIGINS": "https://unlispace-web.__WORKERS_DOMAIN__"
+        "ULS_WEB_ORIGINS": "https://orbitfs.io"
       }
     }
   }

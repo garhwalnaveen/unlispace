@@ -9,7 +9,7 @@ interface __BaseEnv_Env {
 	ULS_WEB_ORIGIN: "http://127.0.0.1:5173";
 	ULS_JWT_PRIVATE_JWK: string;
 	ULS_JWT_PUBLIC_JWKS: string;
-	DATA_PLANE: Service /* entrypoint DataPlaneAdmin from unlispace-data-plane */;
+	DATA_PLANE: Service /* entrypoint DataPlaneAdmin from orbit-data-plane */;
 }
 declare namespace Cloudflare {
 	interface Env extends __BaseEnv_Env {}

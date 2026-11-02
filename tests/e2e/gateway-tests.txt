@@ -1,9 +1,9 @@
 
-> unlispace-s3@0.0.0 test
+> orbit-s3@0.0.0 test
 > vitest run --maxWorkers=1
 
 
- RUN  v4.1.12 /Users/naveen/unlispace/cloud/s3-gateway
+ RUN  v4.1.12 /Users/naveen/orbit/cloud/s3-gateway
 
 [33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
 

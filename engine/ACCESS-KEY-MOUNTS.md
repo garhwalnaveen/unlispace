@@ -1,9 +1,9 @@
 # Programmatic mounts with an S3 key
 
-A drive-scoped Unlispace S3 access key can open a native filesystem mount without a login session. The native engine exchanges the key for a short-lived drive token, renews it before expiry, and refuses a grant that changes the resolved drive ID. Read-only grants force a read-only filesystem and are also checked by the data client before writes.
+A drive-scoped Orbit S3 access key can open a native filesystem mount without a login session. The native engine exchanges the key for a short-lived drive token, renews it before expiry, and refuses a grant that changes the resolved drive ID. Read-only grants force a read-only filesystem and are also checked by the data client before writes.
 
 ```sh
-export ULS_S3_ENDPOINT=https://your-unlispace-s3-endpoint
+export ULS_S3_ENDPOINT=https://your-orbit-s3-endpoint
 export ULS_S3_ACCESS_KEY_ID=your-access-key-id
 export ULS_S3_SECRET_ACCESS_KEY=your-secret
 mkdir -p /path/to/mount
@@ -20,7 +20,7 @@ The same provider is public in the Rust client:
 use uls_client::{AccessKeyTokenProvider, Client};
 # async fn example() -> uls_client::Result<()> {
 let provider = AccessKeyTokenProvider::new(
-    "https://your-unlispace-s3-endpoint",
+    "https://your-orbit-s3-endpoint",
     "drive-alias",
     std::env::var("ULS_S3_ACCESS_KEY_ID").unwrap(),
     std::env::var("ULS_S3_SECRET_ACCESS_KEY").unwrap(),
@@ -34,7 +34,7 @@ let info = client.drive_info(&grant.drive_id).await?;
 # }
 ```
 
-This adapter uses Unlispace's authoritative metadata and existing native NFS/VFS implementation. Space's proprietary `supervised-mount` process consumes a different metadata engine format; raw access to the shared R2 shard lineage would neither implement that format nor safely isolate forks. The native adapter therefore uses the authenticated drive API and never gives clients broad R2 credentials.
+This adapter uses Orbit's authoritative metadata and existing native NFS/VFS implementation. Space's proprietary `supervised-mount` process consumes a different metadata engine format; raw access to the shared R2 shard lineage would neither implement that format nor safely isolate forks. The native adapter therefore uses the authenticated drive API and never gives clients broad R2 credentials.
 
 CLI mounts currently use the existing macOS NFS adapter. Linux FUSE and Windows drive mounting are separate adapters, not provided by this change.
 

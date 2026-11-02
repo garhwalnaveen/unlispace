@@ -1,5 +1,5 @@
 //! Wire types for the app <-> daemon protocol (`mac/DAEMON-PROTOCOL.md`), matching
-//! `mac/Sources/UnlispaceKit/DaemonProtocol.swift` and `AuthProtocol.swift`.
+//! `mac/Sources/OrbitKit/DaemonProtocol.swift` and `AuthProtocol.swift`.
 //!
 //! Types that can carry secrets implement `Debug` by hand and never print them.
 

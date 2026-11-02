@@ -15,7 +15,7 @@ export class ConsoleSender implements EmailSender {
 export class CloudflareEmailSender implements EmailSender {
 	constructor(private binding: SendEmail, private from: string) {}
 	async send(to: string, subject: string, text: string, html?: string): Promise<void> {
-		await this.binding.send({ to, from: { email: this.from, name: "Unlispace" }, subject, text, ...(html ? { html } : {}) });
+		await this.binding.send({ to, from: { email: this.from, name: "Orbit" }, subject, text, ...(html ? { html } : {}) });
 	}
 }
 
@@ -26,7 +26,7 @@ export class ResendSender implements EmailSender {
 		const res = await this.fetcher("https://api.resend.com/emails", {
 			method: "POST",
 			headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-			body: JSON.stringify({ from: `Unlispace <${this.from}>`, to: [to], subject, text, ...(html ? { html } : {}) }),
+			body: JSON.stringify({ from: `Orbit <${this.from}>`, to: [to], subject, text, ...(html ? { html } : {}) }),
 		});
 		if (!res.ok) throw new Error(`resend ${res.status}`);
 	}
@@ -40,7 +40,7 @@ export class NoEmailSender implements EmailSender {
 
 /** Order: dev console, then Resend if RESEND_API_KEY is set, then the Cloudflare binding. */
 export function selectSender(env: AppEnv, fetcher: typeof fetch): EmailSender {
-	const from = env.ULS_EMAIL_FROM || "login@unlispace.com";
+	const from = env.ULS_EMAIL_FROM || "login@orbit.com";
 	if (env.ULS_DEV_LOG_OTP === "1") return new ConsoleSender();
 	if (env.RESEND_API_KEY) return new ResendSender(env.RESEND_API_KEY, from, fetcher);
 	if (env.EMAIL) return new CloudflareEmailSender(env.EMAIL, from);

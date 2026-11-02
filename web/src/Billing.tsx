@@ -54,7 +54,7 @@ export function Billing() {
   const period = cadence === "annual" ? "year" : "month";
   function submit(event: FormEvent) { event.preventDefault(); void redirect(true); }
   return <>
-    <header className="page-heading"><div><Link to="/">Your drives</Link><h1>Billing</h1><p className="muted">{org?.name || "Organization subscription"}</p></div></header>
+    <header className="page-heading"><div><Link to="/">Your drives</Link><h1>Billing</h1><p className="muted">{org?.name || "Workspace subscription"}</p></div></header>
     <ErrorNotice error={summary.error || catalog.error || orgs.error || (!choosing && error)} />
     {Boolean(summary.error || catalog.error || orgs.error) && <Button onClick={() => { summary.reload(); catalog.reload(); orgs.reload(); }}>Try again</Button>}
     {summary.loading && <Loading>Loading subscription…</Loading>}

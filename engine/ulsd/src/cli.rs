@@ -13,7 +13,7 @@ use uls_proto::NodeType;
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8787";
 
 #[derive(Parser, serde::Serialize, serde::Deserialize)]
-#[command(version, about = "Unlispace engine and CLI", long_about = "Unlispace engine and CLI (M0).\n\nEnvironment:\n  ULS_ENDPOINT   Worker URL (default http://127.0.0.1:8787)\n  ULS_DEV_TOKEN  static bearer token (never printed)")]
+#[command(version, about = "Orbit engine and CLI", long_about = "Orbit engine and CLI (M0).\n\nEnvironment:\n  ULS_ENDPOINT   Worker URL (default http://127.0.0.1:8787)\n  ULS_DEV_TOKEN  static bearer token (never printed)")]
 pub struct Cli {
     #[command(subcommand)]
     /// Defaults to `daemon` when omitted (how the LaunchAgent runs it).
@@ -32,7 +32,7 @@ pub enum Cmd {
         #[arg(long, global = true)]
         socket: Option<PathBuf>,
         /// Keep the state file, drive journals, shard cache, socket and mounts under this
-        /// directory instead of ~/Library/Application Support/Unlispace
+        /// directory instead of ~/Library/Application Support/Orbit
         #[arg(long, global = true)]
         state_dir: Option<PathBuf>,
         /// Where refresh tokens are kept. `memory` creates no Keychain item (for tests).

@@ -1,4 +1,4 @@
-# Unlispace for macOS (M1 shell)
+# Orbit for macOS (M1 shell)
 
 Menu-bar app (SwiftUI + AppKit, Swift 6) that controls the `ulsd` engine. Built with SwiftPM and
 the Command Line Tools; no Xcode project.
@@ -7,7 +7,7 @@ the Command Line Tools; no Xcode project.
 ```
 swift build -c release
 bash scripts/test.sh        # swift test with the CLT Testing.framework paths
-bash scripts/bundle.sh      # produces build/Unlispace.app, ad-hoc signed
+bash scripts/bundle.sh      # produces build/Orbit.app, ad-hoc signed
 ```
 With full Xcode, plain `swift test` works. Under the CLT only, `scripts/test.sh` adds the
 framework search paths for Swift Testing (XCTest is not shipped with the CLT).
@@ -25,12 +25,12 @@ If the host cannot start SwiftPM's nested `sandbox-exec`, use `swift build -c re
 reports "engine not installed".
 
 ## Run
-Open `build/Unlispace.app` yourself. The app is `LSUIElement` (no Dock icon). `uls://` is
+Open `build/Orbit.app` yourself (the app displays as Orbit). The app is `LSUIElement` (no Dock icon). `uls://` is
 registered as a URL scheme. The LaunchAgent is registered only when you choose "Enable engine..."
 in the menu. "Launch at login" uses `SMAppService.mainApp`.
 
 ## Sign-in (M1, default)
-Menu or Settings -> "Sign in to Unlispace". Flow (`docs/design/m1-contract.md` 5.1):
+Menu or Settings -> "Sign in to Orbit". Flow (`docs/design/m1-contract.md` 5.1):
 1. `ASWebAuthenticationSession` (callback scheme `uls`) opens
    `GET {api}/auth/desktop/start?state&code_challenge&code_challenge_method=S256`.
 2. The web app returns `uls://auth/callback#code&state`. The app checks `state` (constant time)
@@ -47,7 +47,7 @@ base. Override under Settings -> Advanced -> Developer (e.g. `http://127.0.0.1:8
 
 **Daemon absent fallback.** If the daemon is unreachable when sign-in finishes (no socket, the
 mock is active, connection lost, or it answers `offline`/`internal`), the session is stored as
-one Keychain item (service `com.unlispace.app`, account `pending-session`, this device only,
+one Keychain item (service `com.orbit.app`, account `pending-session`, this device only,
 after first unlock). Every time the app connects to a real daemon it re-sends `auth.set` and
 deletes the item on acknowledgement. This is the only case where the app holds a refresh token;
 it ends at the first successful hand-off. If the daemon rejects the session (`unauthorized`,
@@ -68,7 +68,7 @@ the window returns next launch and can always be opened from the menu or Setting
 starts polling at launch, independently of opening the menu. Setup never registers the engine
 or login items automatically.
 
-Signed out: "Sign in to Unlispace". Signed in: email (`auth.status`), engine state, live
+Signed out: "Sign in to Orbit". Signed in: email (`auth.status`), engine state, live
 `transfer` / `change` / `state` events, drives with mount state (`drives.list`), mount/unmount,
 "Sign out" (`auth.signOut`). Settings: account, cache cap (`config.set cacheCapBytes`), launch at
 login, Advanced -> Developer (API endpoint override, M0 dev endpoint + token via `config.set`).
@@ -86,7 +86,7 @@ redact in `description`. Tokens, codes and verifiers are never logged.
 
 ## Architecture
 ```
- +--------------------------- Unlispace.app (LSUIElement) ---------------------------+
+ +--------------------------- Orbit.app (LSUIElement) ---------------------------+
  |  MenuBarExtra / Settings (SwiftUI)                                               |
  |        |                                                                         |
  |     AppModel (@MainActor, @Observable) --polls 5s + consumes events              |
@@ -95,11 +95,11 @@ redact in `description`. Tokens, codes and verifiers are never logged.
  |     |            |                   DaemonLifecycle (SMAppService)              |
  |  UnixSocket   MockDaemon                                                         |
  +-----|----------------------------------------------------------------------------+
-       | NDJSON over ~/Library/Application Support/Unlispace/ulsd.sock
+       | NDJSON over ~/Library/Application Support/Orbit/ulsd.sock
        v
    ulsd (Rust, LaunchAgent) --HTTPS--> Cloudflare Worker (/v0/drives/...)
 ```
-Targets: `UnlispaceKit` (all testable logic), `Unlispace` (UI shell), tests in `Tests/`.
+Targets: `OrbitKit` (all testable logic), `Orbit` (UI shell), tests in `Tests/`.
 Protocol: see `DAEMON-PROTOCOL.md`.
 
 ## What is mocked or untested
@@ -155,7 +155,7 @@ three-stage flow with a visible step indicator.
 
 See `../docs/design/space-desktop-comparison.md` for the observed comparison, scope and remaining
 acceptance work. `WorkspaceRenderTests` renders signed-out, fixture drives, settings and
-transfers in both appearances to the system temporary directory under `unlispace-ui-review/`.
+transfers in both appearances to the system temporary directory under `orbit-ui-review/`.
 These fixtures do not authenticate or mount drives.
 
 Ad hoc development signing omits hardened runtime so the embedded ad hoc Sparkle framework
@@ -165,13 +165,13 @@ The bundle is for local review; this does not establish notarization or cloud-fl
 
 ## Completed desktop acceptance (26 October 2026)
 
-The review build is configured for `https://unlispace-api.naveen-f3d.workers.dev` and includes
+The review build is configured for `https://orbit-api.naveen-f3d.workers.dev` and includes
 the SMB-enabled engine. An unconfigured build shows an endpoint setup message rather than
 silently using an unavailable hostname. Sign-in checks the service with a 15-second deadline;
 Open browser offers a state-checked custom-scheme fallback when the system sheet is unavailable.
 Cancellation also stops service preparation.
 
-`Unlispace.app/Contents/MacOS/Unlispace --engine-status`, `--enable-engine`, and
+`Orbit.app/Contents/MacOS/Orbit --engine-status`, `--enable-engine`, and
 `--disable-engine` provide ServiceManagement operations for installation/support tools.
 Disabling waits up to 15 seconds for macOS's unregistration completion callback before
 reporting success, so a subsequent registration does not race service shutdown.
@@ -205,7 +205,7 @@ Drive operations reject duplicate in-flight requests and mock connections.
 
 ## Shared desktop styling
 
-`Sources/Unlispace/DesignSystem.swift` defines the neutral light/dark palette, panel borders,
+`Sources/Orbit/DesignSystem.swift` defines the neutral light/dark palette, panel borders,
 and heading scale used by the workspace, setup, settings, and menu-bar UI. Buttons and group
 boxes use native SwiftUI styles.
 System typography, SF Symbols, native navigation and form controls remain in use. Drive
@@ -215,4 +215,4 @@ stronger panel borders; status labels retain their semantic colors.
 `DesignSystemTests` checks AA text contrast in both appearances.
 `WorkspaceRenderTests` renders window-backed fixtures, including the 800 × 580 workspace,
 compact offline actions, setup, and menu-bar UI. Images are written under the system
-temporary directory at `unlispace-ui-review/`. These fixtures do not sign in or mount drives.
+temporary directory at `orbit-ui-review/`. These fixtures do not sign in or mount drives.

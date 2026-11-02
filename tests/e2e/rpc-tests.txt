@@ -1,5 +1,5 @@
 
- RUN  v4.1.12 /Users/naveen/unlispace/cloud/s3-gateway
+ RUN  v4.1.12 /Users/naveen/orbit/cloud/s3-gateway
 
 
  Test Files  1 passed (1)

@@ -35,7 +35,7 @@ with a null alias until renamed. Explicit drive creation derives an alias when o
 
 ## Internal `ControlPlane` service entrypoint
 
-Bind the gateway's `CONTROL_PLANE` service to `unlispace-api`, entrypoint `ControlPlane`.
+Bind the gateway's `CONTROL_PLANE` service to `orbit-api`, entrypoint `ControlPlane`.
 This is a named `WorkerEntrypoint` export; no public secret lookup HTTP route exists.
 Every call resolves the access key against D1 again, checking all ancestor revocations,
 workspace membership, key access levels, current roles, and intersected drive scopes.

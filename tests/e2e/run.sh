@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 here=$(cd "$(dirname "$0")" && pwd)
-work=$(mktemp -d /tmp/unlispace-e2e.XXXXXX)
+work=$(mktemp -d /tmp/orbit-e2e.XXXXXX)
 work=$(cd "$work" && pwd -P)
 runner=
 cleanup() {

@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 import { handle } from "../src/index";
 import { bucketName, harness, KEY_ID, requestHandler, secretOf } from "./helpers";
 
-it("runs the published SpaceFS TypeScript SDK against Unlispace", async () => {
+it("runs the published SpaceFS TypeScript SDK against Orbit", async () => {
   const h = await harness();
   const sdk = new S3SDKClient({
     endpoint:"https://s3.test", accessKeyId:KEY_ID, secretAccessKey:await secretOf(KEY_ID),

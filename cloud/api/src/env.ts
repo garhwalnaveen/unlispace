@@ -24,7 +24,7 @@ export interface AppEnv {
 	ULS_DATA_ENDPOINT: string;
 	ULS_WEB_ORIGIN: string;
 	ULS_DEV_LOG_OTP?: string;
-	/** Sender address for OTP mail, default login@unlispace.com. */
+	/** Sender address for OTP mail, default login@orbit.com. */
 	ULS_EMAIL_FROM?: string;
 	RESEND_API_KEY?: string;
 	GOOGLE_CLIENT_ID?: string;

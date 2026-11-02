@@ -14,7 +14,7 @@ afterEach(() => {
 
 class TestChannel extends EventTarget implements BroadcastChannel {
   static peers = new Set<TestChannel>();
-  name = "unlispace.auth";
+  name = "orbit.auth";
   onmessage: ((event: MessageEvent) => void) | null = null;
   onmessageerror: ((event: MessageEvent) => void) | null = null;
   constructor() {

@@ -233,7 +233,7 @@ fn debug_output_redacts_tokens() {
 #[ignore = "touches the real login Keychain; may prompt the user"]
 fn keychain_round_trip() {
     use uls_auth::KeychainStore;
-    let k = KeychainStore::with_service("com.unlispace.ulsd.test");
+    let k = KeychainStore::with_service("com.orbit.ulsd.test");
     let acct = format!("test-{}", now_s());
     assert_eq!(k.get(&acct).unwrap(), None);
     k.set(&acct, "one").unwrap();

@@ -14,7 +14,7 @@ test('native stress requires an explicit supported byte count', () => {
 });
 
 test('streamed fixture, explicit sync/close copy and hashing agree at a partial block boundary', async () => {
-  const temporary = await mkdtemp(join(tmpdir(), 'unlispace-stress-self-test-'));
+  const temporary = await mkdtemp(join(tmpdir(), 'orbit-stress-self-test-'));
   try {
     const source = join(temporary, 'source'), target = join(temporary, 'target');
     const size = 4 * 1024 * 1024 + 17;

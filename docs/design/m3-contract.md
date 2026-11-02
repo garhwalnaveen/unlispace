@@ -170,7 +170,7 @@ daemon emits `state` with message `journal_full`.
 ### 5.2 `uls` CLI (Space CLI parity; one binary, current flags keep working)
 `uls drives` · `uls use <workspace>` · `uls mount <drive> [mountpoint] [--read-only] [--foreground]`
 (via the daemon unless `--foreground`; `<drive>` = name, `workspace/name`, alias or id, matched
-case-insensitively, ambiguity lists choices; default mountpoint `~/Unlispace/<Name>`) · `uls mounts` ·
+case-insensitively, ambiguity lists choices; default mountpoint `~/Orbit/<Name>`) · `uls mounts` ·
 `uls unmount <drive|mountpoint>` · `uls status` · `uls uploads [--watch]` · `uls pin|unpin <drive> <path>` ·
 `uls history <drive> <path>` · `uls show <drive> <path> [--at <rfc3339> | --version <id>]` ·
 `uls restore <drive> <path> (--at <rfc3339> | <versionId>)` (a folder path restores the subtree as

@@ -1,5 +1,5 @@
 # 07 · S3-compatible gateway (SigV4)  — write in: cloud/s3-gateway/ (new Worker)
-New Worker `unlispace-s3` implementing the S3 subset + extensions in product-design §4.2 and
+New Worker `orbit-s3` implementing the S3 subset + extensions in product-design §4.2 and
 docs/research/spacefs (Space's s3sdk protocol: llms-full sections on Standard S3 subset, Object
 extensions, Drive extensions, Errors). Auth: SigV4 (header, presigned, UNSIGNED-PAYLOAD,
 aws-chunked incl. STREAMING-UNSIGNED-PAYLOAD-TRAILER with trailing checksums) verified with

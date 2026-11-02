@@ -17,7 +17,7 @@ behaviour: /tmp/spacefs-docs-1025/llms-full.txt ("Fork a drive", protocol §5.2)
    `DataPlaneAdmin.restoreSnapshot(driveId, key)` into an *empty* DO, and a test that a drive rebuilt
    from its snapshot answers list/stat/manifest/versions identically.
 6. CORS per §2.2 on every `/v0` and `/_blocks` response (env `ULS_WEB_ORIGINS`; add it to
-   wrangler.jsonc vars for dev `http://localhost:5173` and production `https://unlispace-web.*` only if
+   wrangler.jsonc vars for dev `http://localhost:5173` and production `https://orbit-web.*` only if
    the existing production web origin is visible in repo config, else leave production empty + note).
 Keep every existing test green; add tests for each item. Gate: `cd cloud/data-plane && npx tsc --noEmit && npm test`.
 Report ≤ 300 words.

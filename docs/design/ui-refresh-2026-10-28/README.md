@@ -1,10 +1,10 @@
-# Unlispace interface refresh · 28 October 2026
+# Orbit interface refresh · 28 October 2026
 
-Implemented in `/Users/naveen/.codex/worktrees/unlispace-engine/unlispace`, the existing product worktree. The main checkout still contains the subscription starter. Existing feature work in the product worktree was preserved.
+Implemented in `/Users/naveen/.codex/worktrees/orbit-engine/orbit`, the existing product worktree. The main checkout still contains the subscription starter. Existing feature work in the product worktree was preserved.
 
 ## Design direction
 
-Unlispace is a file utility. The familiar object is a drive, and the first useful action is opening it. The interface now gives drive names, real status and file actions priority over introductory copy.
+Orbit is a file utility. The familiar object is a drive, and the first useful action is opening it. The interface now gives drive names, real status and file actions priority over introductory copy.
 
 Two layouts were considered: independent drive cards and a shared drive list. The shared list fits this product better: people compare names and states, then browse or mount one. The Mac app uses native controls; the portal uses the same ordering and vocabulary.
 
@@ -64,15 +64,15 @@ Browser screenshots below use local sample data and a temporary mock API harness
 
 ## Deployment completed · 28 October 2026
 
-- Portal: https://unlispace-web.naveen-f3d.workers.dev
+- Portal: https://orbit-web.naveen-f3d.workers.dev
 - Worker version: `de1376cf-a5a8-48f1-a7f6-068f2dbfac5d`.
 - Previous Worker version retained for rollback: `98bb33eb-477b-4e86-a53e-32e40a0a4831`.
-- Production API build target: `https://unlispace-api.naveen-f3d.workers.dev`.
+- Production API build target: `https://orbit-api.naveen-f3d.workers.dev`.
 - Verified HTTP 200 and the exact built HTML on login, desktop handoff, auth callback, drive and billing SPA routes. The deployed JavaScript and CSS bytes match the local production build.
-- Rebuilt and installed `/Users/naveen/Applications/Unlispace.app`, version **0.2.1**, build **2**, and reopened it. The live UI shows the new navigation, drive rows and guide layout.
+- Rebuilt and installed `/Users/naveen/Applications/Orbit.app`, version **0.2.1**, build **2**, and reopened it. The live UI shows the new navigation, drive rows and guide layout.
 - The bundled engine is byte-for-byte identical to the previous installed engine. The existing daemon remained running. Account sign-in and the mounted drive were preserved; status reports zero pending operations and no pending uploads.
-- Installer: `mac/build/Unlispace-0.2.1.dmg`; its read-only mount, app signature and Applications link were verified, then the image was detached.
-- Previous Mac bundle retained as `mac/build/Unlispace-before-ui-2026-10-28.zip` for rollback.
+- Installer: `mac/build/Orbit-0.2.1.dmg`; its read-only mount, app signature and Applications link were verified, then the image was detached.
+- Previous Mac bundle retained as `mac/build/Orbit-before-ui-2026-10-28.zip` for rollback.
 - Deployment gates: 77 web tests; 74 Swift library tests, 17 app tests and the isolated daemon integration test passed. Keychain tests remained excluded and the separate browser/Worker integration test remained skipped.
 - No backend Worker or database migration was deployed. No payment or workspace-file mutation was used for verification.
 

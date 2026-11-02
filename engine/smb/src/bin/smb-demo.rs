@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = Arc::new(MemBackend::new());
     backend.create("hello.txt", Kind::File).await?;
     backend
-        .write("hello.txt", 0, b"Hello from Unlispace SMB.\n")
+        .write("hello.txt", 0, b"Hello from Orbit SMB.\n")
         .await?;
     backend.create("Documents", Kind::Directory).await?;
     backend.create("Documents/readme.txt", Kind::File).await?;

@@ -16,7 +16,7 @@ import { parityChecks } from './parity.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const work = process.argv[2];
-assert(work?.startsWith('/private/tmp/unlispace-e2e.') || work?.startsWith('/tmp/unlispace-e2e.'), 'run through tests/e2e/run.sh');
+assert(work?.startsWith('/private/tmp/orbit-e2e.') || work?.startsWith('/tmp/orbit-e2e.'), 'run through tests/e2e/run.sh');
 const apiPort = Number(process.env.E2E_API_PORT ?? 8788);
 const dpPort = Number(process.env.E2E_DATA_PORT ?? 8787);
 const m3Enabled = process.env.E2E_M3 !== '0';
@@ -97,7 +97,7 @@ async function stop(record) {
   if (!record) return;
   if (record === smbDaemon && process.env.E2E_SMB_DIAGNOSTIC === '1' && !record.diagnosticSaved) {
     record.diagnosticSaved = true;
-    const path = `/tmp/unlispace-smb-diagnostic-${Date.now()}.log`;
+    const path = `/tmp/orbit-smb-diagnostic-${Date.now()}.log`;
     const lines = (record.stdout + '\n' + record.stderr).split('\n').map(line => safe(line)).join('\n');
     await writeFile(path, lines, {mode:0o600,flag:'wx'});
     console.log(`DIAGNOSTIC scrubbed SMB trace: ${path}`);
@@ -235,10 +235,10 @@ async function setup() {
   // On an ordinary Mac, prevent the CLI from writing its hard-coded per-user cache.
   // A managed filesystem sandbox already blocks that path but cannot nest sandbox-exec.
   if (process.platform === 'darwin') {
-    const profile = '(version 1)(allow default)(deny file-write* (regex #"/Library/Caches/com\\\\.unlispace(/|$)"))';
+    const profile = '(version 1)(allow default)(deny file-write* (regex #"/Library/Caches/com\\\\.orbit(/|$)"))';
     const probe = await command('/usr/bin/sandbox-exec', ['-p', profile, '/usr/bin/true']);
     if (probe.code === 0) cacheSandbox = ['/usr/bin/sandbox-exec', '-p', profile, binary];
-    else assert.equal(process.env.E2E_MANAGED_SANDBOX, '1', 'sandbox-exec unavailable; set E2E_MANAGED_SANDBOX=1 only when the parent sandbox denies writes to ~/Library/Caches/com.unlispace');
+    else assert.equal(process.env.E2E_MANAGED_SANDBOX, '1', 'sandbox-exec unavailable; set E2E_MANAGED_SANDBOX=1 only when the parent sandbox denies writes to ~/Library/Caches/com.orbit');
   }
   const configArgs = service => ['--config', join(work, service, 'wrangler.json')];
   console.log('SETUP applying local D1 migrations (120 s deadline)');
@@ -254,7 +254,7 @@ async function setup() {
     await until(async () => {
       for (const record of workers) assert(record.child.exitCode === null, `Worker exited: ${safe(record.stderr)}`);
       try {
-        await access(join(work, 'registry', service === 's3-gateway' ? 'unlispace-s3' : `unlispace-${service}`));
+        await access(join(work, 'registry', service === 's3-gateway' ? 'orbit-s3' : `orbit-${service}`));
         return (await request(`http://127.0.0.1:${port}`, '/healthz')).status === 200;
       } catch { return false; }
     }, 45000, `${service} health/registry startup timed out`);
@@ -310,7 +310,7 @@ async function cloudChecks() {
     assert.equal(minted.endpoint, endpoint);
   });
   await check('cloud 07 data plane accepts API-signed token', async () => { await dp(''); });
-  const body = Buffer.from('hello unlispace');
+  const body = Buffer.from('hello orbit');
   const hash = createHash('sha256').update(body).digest('hex');
   await check('cloud 08 shard PUT with drive token', async () => {
     assert(writeToken && drive, 'requires drive token');
@@ -608,15 +608,15 @@ async function smbChecks() {
   await check('smb xattrs and resource fork publish through independent cloud reads', async () => {
     assert(smbMountpoint, 'requires SMB mount');
     const target = join(smbMountpoint, 'smb-safe.txt');
-    await native('/usr/bin/xattr', ['-w', 'com.unlispace.e2e', 'metadata-value', target]);
-    assert.equal((await native('/usr/bin/xattr', ['-p', 'com.unlispace.e2e', target])).trim(), 'metadata-value');
+    await native('/usr/bin/xattr', ['-w', 'com.orbit.e2e', 'metadata-value', target]);
+    assert.equal((await native('/usr/bin/xattr', ['-p', 'com.orbit.e2e', target])).trim(), 'metadata-value');
     await native('/usr/bin/xattr', ['-w', 'com.apple.ResourceFork', 'resource-value', target]);
     let published;
     await until(async () => {
       published = await dp('/manifest?path=smb-safe.txt');
-      return published.xattrs?.['com.unlispace.e2e']?.length && published.xattrs?.['com.apple.ResourceFork']?.length;
+      return published.xattrs?.['com.orbit.e2e']?.length && published.xattrs?.['com.apple.ResourceFork']?.length;
     }, 10000, 'cloud manifest lost file attributes');
-    for (const [name, expected] of [['com.unlispace.e2e','metadata-value'],['com.apple.ResourceFork','resource-value']]) {
+    for (const [name, expected] of [['com.orbit.e2e','metadata-value'],['com.apple.ResourceFork','resource-value']]) {
       const parts = [];
       for (const ref of published.xattrs[name]) {
         const response = await fetch(`${endpoint}/v0/drives/${drive}/shards/${ref.h}`, {headers:{authorization:`Bearer ${independentToken}`},signal:AbortSignal.timeout(10000)});

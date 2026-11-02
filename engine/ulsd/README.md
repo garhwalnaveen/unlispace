@@ -1,6 +1,6 @@
 # ulsd
 
-The Unlispace daemon and CLI (`ulsd`, also invoked as `uls`).
+The Orbit daemon and CLI (`ulsd`, also invoked as `uls`).
 
 ## Daemon options
 
@@ -8,8 +8,8 @@ The Unlispace daemon and CLI (`ulsd`, also invoked as `uls`).
 ulsd daemon [--socket <path>] [--state-dir <dir>] [--secret-store keychain|memory] [--read-only]
 ```
 
-- Defaults are unchanged: `~/Library/Application Support/Unlispace/{ulsd.sock,state.json,drives/}`,
-  mounts under `~/Unlispace`, Keychain secrets.
+- Defaults are unchanged: `~/Library/Application Support/Orbit/{ulsd.sock,state.json,drives/}`,
+  mounts under `~/Orbit`, Keychain secrets.
 - `--state-dir <dir>`: the state file, drive journals (`drives/<id>/`), shard cache (`cache/`),
   mount root (`mnt/`) and, by default, the socket (`<dir>/ulsd.sock`) all live under `<dir>`.
 - `--socket <path>` overrides only the socket location.

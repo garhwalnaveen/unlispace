@@ -2,7 +2,7 @@ import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
 // The real data plane is never started here. wrangler.jsonc binds DATA_PLANE to a service
-// named unlispace-data-plane, so an inert auxiliary worker satisfies the binding. Behavioural tests inject
+// named orbit-data-plane, so an inert auxiliary worker satisfies the binding. Behavioural tests inject
 // test/fake-data-plane.ts through Deps instead (see test/helpers.ts).
 const stubDataPlane = `
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -60,7 +60,7 @@ export const getAwsChunkedEncodingStream = (readableStream, options) => {
 		cloudflareTest({
 			wrangler: { configPath: "./wrangler.jsonc" },
 			miniflare: {
-				workers: [{name: "unlispace-api", modules:true, compatibilityDate:"2026-10-01", script:stubDataPlane}, { name: "unlispace-data-plane", modules: true, compatibilityDate: "2026-10-01", script: stubDataPlane }],
+				workers: [{name: "orbit-api", modules:true, compatibilityDate:"2026-10-01", script:stubDataPlane}, { name: "orbit-data-plane", modules: true, compatibilityDate: "2026-10-01", script: stubDataPlane }],
 				bindings: {
 					ULS_JWT_PRIVATE_JWK: "{}",
 				},

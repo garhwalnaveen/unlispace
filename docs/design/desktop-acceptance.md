@@ -5,13 +5,13 @@ were explicitly left for a later pass.
 
 ## Delivered state
 
-- Installed app: `/Users/naveen/Applications/Unlispace.app`.
-- Review disk image: `mac/build/Unlispace-0.2.0.dmg`.
-- Configured API: `https://unlispace-api.naveen-f3d.workers.dev`.
-- The real `com.unlispace.ulsd` LaunchAgent is enabled and running, its socket is available,
+- Installed app: `/Users/naveen/Applications/Orbit.app`.
+- Review disk image: `mac/build/Orbit-0.2.0.dmg`.
+- Configured API: `https://orbit-api.naveen-f3d.workers.dev`.
+- The real `com.orbit.ulsd` LaunchAgent is enabled and running, its socket is available,
   and the signed-in hosted account and mounted Space drive survived the daemon restart.
 - The hosted SMB volume is mounted under
-  `/Users/naveen/Library/Application Support/Unlispace/mnt/Space`, outside the repository.
+  `/Users/naveen/Library/Application Support/Orbit/mnt/Space`, outside the repository.
 - Final daemon status: `idle`, `pendingOps: 0`.
 
 ## Verified flows
@@ -32,7 +32,7 @@ were explicitly left for a later pass.
 | Hosted browser file flow | After the approved CORS repair, drive listing and generated-file upload/download passed against the deployed Workers |
 | Hosted native file flow | Normal `uls login --api` consumed a hosted browser PKCE code; the real daemon mounted the account drive through SMB, read the browser's 77-byte fixture exactly, and saved a 103-byte update; the independent hosted browser showed version 2 and size 103 B |
 
-The generated hosted fixture is `unlispace-desktop-acceptance-2026-10-26.txt`. It contains only
+The generated hosted fixture is `orbit-desktop-acceptance-2026-10-26.txt`. It contains only
 test text and remains available for review. Its native-saved 103-byte contents have SHA-256
 `653bd3069b77a514c1d464735baf78ceaa90b3c9570d495ac1e2825ee2dac81a`.
 
@@ -64,7 +64,7 @@ test text and remains available for review. Its native-saved 103-byte contents h
 The user approved a scoped deployment to the existing data-plane Worker after reviewing
 `hosted-cors-patch.md`. The repair downloaded the deployed implementation and added a narrow
 HTTP CORS envelope, without deploying the unrelated modified backend source or migrating data.
-Only `https://unlispace-web.naveen-f3d.workers.dev` is allowed on file routes; authenticated
+Only `https://orbit-web.naveen-f3d.workers.dev` is allowed on file routes; authenticated
 requests retain the original authorization logic. Original source hashes and deployment config
 are retained under `mac/.build/hosted-cors-review/`.
 

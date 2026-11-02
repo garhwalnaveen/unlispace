@@ -34,9 +34,9 @@ export async function otpStart(ctx: Ctx, email: string): Promise<void> {
 	try {
 		await ctx.email.send(
 			email,
-			`Your Unlispace code: ${code}`,
-			`Your Unlispace sign-in code is ${code}. It expires in 10 minutes.\n\nIf you didn't request this, ignore this email.`,
-			`<p>Your Unlispace sign-in code is <strong style="font-size:1.4em;letter-spacing:.1em">${code}</strong>.</p><p>It expires in 10 minutes. If you didn't request this, ignore this email.</p>`,
+			`Your Orbit code: ${code}`,
+			`Your Orbit sign-in code is ${code}. It expires in 10 minutes.\n\nIf you didn't request this, ignore this email.`,
+			`<p>Your Orbit sign-in code is <strong style="font-size:1.4em;letter-spacing:.1em">${code}</strong>.</p><p>It expires in 10 minutes. If you didn't request this, ignore this email.</p>`,
 		);
 	} catch (e) {
 		console.error("otp email failed", String((e as Error)?.message ?? e));

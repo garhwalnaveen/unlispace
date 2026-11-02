@@ -1,7 +1,7 @@
 # Space comparison implementation status — 26 October 2026
 
 Work is in the restored `m0-spike` checkout at
-`/Users/naveen/.codex/worktrees/unlispace-engine/unlispace`. The older `main` checkout contains
+`/Users/naveen/.codex/worktrees/orbit-engine/orbit`. The older `main` checkout contains
 the original billing application, not the native/cloud product reviewed by Claude.
 
 ## What was already complete
@@ -19,7 +19,7 @@ remain historical evidence; a reset installation is not assumed to retain their 
 | Drive creation | Workspace page creates drives through the existing role-checked API; My drives exposes New drive | Requires a signed-in real daemon and appropriate organization role |
 | Teams | Member list, invitations by email, explicit recipient acceptance, revoke/change/remove, seat reservations and final-owner protection; web and desktop navigation | Active paid Teams plan and configured email delivery required for invitations |
 | Billing | Desktop workspace links to the existing organization billing page using the API's configured web origin | Billing remains in the browser; payment provider configuration is required for checkout |
-| AI | Ask AI is one shadcn AI Elements chat (Conversation, Message, PromptInput, ModelSelector, Reasoning) in the web app at `/ai`, embedded in the Mac app through a WebView signed in by a one-time PKCE handoff. Managed Kimi K3 and K3.1 Pro models run on the Unlispace Moonshot key with a free per-user daily cap | Requires `MOONSHOT_API_KEY` on the API. Only typed text is sent. No file attachments, autonomous file tools or whole-drive RAG. "Sign in with ChatGPT" is deferred until OpenAI approves eligibility |
+| AI | Ask AI is one shadcn AI Elements chat (Conversation, Message, PromptInput, ModelSelector, Reasoning) in the web app at `/ai`, embedded in the Mac app through a WebView signed in by a one-time PKCE handoff. Managed Kimi K3 and K3.1 Pro models run on the Orbit Moonshot key with a free per-user daily cap | Requires `MOONSHOT_API_KEY` on the API. Only typed text is sent. No file attachments, autonomous file tools or whole-drive RAG. "Sign in with ChatGPT" is deferred until OpenAI approves eligibility |
 | Transfer implementation | Hardware AES on Apple Silicon; release VFS journal lock before cloud reads; skip redundant cached-metadata journal fsyncs; reuse verified disk shards in bounded RAM cache; yield during large publication folds to keep SMB requests responsive | Signing remains enforced. Original hosted 50 MB/1 GB timings are not replaced by theoretical speed claims |
 | Desktop concurrency | Cancelled socket calls release their continuations, late responses are ignored, and request writes are serialized; workspace requests guard account changes | Cancelling a UI request cannot roll back a mutation already accepted by the server |
 
@@ -80,8 +80,8 @@ product expansions beyond the implemented filename search and explicit text assi
 
 ## Review artifacts
 
-- `mac/build/Unlispace.app`
-- `mac/build/Unlispace-0.2.0.dmg`
+- `mac/build/Orbit.app`
+- `mac/build/Orbit-0.2.0.dmg`
 
 These artifacts embed the tested release SMB engine. They are ad hoc signed for review;
 the installed app/daemon and hosted deployment were not replaced. All source changes remain

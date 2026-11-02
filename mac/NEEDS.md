@@ -6,7 +6,7 @@
 Please add one. Ideally derive the state directory from the override too, or provide an
 explicit state directory option so integration tests cannot load a user's remembered session.
 The mac integration target currently uses a fresh HOME under `/tmp` and the daemon's existing
-`~/Library/Application Support/Unlispace/ulsd.sock` convention. No mounts, browser sign-in,
+`~/Library/Application Support/Orbit/ulsd.sock` convention. No mounts, browser sign-in,
 Keychain session or remote service is used by this test.
 
 ## Conflict event status

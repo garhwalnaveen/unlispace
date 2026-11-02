@@ -3,11 +3,11 @@
 The signed-in hosted web app cannot list the account's drive because the data-plane Worker
 returns HTTP 401 to an OPTIONS preflight. The actual authenticated GET never reaches the Worker.
 
-Prepared patch: `mac/.build/hosted-cors-review/unlispace-data-plane/`.
+Prepared patch: `mac/.build/hosted-cors-review/orbit-data-plane/`.
 
 - Uses an authenticated read-only download of the currently deployed Worker, not the unrelated modified M3 backend source.
 - Adds `src/browser-cors.mjs` and `src/cors-entry.mjs`; the downloaded implementation and exported Durable Object classes remain unchanged.
-- Allows the exact origin `https://unlispace-web.naveen-f3d.workers.dev` on file routes. OPTIONS returns 204 for that origin. Actual requests still pass through the original authentication and authorization logic, including 401 responses.
+- Allows the exact origin `https://orbit-web.naveen-f3d.workers.dev` on file routes. OPTIONS returns 204 for that origin. Actual requests still pass through the original authentication and authorization logic, including 401 responses.
 - Keeps the existing Durable Object and R2 bindings, compatibility date, issuer, disabled developer authentication, disabled GC deletion, and existing variables/secrets.
 - Changes no database schema or data and performs no migration.
 - Records the active baseline deployment and source hashes for review/rollback.

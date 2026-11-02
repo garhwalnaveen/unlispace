@@ -1,4 +1,4 @@
-//! End-to-end tests against the actual loopback transport and Unlispace backend.
+//! End-to-end tests against the actual loopback transport and Orbit backend.
 #[path = "../vendor/tests/common/mod.rs"]
 mod common;
 use common::{auth::*, client::*, crypto::*};

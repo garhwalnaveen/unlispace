@@ -36,7 +36,7 @@ export function Home() {
         <div className="empty">
           <h2>No workspaces yet</h2>
           <p>
-            Your account has no organizations. Contact your workspace owner.
+            Your account has no workspaces. Contact your workspace owner.
           </p>
         </div>
       )}

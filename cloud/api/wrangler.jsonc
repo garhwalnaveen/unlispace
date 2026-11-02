@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "unlispace-api",
+  "name": "orbit-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "triggers": { "crons": ["17 * * * *"] },
@@ -15,14 +15,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "unlispace-control-dev",
+      "database_name": "orbit-control-dev",
       // Placeholder: local dev/test never touches a remote database. Replace before deploying.
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],
   "services": [
-    { "binding": "DATA_PLANE", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
+    { "binding": "DATA_PLANE", "service": "orbit-data-plane", "entrypoint": "DataPlaneAdmin" }
   ],
   // Cloudflare Email Service binding. Sending domain must be onboarded; see README.
   "send_email": [{ "name": "EMAIL" }],
@@ -30,7 +30,7 @@
   "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] },
   "env": {
     "production": {
-      "name": "unlispace-api",
+      "name": "orbit-api",
       "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] },
       "workers_dev": true,
       "triggers": { "crons": ["17 * * * *"] },
@@ -38,18 +38,18 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "unlispace-control",
+          "database_name": "orbit-control",
           "database_id": "5f259a26-5e36-4e7b-8134-52a3043e3fc1",
           "migrations_dir": "migrations"
         }
       ],
       "services": [
-        { "binding": "DATA_PLANE", "service": "unlispace-data-plane", "entrypoint": "DataPlaneAdmin" }
+        { "binding": "DATA_PLANE", "service": "orbit-data-plane", "entrypoint": "DataPlaneAdmin" }
       ],
       "vars": {
-        "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
-        "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.__WORKERS_DOMAIN__",
-        "ULS_WEB_ORIGIN": "https://unlispace-web.__WORKERS_DOMAIN__",
+        "ULS_ISSUER": "https://orbit-api.__WORKERS_DOMAIN__",
+        "ULS_DATA_ENDPOINT": "https://orbit-data-plane.__WORKERS_DOMAIN__",
+        "ULS_WEB_ORIGIN": "https://orbitfs.io",
         "DODO_PAYMENTS_ENVIRONMENT": "live_mode"
       }
     }

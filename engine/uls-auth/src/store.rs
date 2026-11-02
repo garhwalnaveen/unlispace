@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// Keychain service name for the refresh token item.
-pub const KEYCHAIN_SERVICE: &str = "com.unlispace.ulsd";
+pub const KEYCHAIN_SERVICE: &str = "com.orbit.ulsd";
 
 #[derive(Debug, thiserror::Error)]
 #[error("secret store: {0}")]
@@ -56,7 +56,7 @@ impl SecretStore for MemoryStore {
     }
 }
 
-/// macOS Keychain: generic password, service `com.unlispace.ulsd`, account = user id.
+/// macOS Keychain: generic password, service `com.orbit.ulsd`, account = user id.
 #[cfg(target_os = "macos")]
 pub struct KeychainStore {
     service: String,

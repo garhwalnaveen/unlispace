@@ -94,7 +94,7 @@ async function route(ctx: Ctx): Promise<Response> {
 				const state = q.get("state") ?? "";
 				const ch = q.get("code_challenge") ?? "";
 				if (!B64URL.test(state) || !B64URL.test(ch) || q.get("code_challenge_method") !== "S256") throw new HttpError(400, "bad_request", "state, code_challenge and code_challenge_method=S256 required");
-				return redirect(`${ctx.env.ULS_WEB_ORIGIN}/desktop?${new URLSearchParams({ state, code_challenge: ch })}`);
+				return redirect(`${ctx.env.ULS_WEB_ORIGIN}/desktop?${new URLSearchParams({ state, code_challenge: ch, ...(q.get("switch") === "1" ? { switch: "1" } : {}) })}`);
 			}
 			case "POST /auth/desktop/code": {
 				const a = await authenticate(ctx);

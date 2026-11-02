@@ -1,10 +1,10 @@
 # Daemon control protocol (app <-> `ulsd`)
 
-Version 0. The Rust daemon implements the server; `Unlispace.app` is the client
-(`Sources/UnlispaceKit/DaemonProtocol.swift`, `UnixSocketDaemonClient.swift`).
+Version 0. The Rust daemon implements the server; `Orbit.app` is the client
+(`Sources/OrbitKit/DaemonProtocol.swift`, `UnixSocketDaemonClient.swift`).
 
 ## Transport
-- Unix domain socket, `SOCK_STREAM`, at `~/Library/Application Support/Unlispace/ulsd.sock`.
+- Unix domain socket, `SOCK_STREAM`, at `~/Library/Application Support/Orbit/ulsd.sock`.
 - Directory mode `0700`, socket mode `0600`. The server should verify the peer is the same uid
   (`LOCAL_PEERCRED` / `getpeereid`) and reject others.
 - Framing: UTF-8 JSON objects, one per line, terminated by `\n`. No pretty-printing; objects must
@@ -57,7 +57,7 @@ must not log `token`.
 **M1 sign-in (see `docs/design/m1-contract.md` §5.1).** The app runs the desktop PKCE flow, then
 hands the resulting session to the daemon with `auth.set` and keeps no copy. From then on the
 daemon is the only holder of the refresh token. It stores it in the macOS Keychain (service
-`com.unlispace.ulsd`, account = user id), rotates it on refresh, and mints drive tokens with
+`com.orbit.ulsd`, account = user id), rotates it on refresh, and mints drive tokens with
 `POST /drives/{id}/token`. `drives.list` returns the drives from `GET /orgs`. Once signed in, the
 daemon emits `state` with `idle`; when refresh fails with `invalid_refresh`, it emits
 `signed_out`.

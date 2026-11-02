@@ -3,7 +3,7 @@
 set -euo pipefail
 umask 077
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${1:-$ROOT/build/Unlispace.app}"
+APP="${1:-$ROOT/build/Orbit.app}"
 WORK="$(mktemp -d /tmp/uls-install.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 PROBE="$WORK/Probe.app"
@@ -12,21 +12,21 @@ cp "$APP/Contents/MacOS/ulsd" "$PROBE/Contents/MacOS/ulsd"
 python3 - "$APP" "$PROBE" "$WORK" <<'PY'
 import pathlib, plistlib, sys, uuid
 app, probe, work = map(pathlib.Path, sys.argv[1:])
-label = 'com.unlispace.install-test.' + uuid.uuid4().hex
-info = {'CFBundleIdentifier': label, 'CFBundleName': 'Unlispace installation check', 'CFBundleExecutable': 'Probe', 'CFBundleVersion': '1', 'CFBundlePackageType': 'APPL'}
+label = 'com.orbit.install-test.' + uuid.uuid4().hex
+info = {'CFBundleIdentifier': label, 'CFBundleName': 'Orbit installation check', 'CFBundleExecutable': 'Probe', 'CFBundleVersion': '1', 'CFBundlePackageType': 'APPL'}
 (probe/'Contents/Info.plist').write_bytes(plistlib.dumps(info))
-agent = plistlib.loads((app/'Contents/Library/LaunchAgents/com.unlispace.ulsd.plist').read_bytes())
+agent = plistlib.loads((app/'Contents/Library/LaunchAgents/com.orbit.ulsd.plist').read_bytes())
 assert agent['BundleProgram'] == 'Contents/MacOS/ulsd'
 agent['Label'] = label
 agent['ProgramArguments'] = ['Contents/MacOS/ulsd', 'daemon', '--state-dir', str(work/'state'), '--socket', str(work/'ulsd.sock'), '--secret-store', 'memory']
-(probe/'Contents/Library/LaunchAgents/com.unlispace.ulsd.plist').write_bytes(plistlib.dumps(agent))
+(probe/'Contents/Library/LaunchAgents/com.orbit.ulsd.plist').write_bytes(plistlib.dumps(agent))
 PY
 cat > "$WORK/main.swift" <<'SWIFT'
 import Foundation
 import ServiceManagement
 import Darwin
 func check() throws {
-    let service = SMAppService.agent(plistName: "com.unlispace.ulsd.plist")
+    let service = SMAppService.agent(plistName: "com.orbit.ulsd.plist")
     var registered = false
     defer {
         if registered {
@@ -42,7 +42,7 @@ func check() throws {
     try service.register()
     registered = true
     guard service.status == .enabled else {
-        throw NSError(domain: "UnlispaceInstallation", code: Int(service.status.rawValue), userInfo: [NSLocalizedDescriptionKey: "Background service needs macOS approval; no permission was changed automatically."])
+        throw NSError(domain: "OrbitInstallation", code: Int(service.status.rawValue), userInfo: [NSLocalizedDescriptionKey: "Background service needs macOS approval; no permission was changed automatically."])
     }
     print("PASS registered isolated LaunchAgent")
     let socket = ProcessInfo.processInfo.environment["ULS_INSTALL_TEST_SOCKET"]!
@@ -79,12 +79,12 @@ print('PASS bundled engine answered status and auth.status RPC')
     try rpc.run()
     rpc.waitUntilExit()
     guard rpc.terminationStatus == 0 else {
-        throw NSError(domain: "UnlispaceInstallation", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bundled engine did not answer isolated RPC"])
+        throw NSError(domain: "OrbitInstallation", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bundled engine did not answer isolated RPC"])
     }
 }
 do { try check() } catch { fputs("FAIL \(error.localizedDescription)\n", stderr); exit(1) }
 SWIFT
-swiftc "$WORK/main.swift" "$ROOT/Sources/UnlispaceKit/UnregisterCompletion.swift" -o "$PROBE/Contents/MacOS/Probe"
+swiftc "$WORK/main.swift" "$ROOT/Sources/OrbitKit/UnregisterCompletion.swift" -o "$PROBE/Contents/MacOS/Probe"
 # Keep the shipped helper signature: re-signing it here would mask packaging failures.
 codesign --verify --strict "$PROBE/Contents/MacOS/ulsd"
 codesign --force --sign - --timestamp=none "$PROBE"

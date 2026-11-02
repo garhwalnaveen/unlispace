@@ -26,7 +26,7 @@ DT=$(echo "$T" | j "d['token']"); EP=$(echo "$T" | j "d['endpoint']")
 
 # data plane with the real token
 code=$(curl -s -o /dev/null -w '%{http_code}' "$EP/v0/drives/$DRIVE" -H "authorization: Bearer $DT"); [ "$code" = 200 ] && pass "data plane accepts api-signed token" || fail "dp drive info $code"
-printf 'hello unlispace' > /tmp/uls-m1/h.txt; H=$(shasum -a 256 /tmp/uls-m1/h.txt | cut -d' ' -f1)
+printf 'hello orbit' > /tmp/uls-m1/h.txt; H=$(shasum -a 256 /tmp/uls-m1/h.txt | cut -d' ' -f1)
 curl -s -o /dev/null -w '%{http_code}' -X PUT "$EP/v0/drives/$DRIVE/shards/$H" -H "authorization: Bearer $DT" --data-binary @/tmp/uls-m1/h.txt | grep -qE '20[01]' && pass "shard PUT with drive token" || fail "shard put"
 C=$(curl -s -X POST "$EP/v0/drives/$DRIVE/commit" -H "authorization: Bearer $DT" -H 'content-type: application/json' -d "{\"ops\":[{\"op\":\"put\",\"path\":\"hello.txt\",\"size\":15,\"shards\":[{\"h\":\"$H\",\"n\":15}]}]}")
 echo "$C" | grep -q versionId && pass "commit" || fail "commit: $C"

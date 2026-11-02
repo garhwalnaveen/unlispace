@@ -12,7 +12,7 @@ use crate::server;
 
 pub fn support_dir() -> Result<PathBuf> {
     let base = dirs::data_dir().context("cannot find Application Support")?; // ~/Library/Application Support
-    Ok(base.join("Unlispace"))
+    Ok(base.join("Orbit"))
 }
 
 pub fn socket_path() -> Result<PathBuf> {
@@ -24,7 +24,7 @@ pub fn state_path() -> Result<PathBuf> {
 }
 
 pub fn mount_root() -> Result<PathBuf> {
-    Ok(dirs::home_dir().context("cannot find the home directory")?.join("Unlispace"))
+    Ok(dirs::home_dir().context("cannot find the home directory")?.join("Orbit"))
 }
 
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8787";

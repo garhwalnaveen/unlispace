@@ -1,6 +1,6 @@
 {
   "previousVersion": "98bb33eb-477b-4e86-a53e-32e40a0a4831",
-  "url": "https://unlispace-web.naveen-f3d.workers.dev",
+  "url": "https://orbit-web.naveen-f3d.workers.dev",
   "previousAssets": [
     "/assets/index-CaeGuRaL.js",
     "/assets/index-B9szOWbK.css"
@@ -21,15 +21,15 @@
   "mac": {
     "version": "0.2.1",
     "build": "2",
-    "path": "/Users/naveen/Applications/Unlispace.app",
+    "path": "/Users/naveen/Applications/Orbit.app",
     "signing": "ad-hoc",
     "engineUnchanged": true,
     "signedIn": true,
     "mountedDrivesPreserved": true,
     "pendingOps": 0,
     "pendingUploads": 0,
-    "backupZip": "/Users/naveen/.codex/worktrees/unlispace-engine/unlispace/mac/build/Unlispace-before-ui-2026-10-28.zip",
-    "installer": "/Users/naveen/.codex/worktrees/unlispace-engine/unlispace/mac/build/Unlispace-0.2.1.dmg",
+    "backupZip": "/Users/naveen/.codex/worktrees/orbit-engine/orbit/mac/build/Orbit-before-ui-2026-10-28.zip",
+    "installer": "/Users/naveen/.codex/worktrees/orbit-engine/orbit/mac/build/Orbit-0.2.1.dmg",
     "installerReadOnlyAndSignatureVerified": true
   }
 }

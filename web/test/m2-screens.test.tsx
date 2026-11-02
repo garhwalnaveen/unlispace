@@ -46,7 +46,7 @@ it("creates a scoped key, reveals and copies its secret once, then confirms revo
   expect(copy).toHaveBeenCalledWith(`export AWS_ACCESS_KEY_ID='${key.accessKeyId}'\nexport AWS_SECRET_ACCESS_KEY='one-time-secret'`);
   await user.click(screen.getByRole("button", { name: "I saved it — close" }));
   expect(screen.queryByText("one-time-secret")).not.toBeInTheDocument();
-  expect(localStorage.getItem("unlispace.refreshToken")).toBeNull();
+  expect(localStorage.getItem("orbit.refreshToken")).toBeNull();
   await user.click(screen.getByRole("button", { name: "Revoke Backup" }));
   expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
   await user.click(screen.getByRole("button", { name: "Confirm revoke" }));

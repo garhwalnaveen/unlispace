@@ -24,7 +24,7 @@ PASS  engine CLI versions + historical get: three ordered versions; first versio
 PASS  engine CLI restore creates new head: new version; original bytes restored
 PASS  engine concurrent ifVersion has exactly one winner: exit codes 0,2; one new version; winner bytes verified
 PASS  engine second CLI client watches change in < 1 s: 91.4 ms from writer invocation to exact version observed
-FAIL  engine native read-only NFS mount + byte-identical read: NFS mount exited: NFS server for drive d-01m5t7dew06gymzjj6y8t6vq02 listening on 127.0.0.1:54774 mount command: mount_nfs -o port=54774,mountport=54774,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/unlispace-e2e.GqiHOw/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server 
+FAIL  engine native read-only NFS mount + byte-identical read: NFS mount exited: NFS server for drive d-01m5t7dew06gymzjj6y8t6vq02 listening on 127.0.0.1:54774 mount command: mount_nfs -o port=54774,mountport=54774,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/orbit-e2e.GqiHOw/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server
 SMB phase disabled (E2E_SMB=1 enables it)
 M3 phase disabled (E2E_M3=0)
 PASS  cleanup: owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
@@ -55,6 +55,6 @@ PASS | engine CLI versions + historical get | three ordered versions; first vers
 PASS | engine CLI restore creates new head | new version; original bytes restored
 PASS | engine concurrent ifVersion has exactly one winner | exit codes 0,2; one new version; winner bytes verified
 PASS | engine second CLI client watches change in < 1 s | 91.4 ms from writer invocation to exact version observed
-FAIL | engine native read-only NFS mount + byte-identical read | NFS mount exited: NFS server for drive d-01m5t7dew06gymzjj6y8t6vq02 listening on 127.0.0.1:54774 mount command: mount_nfs -o port=54774,mountport=54774,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/unlispace-e2e.GqiHOw/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server
+FAIL | engine native read-only NFS mount + byte-identical read | NFS mount exited: NFS server for drive d-01m5t7dew06gymzjj6y8t6vq02 listening on 127.0.0.1:54774 mount command: mount_nfs -o port=54774,mountport=54774,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/orbit-e2e.GqiHOw/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server
 PASS | cleanup | owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
 RESULT: 25 passed, 1 failed

@@ -1,7 +1,7 @@
 # Codex orchestration rules (read before your TASK)
 
-You are one of several Codex agents working in parallel on **Unlispace**, a versioned cloud
-drive (a spacefs.com clone) on Cloudflare plus a native macOS client. Repo: `/Users/naveen/unlispace`,
+You are one of several Codex agents working in parallel on **Orbit**, a versioned cloud
+drive (a spacefs.com clone) on Cloudflare plus a native macOS client. Repo: `/Users/naveen/orbit`,
 branch `m0-spike`. The coordinator (Claude) reviews, integrates and commits your work.
 
 ## Hard rules

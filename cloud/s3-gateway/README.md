@@ -1,4 +1,4 @@
-# Unlispace S3 gateway (`unlispace-s3`)
+# Orbit S3 gateway (`orbit-s3`)
 
 S3-compatible Worker in front of the data plane. Bucket = drive alias or id. Keys and bucket ownership resolve through the control plane. SigV4 is verified with WebCrypto before dispatch;
 object bytes pass through the `DATA_PLANE` service binding using short-lived (300 s) Ed25519 drive tokens minted per request.
@@ -45,7 +45,7 @@ flat child credentials (`accessKeyId`, `parent`, `secretAccessKey`, etc.), and s
 are `Cache-Control: no-store`. Session-created keys default to `write` when access is omitted, subject to the member's role.
 
 `?x-s3sdk-mount` explicitly returns 501: the SpaceFS SDK expects scoped provider storage credentials, whereas `?x-uls-mount`
-issues a native Unlispace drive token. No raw bucket credential is substituted. Optional direct uploads remain unsupported.
+issues a native Orbit drive token. No raw bucket credential is substituted. Optional direct uploads remain unsupported.
 This is wire-name compatibility for the implemented operations, not a claim that the published SpaceFS SDKs were tested.
 
 S3SP patch body (big-endian): `"S3SP" 01 00 00 00`, `u32 count` (1..10000), then per edit `u64 offset`, `u64 length`, bytes.
@@ -53,7 +53,7 @@ Edits apply in order; gaps zero-fill; partial edits reuse untouched shards by re
 
 ## Configuration
 
-`CONTROL_PLANE` binds service `unlispace-api`, entrypoint `ControlPlane` (M3 §3.3); `API` binds its default fetch handler.
+`CONTROL_PLANE` binds service `orbit-api`, entrypoint `ControlPlane` (M3 §3.3); `API` binds its default fetch handler.
 `ControlPlaneKeyResolver` caches lookup results for at most 30 seconds per isolate, with a bounded cache. Successful authorized
 requests call `recordKeyUse`; signature/scope refusals never do. Production has no memory-key fallback or master secret.
 `MemoryKeyResolver` is retained for isolated fixtures. `ULS_JWT_PRIVATE_JWK` (secret, Ed25519 with `kid`) and `ULS_ISSUER` sign

@@ -1,4 +1,4 @@
-# Unlispace access and permission experience
+# Orbit access and permission experience
 
 Implemented 26 October 2026 in the native macOS app. The same permission dashboard appears
 in onboarding's final Access & permissions step and Settings → Permissions.
@@ -13,7 +13,7 @@ in onboarding's final Access & permissions step and Settings → Permissions.
 | Launch at login | Optional menu-bar startup, with real registration/approval state | Explicit Enable or Login Items management |
 
 The dashboard explains that files added to a mounted drive are uploaded to the configured
-Unlispace service. It separates drive access from optional conveniences. Skipping notification
+Orbit service. It separates drive access from optional conveniences. Skipping notification
 or login-item access never blocks Finish setup.
 
 ## Behavior

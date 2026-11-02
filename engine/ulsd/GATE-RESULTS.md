@@ -98,29 +98,29 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 `bash tests/e2e/run.sh` — exit 1 at sandbox preflight:
 
 ```text
-FAIL | setup local Workers + D1 | sandbox-exec unavailable; set E2E_MANAGED_SANDBOX=1 only when the parent sandbox denies writes to ~/Library/Caches/com.unlispace  undefined !== '1' 
+FAIL | setup local Workers + D1 | sandbox-exec unavailable; set E2E_MANAGED_SANDBOX=1 only when the parent sandbox denies writes to ~/Library/Caches/com.orbit  undefined !== '1'
 RESULT: 1 passed, 1 failed
 ```
 `E2E_MANAGED_SANDBOX=1 bash tests/e2e/run.sh` — exit 1, repeated with the same result. The parent sandbox denies writes to the user cache, as required by this harness option. No harness files were edited.
 
 ```text
 PASS | setup local Workers + D1 | Wrangler 4.152.0; api :8788, data :8787, inspector :9230; D1 migrated
-PASS | cloud 01 otp start | 
-PASS | cloud 02 dev OTP logged | 
-PASS | cloud 03 wrong code -> 400 | 
-PASS | cloud 04 verify -> session, accountCreated | 
-PASS | cloud 05 My Space + ready drive via service binding | 
-PASS | cloud 06 write drive token minted | 
-PASS | cloud 07 data plane accepts API-signed token | 
-PASS | cloud 08 shard PUT with drive token | 
-PASS | cloud 09 commit | 
-PASS | cloud 10 version actor = token user id | 
-PASS | cloud 11 drive A token on B -> 404 | 
-PASS | cloud 12 read token cannot commit -> 404 | 
-PASS | cloud 13 API access token on data plane -> 401 | 
-PASS | cloud 14 refresh rotates | 
-PASS | cloud 15 reused old refresh token -> 401 | 
-PASS | cloud 16 reuse revokes whole refresh family | 
+PASS | cloud 01 otp start |
+PASS | cloud 02 dev OTP logged |
+PASS | cloud 03 wrong code -> 400 |
+PASS | cloud 04 verify -> session, accountCreated |
+PASS | cloud 05 My Space + ready drive via service binding |
+PASS | cloud 06 write drive token minted |
+PASS | cloud 07 data plane accepts API-signed token |
+PASS | cloud 08 shard PUT with drive token |
+PASS | cloud 09 commit |
+PASS | cloud 10 version actor = token user id |
+PASS | cloud 11 drive A token on B -> 404 |
+PASS | cloud 12 read token cannot commit -> 404 |
+PASS | cloud 13 API access token on data plane -> 401 |
+PASS | cloud 14 refresh rotates |
+PASS | cloud 15 reused old refresh token -> 401 |
+PASS | cloud 16 reuse revokes whole refresh family |
 PASS | engine CLI put/get byte-identical | 3 unique shards uploaded; 8388608 bytes compared
 PASS | engine dedup re-upload sends zero shards | 0 of 3 shards uploaded
 PASS | engine 4 KiB edit uploads exactly one shard | 4096 bytes edited; 1 of 3 shards uploaded; bytes verified
@@ -128,8 +128,8 @@ PASS | engine CLI versions + historical get | three ordered versions; first vers
 PASS | engine CLI restore creates new head | new version; original bytes restored
 PASS | engine concurrent ifVersion has exactly one winner | exit codes 0,2; one new version; winner bytes verified
 PASS | engine second CLI client watches change in < 1 s | 28.9 ms from writer invocation to exact version observed
-FAIL | engine native read-only NFS mount + byte-identical read | NFS mount exited: NFS server for drive d-01m5st2gktd8z07p0jxcrz3dp0 listening on 127.0.0.1:61587 mount command: mount_nfs -o port=61587,mountport=61587,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/unlispace-e2e.U7LEaT/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server 
-FAIL | smb daemon auth.set + drives.list + native mount | daemon request rejected: internal: cannot mount loopback SMB share; Shimming not enabled - defaulting to legacy behavior. 
+FAIL | engine native read-only NFS mount + byte-identical read | NFS mount exited: NFS server for drive d-01m5st2gktd8z07p0jxcrz3dp0 listening on 127.0.0.1:61587 mount command: mount_nfs -o port=61587,mountport=61587,nolocks,vers=3,tcp,rdonly,actimeo=1 localhost:/ /private/tmp/orbit-e2e.U7LEaT/mount mount_nfs failed (exit status: 5): Shimming not enabled - defaulting to legacy behavior. mount_nfs: Loading com.apple.filesystems.nfs status = 0x44c The server
+FAIL | smb daemon auth.set + drives.list + native mount | daemon request rejected: internal: cannot mount loopback SMB share; Shimming not enabled - defaulting to legacy behavior.
 FAIL | smb text save -> independent remote bytes within 10 s | requires a verified SMB mount
 FAIL | smb cp random 8 MiB -> independent remote bytes within 10 s | requires a verified SMB mount
 FAIL | smb mkdir -p + mv -> remote bytes and old path gone | requires SMB mount

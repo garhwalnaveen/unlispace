@@ -1,15 +1,15 @@
 # SpaceFS API comparison and implemented fixes — 31 October 2026
 
-Compared the current Unlispace storage platform with [SpaceFS's complete documentation](https://docs.spacefs.com/llms-full.txt)
+Compared the current Orbit storage platform with [SpaceFS's complete documentation](https://docs.spacefs.com/llms-full.txt)
 (generated 30 October 2026, s3sdk 0.4.0). Three agents investigated object operations, drives and credentials in parallel;
 the coordinator implemented compatibility routing and integrated the fixes. Existing uncommitted product work was preserved.
 
-Product checkout: `/Users/naveen/.codex/worktrees/unlispace-engine/unlispace`.
-The chat's `Documents/Codex/2026-10-26/se/projects/unlispace` checkout is an older subscription starter, not the storage implementation.
+Product checkout: `/Users/naveen/.codex/worktrees/orbit-engine/orbit`.
+The chat's `Documents/Codex/2026-10-26/se/projects/orbit` checkout is an older subscription starter, not the storage implementation.
 
 ## API coverage
 
-| Area | Unlispace after this change | Status |
+| Area | Orbit after this change | Status |
 | --- | --- | --- |
 | Standard S3 object operations | List, get/head, ranges, put, copy, delete, multipart and conditionals already existed | Implemented; capacity differences below |
 | In-place edits | Offset writes, truncate/extend, ordered S3SP patches, splice, guarded rename | Already implemented |
@@ -53,7 +53,7 @@ Full SpaceFS parity is **not achieved**. These require storage architecture, pro
 | Drive recovery | Soft-deleted metadata/content are retained; no public drive undelete/retention contract | Define retention and quota policy, then implement authorized recovery and expiry together. |
 | Optional direct uploads | Direct plan/commit return 501 | Add scoped upload plans plus verified commit/quota accounting if this optional feature is needed. |
 | Standard version listings | Includes retained deleted history and delete markers | This differs from SpaceFS's live-key content-only listing. Preserve existing callers until an explicit versioned contract is selected. |
-| SDK distribution | Native Rust client/CLI exist; no matching four-language Unlispace package suite | Package and run language-level conformance. This change tests wire requests and AWS SDK interoperability, not published SpaceFS SDK binaries. |
+| SDK distribution | Native Rust client/CLI exist; no matching four-language Orbit package suite | Package and run language-level conformance. This change tests wire requests and AWS SDK interoperability, not published SpaceFS SDK binaries. |
 
 Compare capacity with [SpaceFS's limits](https://docs.spacefs.com/reference/limits/) and mount/fork semantics with its
 [drive protocol](https://docs.spacefs.com/protocol/drive-extensions/). No performance equivalence was measured.

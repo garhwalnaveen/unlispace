@@ -102,7 +102,7 @@ it("signs the desktop app's embedded Ask AI page in with a one-time handoff and 
     if (url.endsWith("/ai/models")) return json(models);
     throw new Error(`Unexpected call: ${url}`);
   }));
-  sessionStorage.setItem("unlispace.embedVerifier", "v".repeat(43));
+  sessionStorage.setItem("orbit.embedVerifier", "v".repeat(43));
   window.history.replaceState(null, "", "/embed/ai#handoff=h123");
   const auth = new AuthStore(localStorage, null);
   stores.push(auth);
@@ -116,7 +116,7 @@ it("signs the desktop app's embedded Ask AI page in with a one-time handoff and 
   );
   expect(await screen.findByRole("heading", { name: "Ask AI" })).toBeInTheDocument();
   expect(exchanged).toEqual([{ handoff: "h123", webCodeVerifier: "v".repeat(43) }]);
-  expect(sessionStorage.getItem("unlispace.embedVerifier")).toBeNull();
+  expect(sessionStorage.getItem("orbit.embedVerifier")).toBeNull();
   expect(window.location.hash).toBe("");
   // Embedded pages omit the web sidebar; the desktop app has its own navigation.
   expect(screen.queryByRole("navigation", { name: "Main navigation" })).toBeNull();

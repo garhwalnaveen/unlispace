@@ -2,7 +2,7 @@
     clippy::double_must_use,
     reason = "async_trait macro generates must_use on boxed futures"
 )]
-//! Loopback SMB adapter for Unlispace.
+//! Loopback SMB adapter for Orbit.
 mod adapter;
 mod backend;
 mod mem;

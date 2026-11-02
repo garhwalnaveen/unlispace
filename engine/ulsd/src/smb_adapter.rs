@@ -68,7 +68,7 @@ async fn detach_stale_mounts(target: &Path) -> Result<(), MountError> {
         if target_mounts(&mount_table().await?, target)? != mounts {
             return Err(err("SMB mountpoint changed during recovery"));
         }
-        // Only a verified dead Unlispace share may be force-detached. A normal unmount can
+        // Only a verified dead Orbit share may be force-detached. A normal unmount can
         // wait for that dead server, leaving the recovery itself stuck in the kernel.
         let output = tokio::time::timeout(Duration::from_secs(5),
             tokio::process::Command::new("/sbin/umount").arg("-f").arg(target)

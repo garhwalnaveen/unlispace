@@ -23,12 +23,12 @@ it("waits for real storage readiness before allowing the desktop handoff", async
   const fetcher = vi.fn(async () => json(orgs(ready)));
   vi.stubGlobal("fetch", fetcher);
   await act(async () => { renderDesktop(); });
-  expect(screen.getByRole("button", { name: "Open Unlispace" })).toBeDisabled();
-  expect(screen.getByRole("heading")).toHaveTextContent("Preparing your Unlispace");
+  expect(screen.getByRole("button", { name: "Open Orbit" })).toBeDisabled();
+  expect(screen.getByRole("heading")).toHaveTextContent("Preparing your Orbit");
   ready = true;
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(screen.getByRole("heading")).toHaveTextContent("Your Unlispace is ready");
-  expect(screen.getByRole("button", { name: "Open Unlispace" })).toBeEnabled();
+  expect(screen.getByRole("heading")).toHaveTextContent("Your Orbit is ready");
+  expect(screen.getByRole("button", { name: "Open Orbit" })).toBeEnabled();
   expect(screen.getByText("Drive ready")).toBeInTheDocument();
   expect(screen.getByText("Connect your Mac")).toBeInTheDocument();
   await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
@@ -43,11 +43,11 @@ it("bounds provisioning checks and lets the user retry after the deadline", asyn
   await act(async () => { renderDesktop(); });
   await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
   expect(fetcher).toHaveBeenCalledTimes(10);
-  expect(screen.getByRole("button", { name: "Open Unlispace" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Open Orbit" })).toBeDisabled();
   expect(screen.getByRole("link", { name: "View drives in browser" })).toHaveAttribute("href", "/");
   ready = true;
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry drive setup" })); });
-  expect(screen.getByRole("button", { name: "Open Unlispace" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Open Orbit" })).toBeEnabled();
   expect(fetcher).toHaveBeenCalledTimes(11);
 });
 
@@ -58,7 +58,7 @@ it("stops on a network failure and clears it when retry succeeds", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Network unavailable");
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry drive setup" })); });
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Open Unlispace" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Open Orbit" })).toBeEnabled();
 });
 
 it("cancels pending polling when the desktop page closes", async () => {

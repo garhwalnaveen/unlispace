@@ -19,11 +19,12 @@ yarn-error.log*
 .env
 .env.local
 .env.production
+!web/.env.production
 
 # typescript
 *.tsbuildinfo
 
-# unlispace cloud + engine
+# orbit cloud + engine
 cloud/**/node_modules
 cloud/**/.wrangler
 cloud/**/.dev.vars

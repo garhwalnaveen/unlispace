@@ -1,4 +1,4 @@
-# Unlispace web · M2
+# Orbit web
 
 A static Vite / React 19 / TypeScript SPA. All application files, dependencies, caches and build
 output live in this directory. Node 22.22+ and npm are recommended. No deployment is performed.
@@ -41,6 +41,10 @@ The data endpoint is taken from `POST /drives/{id}/token`, never inferred from t
 
 ## Verification and static hosting
 
+Production builds load the tracked `.env.production` API endpoint and reject local or non-HTTPS API URLs.
+The canonical production origin is `https://orbitfs.io`, matching `/client-config` on the hosted API.
+The Worker preview hostname redirects there before starting authentication; local development stays local.
+
 ```sh
 npm run build
 npm run typecheck
@@ -59,12 +63,15 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
 
 ## Screens and behavior
 
+- `/`: public Orbit landing page when signed out; your drives when signed in. `/overview` always shows
+  the landing page, including while session recovery is pending. Its interactive preview uses clearly labeled
+  example files; account and file actions still require sign-in.
 - `/login`: email → six-digit OTP, or Google; `/auth/callback` consumes and immediately removes
   the single-use handoff fragment. New accounts get the backend's personal org, drive and trial.
 - `/desktop?state&code_challenge`: preserves the desktop return location through either login
   flow, mints a PKCE-bound code on an explicit button press, then opens `uls://auth/callback`.
   “Use another account” revokes the current session before returning to login.
-- `/`: organizations, trial days, drives, create, rename, exact-name confirmation for delete.
+- Signed-in `/`: workspaces, trial days, drives, create, rename, exact-name confirmation for delete.
   Plan-limit errors explain that additional drives require Teams; each organization links to Billing.
 - `/drives/:id/*`: root/folder listing, cursor-based Load more, breadcrumbs and file details.
   Version history has its own cursor pagination and is a panel (`?panel=versions`) backed by the data plane's `/versions` endpoint.
@@ -94,7 +101,7 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
 ## Memory-only sessions and cookie migration
 
 Access tokens, refresh tokens and user session data live only in `AuthStore` memory. Startup removes
-any legacy `unlispace.refreshToken` localStorage item without reusing it. Theme preference remains
+any legacy `orbit.refreshToken` localStorage item without reusing it. Theme preference remains
 persistent. A reload/new tab can recover a session only from another live tab on the same origin via
 BroadcastChannel; closing all tabs requires signing in again. Nothing uses sessionStorage or IndexedDB
 for credentials. This reduces persistent credential exposure; same-origin XSS can still access a live
@@ -148,6 +155,16 @@ components can be added with `npx shadcn@latest add <component>`. Add only what 
 The Button defaults to the outline variant; use `variant="default"` for the primary action.
 `src/styles.css` owns the shared neutral light/dark tokens and page layout. Avoid restyling controls
 there. Lucide provides the icons; the shared `Modal` connects existing screen state to Radix.
+
+The public landing page follows the visual patterns of [Liveblocks’ homepage](https://liveblocks.io/):
+black surfaces, a centered sans-serif hero, white primary buttons, compact navigation menus, and
+subtle bordered product panels. This is an independent implementation: the public Liveblocks
+repository contains SDKs, examples and starter-kit marketing components, not its production homepage.
+`src/landing.css` owns the public design tokens, responsive layout and component styling;
+`src/Landing.tsx` reuses the installed Button and DropdownMenu components. The signed-in app keeps
+its existing theme and controls. The homepage uses system sans-serif fonts rather than Suisse.
+Legacy `orbit.*` storage keys, `uls://` links, deployed
+service names, and sender domains stay compatible with existing clients and infrastructure.
 
 The refresh was checked in Chrome at desktop and 375 px in light/dark mode using temporary
 sample data. Checkout lives in a dialog and invoices use a table. The web suite covers pricing

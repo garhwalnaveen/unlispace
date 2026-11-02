@@ -11,7 +11,7 @@ fi
 [[ -n "${ULS_API_URL:-}${ULS_WORKERS_DOMAIN:-}" ]] || { echo 'Release requires a production API endpoint' >&2; exit 1; }
 python3 - <<'PYURL'
 import os, urllib.parse
-url = os.environ.get('ULS_API_URL') or 'https://unlispace-api.' + os.environ.get('ULS_WORKERS_DOMAIN', '')
+url = os.environ.get('ULS_API_URL') or 'https://orbit-api.' + os.environ.get('ULS_WORKERS_DOMAIN', '')
 u = urllib.parse.urlparse(url)
 if u.scheme != 'https' or not u.hostname or u.hostname in ('localhost', '127.0.0.1') or u.username or u.password or u.query or u.fragment:
     raise SystemExit('Release requires a valid HTTPS production API endpoint')
@@ -26,5 +26,5 @@ if [[ -n "${ULS_SIGN_IDENTITY:-}" ]]; then
 else
   echo 'Unsigned DMG: macOS Gatekeeper will require the user to allow the app.'
 fi
-shasum -a 256 "$ROOT/build/Unlispace-${ULS_VERSION}.dmg" > "$ROOT/build/Unlispace-${ULS_VERSION}.dmg.sha256"
+shasum -a 256 "$ROOT/build/Orbit-${ULS_VERSION}.dmg" > "$ROOT/build/Orbit-${ULS_VERSION}.dmg.sha256"
 echo 'RELEASE PASS: installer and SHA-256 manifest created'

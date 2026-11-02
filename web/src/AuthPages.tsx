@@ -10,6 +10,7 @@ import {
 } from "react-router-dom";
 import { API_URL, publicPost, type Session } from "./api";
 import { useAuth } from "./context";
+import { OrbitMark } from "./OrbitMark";
 import { desktopCallback, desktopParameters, safeReturn } from "./links";
 import { ErrorNotice, Icon, Loading } from "./ui";
 
@@ -138,14 +139,14 @@ export function OtpForm({
     </form>
   );
 }
-export const GOOGLE_VERIFIER_KEY = "unlispace.googleVerifier";
+export const GOOGLE_VERIFIER_KEY = "orbit.googleVerifier";
 
 export async function googleSignIn(returnTo: string): Promise<string> {
   const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
   const challenge = btoa(String.fromCharCode(...digest)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   sessionStorage.setItem(GOOGLE_VERIFIER_KEY, verifier);
-  sessionStorage.setItem("unlispace.return", returnTo);
+  sessionStorage.setItem("orbit.return", returnTo);
   return `${API_URL}/auth/google/start?${new URLSearchParams({ return: `${window.location.origin}/auth/callback`, web_code_challenge: challenge })}`;
 }
 
@@ -160,7 +161,8 @@ export function Login() {
     <div className="auth-layout">
       <section className="auth-form" aria-labelledby="sign-in-title">
         <div className="auth-heading">
-          <h1 id="sign-in-title">Welcome to Unlispace</h1>
+          <OrbitMark className="auth-mark" />
+          <h1 id="sign-in-title">Welcome to Orbit</h1>
           <p className="muted">Sign in to access your drives and connect your Mac.</p>
         </div>
         <ErrorNotice error={googleError} />
@@ -218,8 +220,8 @@ export function Callback() {
     void publicPost<Session>("/auth/handoff/exchange", { handoff, webCodeVerifier })
       .then((session) => {
         auth.accept(session);
-        const returnTo = safeReturn(sessionStorage.getItem("unlispace.return"));
-        sessionStorage.removeItem("unlispace.return");
+        const returnTo = safeReturn(sessionStorage.getItem("orbit.return"));
+        sessionStorage.removeItem("orbit.return");
         navigate(returnTo, { replace: true });
       })
       .catch(setError);
@@ -230,7 +232,7 @@ export function Callback() {
       {error ? (
         <>
           <ErrorNotice error={error} />
-          <Link to={`/login?${new URLSearchParams({ return: safeReturn(sessionStorage.getItem("unlispace.return")) })}`}>Return to sign in</Link>
+          <Link to={`/login?${new URLSearchParams({ return: safeReturn(sessionStorage.getItem("orbit.return")) })}`}>Return to sign in</Link>
         </>
       ) : (
         <Loading>Signing you in…</Loading>
@@ -269,7 +271,7 @@ function DesktopStorage({ busy, onOpen }: { busy: boolean; onOpen: () => void })
     return () => { active = false; clearTimeout(timer); };
   }, [auth, revision]);
   return <>
-    <h1>{status === "ready" ? "Your Unlispace is ready" : "Preparing your Unlispace"}</h1>
+    <h1>{status === "ready" ? "Your Orbit is ready" : "Preparing your Orbit"}</h1>
     <p className="muted">Connecting as <strong>{user?.email}</strong></p>
     <ol className="connection-progress" aria-label="Connection progress">
       <li><span aria-hidden="true">✓</span> Account verified</li>
@@ -282,7 +284,7 @@ function DesktopStorage({ busy, onOpen }: { busy: boolean; onOpen: () => void })
     <ErrorNotice error={error} />
     {status === "waiting" && <Button onClick={() => setRevision(value => value + 1)}>Retry drive setup</Button>}
     <Button variant="default" onClick={onOpen} disabled={busy || status !== "ready"}>
-      {busy ? "Please wait…" : "Open Unlispace"}
+      {busy ? "Please wait…" : "Open Orbit"}
     </Button>
     <Link className="desktop-browser-link" to="/">View drives in browser</Link>
   </>;
@@ -367,7 +369,7 @@ export function Desktop() {
       <DesktopStorage key={user.id} busy={busy} onOpen={() => void open()} />
       {opened && (
         <p role="status">
-          Your browser was asked to open Unlispace. If nothing happened, check
+          Your browser was asked to open Orbit. If nothing happened, check
           that the desktop app is installed, then try again.
         </p>
       )}
@@ -382,7 +384,7 @@ export function Desktop() {
   );
 }
 /** Session storage key the desktop app's WebView sets before load; never put in a URL. */
-export const EMBED_VERIFIER_KEY = "unlispace.embedVerifier";
+export const EMBED_VERIFIER_KEY = "orbit.embedVerifier";
 /**
  * Entry point for the desktop app's embedded pages. The app passes a one-time handoff in the
  * fragment and injects its PKCE verifier into session storage, then this signs in as that user.
@@ -399,7 +401,7 @@ export function Embed({ children }: { children: ReactNode }) {
     const webCodeVerifier = sessionStorage.getItem(EMBED_VERIFIER_KEY);
     sessionStorage.removeItem(EMBED_VERIFIER_KEY);
     if (!handoff || !webCodeVerifier) {
-      if (!user) setError("Open Ask AI from the Unlispace app to sign in.");
+      if (!user) setError("Open Ask AI from the Orbit app to sign in.");
       return;
     }
     void publicPost<Session>("/auth/handoff/exchange", { handoff, webCodeVerifier })

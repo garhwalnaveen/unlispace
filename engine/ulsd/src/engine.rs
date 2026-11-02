@@ -23,7 +23,7 @@ use crate::watch::{self, WatchCtx};
 pub struct EngineConfig {
     pub version: String,
     pub state_path: PathBuf,
-    /// `~/Unlispace`; drives mount at `<root>/<Drive name>`.
+    /// `~/Orbit`; drives mount at `<root>/<Drive name>`.
     pub mount_root: PathBuf,
     /// Shard cache directory; `None` = the platform default.
     pub cache_dir: Option<PathBuf>,
@@ -158,7 +158,7 @@ impl Engine {
 
     fn note_err(&self, e: &ErrorBody) {
         if e.code == code::OFFLINE {
-            self.set_state(State::Offline, Some("cannot reach the Unlispace servers".into()));
+            self.set_state(State::Offline, Some("cannot reach the Orbit servers".into()));
         }
     }
 
@@ -1032,8 +1032,8 @@ pub fn capacities_in_orgs(orgs: &Value) -> HashMap<String, (u64, u64)> {
 /// A data-plane or auth failure that means "cannot reach the servers" rather than "rejected".
 fn client_err(e: uls_client::Error) -> ErrorBody {
     match &e {
-        uls_client::Error::Transport(t) if t.is_connect() || t.is_timeout() || t.is_request() => ErrorBody::new(code::OFFLINE, "cannot reach the Unlispace servers"),
-        uls_client::Error::Auth(m) if m.starts_with("offline") => ErrorBody::new(code::OFFLINE, "cannot reach the Unlispace servers"),
+        uls_client::Error::Transport(t) if t.is_connect() || t.is_timeout() || t.is_request() => ErrorBody::new(code::OFFLINE, "cannot reach the Orbit servers"),
+        uls_client::Error::Auth(m) if m.starts_with("offline") => ErrorBody::new(code::OFFLINE, "cannot reach the Orbit servers"),
         _ => ErrorBody::bad_request(e.to_string()),
     }
 }

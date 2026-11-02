@@ -8,7 +8,7 @@ TOOL="$(find "$ROOT/.build/artifacts" -type f -name generate_appcast -print -qui
 # Explicit file avoids Sparkle keychain lookup. Feed directory must contain releases only.
 FEED="$ROOT/build/feed"
 mkdir -p "$FEED"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/build/Unlispace.app/Contents/Info.plist")"
-cp "$ROOT/build/Unlispace-$VERSION.dmg" "$FEED/"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/build/Orbit.app/Contents/Info.plist")"
+cp "$ROOT/build/Orbit-$VERSION.dmg" "$FEED/"
 "$TOOL" --ed-key-file "$ULS_EDDSA_KEY_FILE" "$FEED"
 echo 'APPCAST PASS: build/feed/appcast.xml generated'

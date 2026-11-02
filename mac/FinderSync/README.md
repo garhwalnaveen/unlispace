@@ -1,6 +1,6 @@
 # Finder Sync extension (not built yet)
 
-`UnlispaceFinder.appex` needs a full Xcode toolchain (app-extension bundling, entitlements,
+`OrbitFinder.appex` needs a full Xcode toolchain (app-extension bundling, entitlements,
 provisioning). It is intentionally skipped while we build with SwiftPM and the Command Line Tools.
 
 Planned behaviour (product-design.md section 5.1):
@@ -10,4 +10,4 @@ Planned behaviour (product-design.md section 5.1):
   app-group channel. Monitored root: the drive mount points under `/Volumes`.
 
 When Xcode is available: add an Xcode project (or XcodeGen spec) with a Finder Sync extension target
-that embeds in `Unlispace.app/Contents/PlugIns/`, sharing `UnlispaceKit` for the protocol types.
+that embeds in `Orbit.app/Contents/PlugIns/`, sharing `OrbitKit` for the protocol types.

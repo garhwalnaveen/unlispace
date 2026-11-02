@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 import Testing
-import UnlispaceKit
+import OrbitKit
 
 @Suite struct RealDaemonTests {
     @Test func isolatedDaemonRoundTrip() async throws {
@@ -14,7 +14,7 @@ import UnlispaceKit
         let home = URL(fileURLWithPath: "/tmp/uls-mac-\(UUID().uuidString.prefix(8))", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: home) }
-        let support = home.appendingPathComponent("Library/Application Support/Unlispace")
+        let support = home.appendingPathComponent("Library/Application Support/Orbit")
         let socket = support.appendingPathComponent("ulsd.sock")
         let daemon = Process()
         daemon.executableURL = binary

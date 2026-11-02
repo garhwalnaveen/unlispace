@@ -14,6 +14,7 @@ it("follows system appearance, persists a manual choice and restores system trac
     removeEventListener: vi.fn(),
   };
   vi.stubGlobal("matchMedia", () => media);
+  localStorage.setItem("orbit.theme", "system");
   const auth = new AuthStore(localStorage, null);
   await auth.start();
   const view = render(<MemoryRouter initialEntries={["/login"]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
@@ -23,12 +24,27 @@ it("follows system appearance, persists a manual choice and restores system trac
   act(() => { media.matches = true; onChange(); });
   expect(document.documentElement.dataset.theme).toBe("dark");
   await user.click(screen.getByRole("button", { name: "Use light theme" }));
-  expect(localStorage.getItem("unlispace.theme")).toBe("light");
+  expect(localStorage.getItem("orbit.theme")).toBe("light");
   act(() => onChange());
   expect(document.documentElement.dataset.theme).toBe("light");
   await user.click(screen.getByRole("button", { name: "Use system theme" }));
   expect(document.documentElement.dataset.theme).toBe("dark");
   view.unmount();
   expect(media.removeEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+  auth.dispose();
+});
+
+
+it("defaults to dark and retains a saved light choice", async () => {
+  const auth = new AuthStore(localStorage, null);
+  await auth.start();
+  const view = render(<MemoryRouter initialEntries={["/login"]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
+  expect(screen.getByRole("button", { name: "Use dark theme" })).toHaveAttribute("aria-pressed", "true");
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  await userEvent.click(screen.getByRole("button", { name: "Use light theme" }));
+  view.unmount();
+  render(<MemoryRouter initialEntries={["/login"]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
+  expect(screen.getByRole("button", { name: "Use light theme" })).toHaveAttribute("aria-pressed", "true");
+  expect(document.documentElement.dataset.theme).toBe("light");
   auth.dispose();
 });

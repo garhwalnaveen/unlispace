@@ -102,17 +102,17 @@ it("switch=1 signs the web session out once and keeps the desktop parameters for
   });
   vi.stubGlobal("fetch", fetcher);
   await renderApp(`/desktop?${desktopQuery({ switch: "1" })}`);
-  expect(await screen.findByRole("heading", { name: "Welcome to Unlispace" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/auth/logout"))).toHaveLength(1);
   // The Google button records the return target without `switch`, so the user cannot loop.
   await userEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
-  await waitFor(() => expect(sessionStorage.getItem("unlispace.return")).toBe(`/desktop?${desktopQuery()}`));
+  await waitFor(() => expect(sessionStorage.getItem("orbit.return")).toBe(`/desktop?${desktopQuery()}`));
 });
 
 it("switch=1 without a web session goes straight to sign-in", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("no network expected"); }));
   await renderApp(`/desktop?${desktopQuery({ switch: "1" })}`, false);
-  expect(await screen.findByRole("heading", { name: "Welcome to Unlispace" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
 });
 
 it("offers Use a different account on the confirmation screen and keeps the target through email sign-in", async () => {
@@ -126,13 +126,13 @@ it("offers Use a different account on the confirmation screen and keeps the targ
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
   await renderApp(`/desktop?${desktopQuery()}`);
-  await screen.findByRole("heading", { name: "Your Unlispace is ready" });
+  await screen.findByRole("heading", { name: "Your Orbit is ready" });
   await user.click(screen.getByRole("button", { name: "Use a different account" }));
   await user.type(await screen.findByLabelText("Email address"), "other@example.com");
   await user.click(screen.getByRole("button", { name: "Continue with email" }));
   await user.type(await screen.findByLabelText("Verification code"), "123456");
   await user.click(screen.getByRole("button", { name: "Verify & sign in" }));
-  expect(await screen.findByRole("heading", { name: "Your Unlispace is ready" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Your Orbit is ready" })).toBeInTheDocument();
   expect(within(screen.getByRole("main")).getByText("other@example.com")).toBeInTheDocument();
 });
 
@@ -144,7 +144,7 @@ it("switching from email to Google mid-flow keeps the desktop return target", as
   await user.click(screen.getByRole("button", { name: "Continue with email" }));
   await screen.findByLabelText("Verification code");
   await user.click(screen.getByRole("button", { name: "Continue with Google" }));
-  await waitFor(() => expect(sessionStorage.getItem("unlispace.return")).toBe(`/desktop?${desktopQuery()}`));
+  await waitFor(() => expect(sessionStorage.getItem("orbit.return")).toBe(`/desktop?${desktopQuery()}`));
 });
 
 function homeFetch(accessBody: unknown, orgBody = org()) {

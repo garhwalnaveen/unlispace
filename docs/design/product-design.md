@@ -1,6 +1,6 @@
-# Unlispace — product design (v1: macOS)
+# Orbit — product design (v1: macOS)
 
-Status: draft for review · 2026-10-25 · working name "Unlispace", domain shown as `unlispace.com` (placeholder)
+Status: draft for review · 2026-10-25 · working name "Orbit", domain shown as `orbit.com` (placeholder)
 
 Evidence for every claim about Space (spacefs.com) is in [`docs/research/spacefs/`](../research/spacefs/):
 `signed-in.md` (live web app + API), `mac-client.md` (installed app), `mac-pkgs.md` (installers),
@@ -29,7 +29,7 @@ and developers running coding agents who need a forkable sandbox.
 
 ### Where we match Space, and where we deliberately differ
 
-| Area | Space today | Unlispace v1 |
+| Area | Space today | Orbit v1 |
 |---|---|---|
 | Storage model | FastCDC shards + per-version manifest | same |
 | Commit cost | 4 R2 objects per version, so small writes are 2–3× slower than a bare bucket | one SQLite transaction in the drive's Durable Object; we aim for small writes faster than Space (to be benchmarked in M0) |
@@ -47,7 +47,7 @@ and developers running coding agents who need a forkable sandbox.
 ```
  macOS                                     Cloudflare
 ┌──────────────────────────────┐        ┌───────────────────────────────────────────────┐
-│ Unlispace.app (Swift)        │ HTTPS  │ api Worker (control plane)  ── D1 (control db) │
+│ Orbit.app (Swift)        │ HTTPS  │ api Worker (control plane)  ── D1 (control db) │
 │  menu bar, onboarding,       ├───────►│  auth · orgs · drives · keys · billing          │
 │  Keychain, Finder Sync ext   │        │                                                 │
 │        │ XPC                 │        │ s3 Worker (data plane)                          │
@@ -121,7 +121,7 @@ loss: it keeps both access scoping and GC confined to one lineage.
 1. Resolve the head at the DO, or from the per-colo metadata cache (TTL ≤ 2 s) unless the request
    sends `x-uls-consistent: true`.
 2. Map the byte range onto shards.
-3. Fetch the shards through `GET s3.unlispace.com/_blocks/{lineage}/{sha}?t=<hmac>`. Shards are
+3. Fetch the shards through `GET s3.orbit.com/_blocks/{lineage}/{sha}?t=<hmac>`. Shards are
    immutable, so they are served with `Cache-Control: immutable` through the zone cache and
    Smart Tiered Cache. R2 presigned URLs can't use the edge cache on custom domains, so we don't
    use them.
@@ -188,11 +188,11 @@ Soft-deleted drives keep their shards until their retention window expires.
 
 | Piece | Language | Role |
 |---|---|---|
-| `Unlispace.app` | Swift (SwiftUI + AppKit), menu-bar app | sign-in, onboarding, drive picker, transfer progress, settings, updates |
+| `Orbit.app` | Swift (SwiftUI + AppKit), menu-bar app | sign-in, onboarding, drive picker, transfer progress, settings, updates |
 | `ulsd` | Rust | the engine: VFS, journal, shard cache, sync, SMB server. Registered as a LaunchAgent with `SMAppService.agent` (user, never root) |
-| `UnlispaceFinder.appex` | Swift | Finder Sync: badges (synced / uploading / conflict / offline), context menu (Version history…, Copy link, Restore) |
+| `OrbitFinder.appex` | Swift | Finder Sync: badges (synced / uploading / conflict / offline), context menu (Version history…, Copy link, Restore) |
 | `uls` | Rust, the same binary as `ulsd` invoked as multicall | CLI: login, mount, history, restore, keys |
-| `UnlispaceFS.appex` (later) | Swift shell linking the Rust staticlib | FSKit "native mode", opt-in on macOS ≥ 27.2 |
+| `OrbitFS.appex` (later) | Swift shell linking the Rust staticlib | FSKit "native mode", opt-in on macOS ≥ 27.2 |
 
 The app and daemon talk over XPC (Mach service in our app group). The daemon also exposes a Unix
 socket for the CLI, checked with `SO_PEERCRED`.
@@ -218,10 +218,10 @@ socket for the CLI, checked with `SO_PEERCRED`.
 
 ### 5.3 Engine behaviour
 - **Reads:** a page-aligned range request is mapped to shards. The shard comes from the RAM cache,
-  then the disk cache (`~/Library/Caches/com.unlispace/shards/{sha}`, LRU, default 20 GB),
+  then the disk cache (`~/Library/Caches/com.orbit/shards/{sha}`, LRU, default 20 GB),
   otherwise it is fetched from `/_blocks` with read-ahead. A cached shard can never be stale.
 - **Writes:**
-  1. They land in a crash-safe journal (SQLite WAL in `~/Library/Application Support/Unlispace/`),
+  1. They land in a crash-safe journal (SQLite WAL in `~/Library/Application Support/Orbit/`),
      so a save returns at local speed.
   2. On close or fsync, plus a 2 s quiet window, the journal is folded into new shards (only
      around dirty ranges).
@@ -314,7 +314,7 @@ write-heavy users, so batched commits from the desktop matter.
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | Product name and domain | **Locked 2026-10-25:** Unlispace, bundle id `com.unlispace.app`, URL scheme `uls://` (final domain still to be registered) |
+| D1 | Product name and domain | **Locked 2026-10-25:** Orbit, bundle id `com.orbit.app`, URL scheme `uls://` (final domain still to be registered) |
 | D2 | Default Mac adapter | **Locked:** loopback SMB in v1, FSKit opt-in later. NFSv3 is the M0/M1 prototype adapter |
 | D3 | Payments | **Locked:** Dodo Payments (merchant of record) for seats, storage add-ons and trials |
 | D4 | Web app stack | **Locked:** the Vite/React app in `web/`, hosted on Cloudflare and talking to `api.`. The obsolete Next.js/Supabase starter has been removed. |

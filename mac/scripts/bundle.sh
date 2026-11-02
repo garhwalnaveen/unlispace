@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assembles build/Unlispace.app from the SwiftPM release binary and ad-hoc signs it.
+# Assembles build/Orbit.app from the SwiftPM release binary and ad-hoc signs it.
 # Does not launch the app or register anything with the system.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,16 +8,16 @@ source "$ROOT/scripts/swift-env.sh"
 
 API_ENDPOINT="${ULS_API_URL:-}"
 if [[ -z "$API_ENDPOINT" && -n "${ULS_WORKERS_DOMAIN:-}" ]]; then
-  API_ENDPOINT="https://unlispace-api.${ULS_WORKERS_DOMAIN}"
+  API_ENDPOINT="https://orbit-api.${ULS_WORKERS_DOMAIN}"
 fi
 
 swift build "${SWIFT_OPTIONS[@]}" -c release "$@"
-BIN="$(swift build "${SWIFT_OPTIONS[@]}" -c release --show-bin-path "$@")/Unlispace"
+BIN="$(swift build "${SWIFT_OPTIONS[@]}" -c release --show-bin-path "$@")/Orbit"
 
-APP="$ROOT/build/Unlispace.app"
+APP="$ROOT/build/Orbit.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
-cp "$BIN" "$APP/Contents/MacOS/Unlispace"
+cp "$BIN" "$APP/Contents/MacOS/Orbit"
 FRAMEWORK="$(find "$ROOT/.build/artifacts" -type d -path '*/macos-arm64_x86_64/Sparkle.framework' -print -quit)"
 if [[ -z "$FRAMEWORK" ]]; then echo "Sparkle framework missing from resolved artifacts" >&2; exit 1; fi
 mkdir -p "$APP/Contents/Frameworks"
@@ -28,10 +28,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>com.unlispace.app</string>
-  <key>CFBundleName</key><string>Unlispace</string>
-  <key>CFBundleDisplayName</key><string>Unlispace</string>
-  <key>CFBundleExecutable</key><string>Unlispace</string>
+  <key>CFBundleIdentifier</key><string>com.orbit.app</string>
+  <key>CFBundleName</key><string>Orbit</string>
+  <key>CFBundleDisplayName</key><string>Orbit</string>
+  <key>CFBundleExecutable</key><string>Orbit</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.2.0</string>
@@ -42,7 +42,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
-      <key>CFBundleURLName</key><string>com.unlispace.app.auth</string>
+      <key>CFBundleURLName</key><string>com.orbit.app.auth</string>
       <key>CFBundleURLSchemes</key>
       <array><string>uls</string></array>
     </dict>
@@ -52,16 +52,16 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 if [[ -n "$API_ENDPOINT" ]]; then
-  /usr/libexec/PlistBuddy -c "Add :UnlispaceAPIEndpoint string $API_ENDPOINT" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :OrbitAPIEndpoint string $API_ENDPOINT" "$APP/Contents/Info.plist"
 fi
 
 # LaunchAgent plist for SMAppService.agent(plistName:). BundleProgram is relative to the bundle.
-cat > "$APP/Contents/Library/LaunchAgents/com.unlispace.ulsd.plist" <<'PLIST'
+cat > "$APP/Contents/Library/LaunchAgents/com.orbit.ulsd.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.unlispace.ulsd</string>
+  <key>Label</key><string>com.orbit.ulsd</string>
   <key>BundleProgram</key><string>Contents/MacOS/ulsd</string>
   <key>ProgramArguments</key>
   <array><string>Contents/MacOS/ulsd</string><string>daemon</string></array>
@@ -79,7 +79,7 @@ if [[ -n "${ULSD_BIN:-}" ]]; then
   cp "$ULSD_BIN" "$APP/Contents/MacOS/ulsd"
 fi
 
-plutil -lint "$APP/Contents/Library/LaunchAgents/com.unlispace.ulsd.plist"
+plutil -lint "$APP/Contents/Library/LaunchAgents/com.orbit.ulsd.plist"
 
 python3 - "$APP/Contents/Info.plist" <<'PYPLIST'
 import os, plistlib, sys
@@ -96,8 +96,8 @@ if feed and key:
 with open(path, 'wb') as f: plistlib.dump(info, f)
 PYPLIST
 plutil -lint "$APP/Contents/Info.plist"
-otool -L "$APP/Contents/MacOS/Unlispace" | grep -Fq '@rpath/Sparkle.framework/'
-otool -l "$APP/Contents/MacOS/Unlispace" | grep -Fq '@executable_path/../Frameworks'
+otool -L "$APP/Contents/MacOS/Orbit" | grep -Fq '@rpath/Sparkle.framework/'
+otool -l "$APP/Contents/MacOS/Orbit" | grep -Fq '@executable_path/../Frameworks'
 bash "$ROOT/scripts/sign.sh" "$APP"
 codesign --verify --deep --strict "$APP"
 echo "Built $APP"

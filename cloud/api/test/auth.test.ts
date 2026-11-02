@@ -259,7 +259,21 @@ describe("desktop PKCE flow", () => {
 		expect(loc.origin + loc.pathname).toBe("http://127.0.0.1:5173/desktop");
 		expect(loc.searchParams.get("state")).toBe(state);
 		expect(loc.searchParams.get("code_challenge")).toBe(ch);
+		expect(loc.searchParams.has("switch")).toBe(false);
 		expect((await w.call(`/auth/desktop/start?state=${state}&code_challenge=${ch}&code_challenge_method=plain`)).status).toBe(400);
+	});
+
+	it("preserves the explicit request to choose another desktop account", async () => {
+		const w = await makeWorld();
+		const ch = await pkce(verifier);
+		for (const value of ["1", "0", "https://example.com"]) {
+			const r = await w.call(`/auth/desktop/start?state=${state}&code_challenge=${ch}&code_challenge_method=S256&switch=${encodeURIComponent(value)}`);
+			expect(r.status).toBe(302);
+			const loc = new URL(r.headers.get("location")!);
+			expect(loc.searchParams.get("switch")).toBe(value === "1" ? "1" : null);
+			expect(loc.searchParams.get("state")).toBe(state);
+			expect(loc.searchParams.get("code_challenge")).toBe(ch);
+		}
 	});
 
 	it("end to end, single use", async () => {

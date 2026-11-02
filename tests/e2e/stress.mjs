@@ -111,7 +111,7 @@ export async function nativeStressChecks(h) {
   if (size === null) { console.log('Native stress phase disabled (E2E_STRESS_BYTES=50000000 or 1000000000 enables it)'); return; }
   const { work, drive, control, check, native, smbMountpoint, cli, independentToken, until } = h;
   const base = await realpath(work);
-  assert(/^\/private\/tmp\/unlispace-e2e\.|^\/tmp\/unlispace-e2e\./.test(base), 'stress work must be an owned E2E directory');
+  assert(/^\/private\/tmp\/orbit-e2e\.|^\/tmp\/orbit-e2e\./.test(base), 'stress work must be an owned E2E directory');
   assert(control && smbMountpoint && independentToken, 'stress requires the isolated authenticated SMB phase');
   const mount = resolve(smbMountpoint);
   assert(mount.startsWith(join(base, 'smb-state/mnt') + '/'), 'stress mount is outside the isolated daemon state');

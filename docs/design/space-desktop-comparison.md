@@ -1,16 +1,16 @@
-# Space → Unlispace desktop UX review
+# Space → Orbit desktop UX review
 
-Reviewed 26 October 2026 using the installed Space 0.2.407 macOS app and the local Unlispace source and bundle. Scope: the native macOS client. Existing web changes were preserved.
+Reviewed 26 October 2026 using the installed Space 0.2.407 macOS app and the local Orbit source and bundle. Scope: the native macOS client. Existing web changes were preserved.
 
 ## Evidence and limits
 
 Space was already signed in, with one unmounted drive and no active uploads. Its General, Drives, Search, Space AI, Shortcuts, Workspace, Uploads, Team, Plan & Storage, Permissions, Cache, Advanced, and About surfaces were inspected through the live UI. Its drive overflow menu was inspected without invoking rename or delete. No files were uploaded, drives mounted, permissions granted, keys entered, or subscriptions changed. Launcher invocation did not produce a separately inspectable launcher surface; its workflows are described only where exposed in settings and shortcut descriptions. First-run Space onboarding and successful transfers were not exercised.
 
-The original Unlispace bundle crashed before rendering because hardened runtime rejected the ad hoc signed Sparkle framework. The original interface comparison therefore uses source inspection: a 320-point menu, one 460 × 480 settings form, a three-stage onboarding window, and a transfers popover. After repairing the development packaging path, the rebuilt native UI was launched and inspected live.
+The original Orbit bundle crashed before rendering because hardened runtime rejected the ad hoc signed Sparkle framework. The original interface comparison therefore uses source inspection: a 320-point menu, one 460 × 480 settings form, a three-stage onboarding window, and a transfers popover. After repairing the development packaging path, the rebuilt native UI was launched and inspected live.
 
 ## Flow comparison and implemented response
 
-| Journey | Space observation | Unlispace baseline | Rebuild |
+| Journey | Space observation | Orbit baseline | Rebuild |
 | --- | --- | --- | --- |
 | Open app | Dedicated settings window with persistent categorized sidebar; launcher features exposed through commands | Menu-bar shell; no persistent drive workspace | Resizable workspace opens on launch and reopen; menu provides Open app |
 | Find drives | Drive count, mounted count, clearly named drive rows and visible Mount action | Drive actions nested in menus | Drive cards, mount counts, name filter, inline Mount/Open in Finder/Eject, offline overflow |
@@ -64,7 +64,7 @@ now has distinct guidance instead of incorrectly claiming the engine binary is m
 Service registration and login remain acceptance blockers for real file-flow testing.
 
 Final live cancellation check passed: starting sign-in from setup displayed the waiting
-state and Cancel sign-in; cancelling restored the enabled Sign in to Unlispace button.
+state and Cancel sign-in; cancelling restored the enabled Sign in to Orbit button.
 Cancellation explicitly resolves the pending continuation, and per-session IDs ignore late
 callbacks. The final app was left open on My drives with accurate service-unavailable guidance.
 
@@ -105,7 +105,7 @@ including filter combinations, mock rejection, duplicate action locking and fail
 The fixture renderer covers the new offline empty/progress layouts in light and dark;
 offscreen rendering retains the previously documented native-sidebar limitation.
 Release compilation and ad hoc bundle signature verification passed. The local review
-bundle is `mac/build/Unlispace.app`, retaining the existing configured endpoint and embedding
+bundle is `mac/build/Orbit.app`, retaining the existing configured endpoint and embedding
 `engine/target/debug/ulsd`.
 
 Live review confirmed the new sidebar, Command-2/3 navigation, Command-F focus from another

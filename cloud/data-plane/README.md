@@ -1,4 +1,4 @@
-# Unlispace data plane (M1 auth)
+# Orbit data plane (M1 auth)
 
 One Cloudflare Worker plus a SQLite-backed Durable Object (`DriveAuthority`, one per drive) and an R2 bucket (`SHARDS`).
 Implements `docs/design/m0-contract.md` with the M1 auth and drive lifecycle of `docs/design/m1-contract.md` §2-§4. The Worker does auth, routing and shard I/O (SHA-256 verified while streaming into R2).
@@ -15,7 +15,7 @@ npm test                         # vitest in the Workers runtime (local R2 + DO)
 npm run typecheck
 ```
 
-`npm run deploy` runs `wrangler deploy`. It needs a real R2 bucket named `unlispace-shards-dev` and `wrangler secret put ULS_JWT_PUBLIC_JWKS`, and `ULS_ALLOW_DEV_TOKEN` must be overridden to `"0"` (it is `"1"` in `wrangler.jsonc` for local dev). It was not run.
+`npm run deploy` runs `wrangler deploy`. It needs a real R2 bucket named `orbit-shards-dev` and `wrangler secret put ULS_JWT_PUBLIC_JWKS`, and `ULS_ALLOW_DEV_TOKEN` must be overridden to `"0"` (it is `"1"` in `wrangler.jsonc` for local dev). It was not run.
 `npm run types` regenerates `worker-configuration.d.ts` after editing `wrangler.jsonc`.
 
 ## Auth

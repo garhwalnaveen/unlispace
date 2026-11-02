@@ -1,6 +1,6 @@
 # Integration needs from agent 15 (M3; supersedes agent 06's M2 usage notes)
 
-- **Gateway:** bind `CONTROL_PLANE` to service `unlispace-api`, entrypoint `ControlPlane`.
+- **Gateway:** bind `CONTROL_PLANE` to service `orbit-api`, entrypoint `ControlPlane`.
   Implemented RPC surface and errors are in `M3-API.md`. Every operation rechecks live key
   authority. Use `BucketInfo.writable` for quota/entitlement write gating, and call
   `recordKeyUse` only after verified SigV4 and successful authorization. Forward the entire

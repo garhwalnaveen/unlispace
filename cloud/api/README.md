@@ -1,6 +1,6 @@
-# Unlispace control-plane API (M1 + M2 + M3)
+# Orbit control-plane API (M1 + M2 + M3)
 
-Worker `unlispace-api`: auth (email OTP, Google OIDC, desktop PKCE), sessions, orgs, drives, and drive-token minting.
+Worker `orbit-api`: auth (email OTP, Google OIDC, desktop PKCE), sessions, orgs, drives, and drive-token minting.
 Implements `docs/design/m1-contract.md`. Storage is D1 (`DB`); drive lifecycle goes to the data plane through the
 `DATA_PLANE` service binding (`DataPlaneAdmin` entrypoint).
 
@@ -39,7 +39,7 @@ M2 key secrets: `ULS_ACCESS_KEY_MASTERS` (JSON version → base64 master, each a
 Billing: `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, explicit
 `DODO_PAYMENTS_ENVIRONMENT=test_mode|live_mode`, and `DODO_PRODUCTS` (catalog JSON; see M2 contract).
 Catalog remains public without credentials, with `checkoutAvailable:false`.
-`ULS_DEV_LOG_OTP=1` logs OTP codes instead of emailing them (dev only). `ULS_EMAIL_FROM` sets the sender (default `login@unlispace.com`).
+`ULS_DEV_LOG_OTP=1` logs OTP codes instead of emailing them (dev only). `ULS_EMAIL_FROM` sets the sender (default `login@orbit.com`).
 
 Email sender order: console (dev flag), Resend (`RESEND_API_KEY`), Cloudflare Email Service `send_email` binding `EMAIL`.
 The sending domain must be onboarded first (`npx wrangler email sending enable <domain>`).

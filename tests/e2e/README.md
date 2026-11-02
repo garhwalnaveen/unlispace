@@ -15,7 +15,7 @@ directory so concurrent builds cannot change adapters mid-run. On macOS, native 
 `mount_nfs` permission. The runner never uses sudo or changes system settings.
 
 It generates ephemeral Ed25519 and block-signing keys, copies the current JSONC Worker configuration
-to a private `/tmp/unlispace-e2e.*` directory, points entrypoints and migrations back
+to a private `/tmp/orbit-e2e.*` directory, points entrypoints and migrations back
 at the real source, applies D1 migrations with `--local`, then starts three installed
 Wrangler v4 processes. The data plane listens on 8787 with `--inspector-port 9230`;
 the API uses 8788 and inspector 9231. Their isolated local service registry connects
@@ -32,7 +32,7 @@ E2E_API_PORT=18788 E2E_DATA_PORT=18787 E2E_S3_PORT=18789 E2E_INSPECTOR_PORT=1923
 ```
 
 On an ordinary Mac the CLI is wrapped with `sandbox-exec` to deny writes to its
-hard-coded `~/Library/Caches/com.unlispace` cache; downloads still work with the
+hard-coded `~/Library/Caches/com.orbit` cache; downloads still work with the
 cache disabled. A managed filesystem sandbox may forbid nesting `sandbox-exec`.
 **Only when that parent sandbox already denies writes to this cache**, use
 `E2E_MANAGED_SANDBOX=1` to acknowledge that protection. This does not change `HOME`,
@@ -191,7 +191,7 @@ session entries. The test covers deferred storage, retry into a memory-store dae
 listing, sign-out, forged-state rejection and one-time-code replay rejection.
 
 `E2E_DESKTOP_BROWSER=1` also starts Vite on `E2E_WEB_PORT` (default 21773) and prints
-`DESKTOP_BROWSER_READY <private-work-dir>`. Complete the local browser login and Open Unlispace
+`DESKTOP_BROWSER_READY <private-work-dir>`. Complete the local browser login and Open Orbit
 flow, then write its returned `{ "code": "..." }` to `desktop-browser-result.json` in that private
 directory within four minutes. OTP output remains in the isolated local Worker log; no real
 email is sent. The Swift test consumes the code immediately. Protect all such temporary files.

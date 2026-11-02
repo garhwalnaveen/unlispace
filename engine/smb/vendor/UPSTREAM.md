@@ -28,4 +28,4 @@ Local changes:
   interfaces; did not disable validation/security lints. Applied rustfmt.
 
 The original README describes upstream. The enclosing README describes the
-Unlispace adapter and the verification limitations of this fork.
+Orbit adapter and the verification limitations of this fork.

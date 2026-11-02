@@ -1,6 +1,6 @@
 # uls-smb
 
-Isolated Rust workspace containing the Unlispace SMB library, `smb-demo`, and an
+Isolated Rust workspace containing the Orbit SMB library, `smb-demo`, and an
 MIT-licensed protocol-server fork. **The native macOS mount acceptance gate is
 blocked on this machine; this is not a verified production mount adapter.** The
 server and backend have been exercised over real loopback TCP.

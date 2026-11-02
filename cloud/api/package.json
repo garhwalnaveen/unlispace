@@ -1,5 +1,5 @@
 {
-  "name": "unlispace-api",
+  "name": "orbit-api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "types": "wrangler types",
     "deploy": "wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply unlispace-control-dev --local"
+    "db:migrate:local": "wrangler d1 migrations apply orbit-control-dev --local"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.7",
