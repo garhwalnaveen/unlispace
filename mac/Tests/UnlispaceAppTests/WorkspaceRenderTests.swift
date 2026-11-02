@@ -43,7 +43,7 @@ import UnlispaceKit
             try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 520, height: 580))
             try render(FileSearchView(model: model).preferredColorScheme(scheme), name: "search-\(suffix)", output: output, scheme: scheme)
             try render(WorkspaceAccountView(model: AppModel()).preferredColorScheme(scheme), name: "workspace-\(suffix)", output: output, scheme: scheme)
-            try render(AIView().preferredColorScheme(scheme), name: "ai-\(suffix)", output: output, scheme: scheme)
+            try render(AIView(model: AppModel()).preferredColorScheme(scheme), name: "ai-\(suffix)", output: output, scheme: scheme)
             try render(SettingsView(model: model).preferredColorScheme(scheme), name: "settings-\(suffix)", output: output, scheme: scheme)
             model.engineInstall = .enabled
             model.notificationAccess = .denied

@@ -23,4 +23,14 @@ import Testing
             #expect(ClientConfiguration(webOrigin: origin).page(orgId: "o_123", section: "team") == nil)
         }
     }
+    @Test func embeddedPagesCarryTheHandoffOnlyInTheFragment() {
+        let url = ClientConfiguration(webOrigin: "https://example.com").embedPage("ai", handoff: "h_AB-12")
+        #expect(url?.absoluteString == "https://example.com/embed/ai#handoff=h_AB-12")
+        #expect(url?.query == nil)
+        let config = ClientConfiguration(webOrigin: "https://example.com")
+        #expect(config.embedPage("billing", handoff: "h") == nil)
+        #expect(config.embedPage("ai", handoff: "") == nil)
+        #expect(config.embedPage("ai", handoff: "a&b=c") == nil)
+        #expect(ClientConfiguration(webOrigin: "http://evil.example").embedPage("ai", handoff: "h") == nil)
+    }
 }

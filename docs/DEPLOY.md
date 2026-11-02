@@ -24,11 +24,11 @@ Set these secrets on the corresponding Worker before deployment:
 | Worker | Required secrets |
 | --- | --- |
 | `unlispace-data-plane` | `ULS_JWT_PUBLIC_JWKS`, `ULS_BLOCK_KEY` |
-| `unlispace-api` | `ULS_JWT_PRIVATE_JWK`, `ULS_JWT_PUBLIC_JWKS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, `DODO_PRODUCTS`, `ULS_ACCESS_KEY_MASTERS` |
+| `unlispace-api` | `ULS_JWT_PRIVATE_JWK`, `ULS_JWT_PUBLIC_JWKS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, `DODO_PRODUCTS`, `ULS_ACCESS_KEY_MASTERS`, `MOONSHOT_API_KEY` |
 | `unlispace-s3` | `ULS_JWT_PRIVATE_JWK` |
 | `unlispace-web` | None |
 
-Set secrets with `wrangler secret put <NAME> --env production -c <config>`. API Google OAuth and Dodo values are optional in the runtime type but must be configured to enable those integrations.
+Set secrets with `wrangler secret put <NAME> --env production -c <config>`. API Google OAuth, Dodo and `MOONSHOT_API_KEY` values are optional in the runtime type but must be configured to enable those integrations. Without `MOONSHOT_API_KEY`, Ask AI shows as unavailable and `/ai/chat` returns `501`. Free-tier caps default to 50 requests and 100,000 tokens per user per UTC day; override with the `ULS_AI_DAILY_REQUESTS` and `ULS_AI_DAILY_TOKENS` vars.
 
 For S3 key creation, set API `ULS_ACCESS_KEY_MASTERS` to a JSON map of version characters to
 base64-encoded random master keys (each at least 32 bytes). `ULS_ACCESS_KEY_VERSION` selects

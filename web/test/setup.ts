@@ -15,6 +15,8 @@ beforeEach(() => {
   sessionStorage.clear();
   vi.stubGlobal("crypto", webcrypto);
   vi.stubGlobal("Blob", Blob);
+  // jsdom lacks ResizeObserver, which the chat conversation's stick-to-bottom scroller needs.
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal(
     "matchMedia",
     vi.fn(() => ({

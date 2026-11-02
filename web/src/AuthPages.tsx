@@ -1,6 +1,6 @@
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Link,
   Navigate,
@@ -380,4 +380,32 @@ export function Desktop() {
       </Button>
     </section>
   );
+}
+/** Session storage key the desktop app's WebView sets before load; never put in a URL. */
+export const EMBED_VERIFIER_KEY = "unlispace.embedVerifier";
+/**
+ * Entry point for the desktop app's embedded pages. The app passes a one-time handoff in the
+ * fragment and injects its PKCE verifier into session storage, then this signs in as that user.
+ */
+export function Embed({ children }: { children: ReactNode }) {
+  const { auth, user } = useAuth();
+  const started = useRef(false);
+  const [error, setError] = useState<unknown>();
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    const handoff = new URLSearchParams(window.location.hash.slice(1)).get("handoff");
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    const webCodeVerifier = sessionStorage.getItem(EMBED_VERIFIER_KEY);
+    sessionStorage.removeItem(EMBED_VERIFIER_KEY);
+    if (!handoff || !webCodeVerifier) {
+      if (!user) setError("Open Ask AI from the Unlispace app to sign in.");
+      return;
+    }
+    void publicPost<Session>("/auth/handoff/exchange", { handoff, webCodeVerifier })
+      .then((session) => auth.accept(session))
+      .catch(setError);
+  }, [auth, user]);
+  if (user) return <>{children}</>;
+  return error ? <ErrorNotice error={error} /> : <Loading>Signing you in…</Loading>;
 }

@@ -19,7 +19,7 @@ remain historical evidence; a reset installation is not assumed to retain their 
 | Drive creation | Workspace page creates drives through the existing role-checked API; My drives exposes New drive | Requires a signed-in real daemon and appropriate organization role |
 | Teams | Member list, invitations by email, explicit recipient acceptance, revoke/change/remove, seat reservations and final-owner protection; web and desktop navigation | Active paid Teams plan and configured email delivery required for invitations |
 | Billing | Desktop workspace links to the existing organization billing page using the API's configured web origin | Billing remains in the browser; payment provider configuration is required for checkout |
-| AI | Ask AI page supports an explicitly configured OpenAI-compatible endpoint, model and endpoint-scoped Keychain key, conversations, bounded UTF-8 attachment preview, send/cancel/reset | Provider/model/key must be configured by the user. Only chosen text is sent. No autonomous file tools or whole-drive RAG |
+| AI | Ask AI is one shadcn AI Elements chat (Conversation, Message, PromptInput, ModelSelector, Reasoning) in the web app at `/ai`, embedded in the Mac app through a WebView signed in by a one-time PKCE handoff. Managed Kimi K3 and K3.1 Pro models run on the Unlispace Moonshot key with a free per-user daily cap | Requires `MOONSHOT_API_KEY` on the API. Only typed text is sent. No file attachments, autonomous file tools or whole-drive RAG. "Sign in with ChatGPT" is deferred until OpenAI approves eligibility |
 | Transfer implementation | Hardware AES on Apple Silicon; release VFS journal lock before cloud reads; skip redundant cached-metadata journal fsyncs; reuse verified disk shards in bounded RAM cache; yield during large publication folds to keep SMB requests responsive | Signing remains enforced. Original hosted 50 MB/1 GB timings are not replaced by theoretical speed claims |
 | Desktop concurrency | Cancelled socket calls release their continuations, late responses are ignored, and request writes are serialized; workspace requests guard account changes | Cancelling a UI request cannot roll back a mutation already accepted by the server |
 
@@ -31,8 +31,7 @@ remain historical evidence; a reset installation is not assumed to retain their 
   No production deployment or billing/email mutation is part of the local validation.
 - Rebuild the daemon from `engine/` so its Cargo configuration enables runtime-detected ARM AES.
   Build an SMB-enabled daemon and bundle it with the macOS client.
-- In Ask AI, configure the complete chat-completions URL, model ID and API key. Keys stay in
-  this Mac's Keychain and are sent only to that exact endpoint; redirects are refused.
+- Ask AI uses managed Kimi models with a free daily allowance; no provider setup is needed.
 
 ## Validation
 

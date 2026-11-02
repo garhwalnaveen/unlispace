@@ -31,7 +31,9 @@ If `npm install` crashes with "edgesOut", install the devDependencies in groups.
 
 Vars in `wrangler.jsonc`: `ULS_ISSUER`, `ULS_DATA_ENDPOINT`, `ULS_WEB_ORIGIN` (local values; override for production).
 Secrets (`.dev.vars` locally, `wrangler secret put` in production): `ULS_JWT_PRIVATE_JWK`, `ULS_JWT_PUBLIC_JWKS`,
-optional `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (without them `/auth/google/*` is `501 not_configured`), `RESEND_API_KEY`.
+optional `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (without them `/auth/google/*` is `501 not_configured`), `RESEND_API_KEY`,
+optional `MOONSHOT_API_KEY` for managed Kimi inference at `GET /ai/models` and `POST /ai/chat` (AI SDK UI message stream;
+without it `/ai/chat` is `501`). Per-user daily caps: `ULS_AI_DAILY_REQUESTS` (default 50) and `ULS_AI_DAILY_TOKENS` (default 100000).
 M2 key secrets: `ULS_ACCESS_KEY_MASTERS` (JSON version → base64 master, each at least 32 bytes);
 `ULS_ACCESS_KEY_VERSION` selects the issuing version, default `1`.
 Billing: `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, explicit

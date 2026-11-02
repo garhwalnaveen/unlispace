@@ -31,7 +31,7 @@ struct WorkspaceView: View {
             case .offline: "Manage the files you want to keep on this Mac."
             case .search: "Find files and folders by name across a drive."
             case .workspace: "Create drives, manage your team, and review your plan."
-            case .ai: "Ask your configured provider about text you choose to share."
+            case .ai: "Chat with Kimi models managed by Unlispace."
             }
         }
     }
@@ -88,7 +88,7 @@ struct WorkspaceView: View {
                             .foregroundStyle(AppDesign.muted)
                     }
                     Divider().overlay(AppDesign.border)
-                    ConnectionNotice(model: model)
+                    if ConnectionNotice.hasContent(model) { ConnectionNotice(model: model) }
                     if page == .transfers {
                         TransfersView(transfers: model.transfers, uploads: model.uploads, recentUploads: model.recentUploads, state: model.status, embedded: true, available: !model.usingMock && (model.isSignedIn || model.hasDevToken))
                     } else if page == .offline {
@@ -101,7 +101,7 @@ struct WorkspaceView: View {
                         drives
                     }
                     if hasVisitedAI {
-                        AIView().id(model.account?.id)
+                        AIView(model: model).id(model.account?.id)
                             .frame(height: page == .ai ? nil : 0)
                             .clipped()
                             .disabled(page != .ai)
@@ -136,7 +136,8 @@ struct WorkspaceView: View {
 
     private var drives: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if model.isSignedIn || model.hasDevToken {
+            if (model.isSignedIn || model.hasDevToken) && !model.usingMock
+                && (model.uploads != nil || !model.transfers.isEmpty || model.status != .idle) {
                 HStack {
                     Label(model.connectionTitle, systemImage: model.symbolName)
                     Spacer()
@@ -144,6 +145,7 @@ struct WorkspaceView: View {
                 }
                 .padding(16).appPanel()
             }
+            if (model.isSignedIn || model.hasDevToken) && !model.usingMock && !model.drives.isEmpty {
             HStack {
                 Text("\(model.drives.count) drive\(model.drives.count == 1 ? "" : "s")")
                     .font(.callout).foregroundStyle(AppDesign.muted)
@@ -155,6 +157,7 @@ struct WorkspaceView: View {
                     .accessibilityLabel("Filter drives").focused($searchFocused)
                 Button("New drive…") { page = .workspace }.disabled(!model.isSignedIn || model.usingMock)
             }
+            }
             if !model.isSignedIn && !model.hasDevToken {
                 ContentUnavailableView {
                     Label("Your drives start here", systemImage: "externaldrive.badge.person.crop")
@@ -164,14 +167,17 @@ struct WorkspaceView: View {
                     Button(model.signingIn ? "Waiting for browser…" : "Sign in to Unlispace") { model.signIn() }
                         .buttonStyle(.borderedProminent).disabled(model.signingIn)
                     if model.signingIn {
-                    Button("Open browser") { model.openSignInBrowser() }
-                    Button("Cancel sign-in") { model.cancelSignIn() }
+                        Button("Open browser") { model.openSignInBrowser() }
+                        Button("Cancel sign-in") { model.cancelSignIn() }
+                    }
                 }
-                }
+                .frame(maxWidth: .infinity)
             } else if model.usingMock {
                 ContentUnavailableView("Waiting for the engine", systemImage: "externaldrive.badge.exclamationmark", description: Text("Your drives will appear when the engine connects. Use setup to get connected."))
+                    .frame(maxWidth: .infinity)
             } else if model.drives.isEmpty {
                 ContentUnavailableView("No drives yet", systemImage: "externaldrive", description: Text("Drives available to your account will appear here. Refresh to check again."))
+                    .frame(maxWidth: .infinity)
             } else {
                 let filtered = filter.apply(to: model.drives, query: query)
                 if filtered.isEmpty {
@@ -210,6 +216,11 @@ struct ConnectionNotice: View {
         default: "Open setup to connect the engine and choose your drives."
         }
     }
+    static func hasContent(_ model: AppModel) -> Bool {
+        model.usingMock || model.notice != nil || model.lastError != nil || model.lastConflict != nil
+            || model.stateMessage?.isEmpty == false || model.canRetrySignIn
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if model.usingMock {
@@ -260,7 +271,7 @@ struct DriveCard: View {
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 5) {
                 Text(drive.name).font(.system(size: 14, weight: .medium)).lineLimit(2)
-                Text(drive.mountState.rawValue.capitalized).font(.callout).foregroundStyle(AppDesign.muted)
+                Text(drive.mountState.label).font(.callout).foregroundStyle(AppDesign.muted)
                 if let path = drive.mountPath { Text(path).font(.caption).foregroundStyle(AppDesign.muted).textSelection(.enabled).lineLimit(2) }
                 if let mounts = model.mounts, let mount = mounts.first(where: { $0.driveId == drive.driveId }), mount.readOnly {
                     Text("Read only").font(.caption).foregroundStyle(AppDesign.muted)
@@ -272,7 +283,7 @@ struct DriveCard: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
-            if busy { ProgressView().controlSize(.small).accessibilityLabel(drive.mountState.rawValue) }
+            if busy { ProgressView().controlSize(.small).accessibilityLabel(drive.mountState.label) }
             if drive.mountState == .mounted {
                 Button("Open in Finder") { model.openInFinder(drive) }.disabled(drive.mountPath == nil).buttonStyle(.borderedProminent)
                 Button("Add a file…") { model.addFile(to: drive) }
@@ -291,7 +302,7 @@ struct DriveCard: View {
                         Button("Stop keeping \(pin.path) offline") { model.setPin(driveId: drive.driveId, path: pin.path, pinned: false) }
                     }
                 } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).fixedSize().help("Offline options for \(drive.name)")
+                .menuStyle(.button).menuIndicator(.hidden).fixedSize().help("Offline options for \(drive.name)")
                 .accessibilityLabel("Offline options for \(drive.name)").disabled(busy || model.usingMock)
             }
         }

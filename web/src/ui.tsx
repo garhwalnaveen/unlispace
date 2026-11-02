@@ -1,5 +1,5 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
-import { Monitor, Sun, Moon, HardDrive, UserRound, KeyRound, ChevronRight, Folder, File } from "lucide-react";
+import { Monitor, Sun, Moon, HardDrive, UserRound, KeyRound, ChevronRight, Folder, File, Sparkles } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { errorMessage } from "./api";
 
@@ -81,7 +81,7 @@ export function Modal({
     </Dialog>
   );
 }
-const icons = { monitor: Monitor, sun: Sun, moon: Moon, drive: HardDrive, user: UserRound, key: KeyRound, chevron: ChevronRight, folder: Folder, file: File };
+const icons = { monitor: Monitor, sun: Sun, moon: Moon, drive: HardDrive, user: UserRound, key: KeyRound, chevron: ChevronRight, folder: Folder, file: File, sparkles: Sparkles };
 export function Icon({ name }: { name: keyof typeof icons }) {
   const Component = icons[name];
   return <Component size={18} strokeWidth={1.75} aria-hidden="true" />;

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UnlispaceKit
 
 /// Shared neutral surfaces; system fonts, controls, and semantic status colors stay native.
 enum AppDesign {
@@ -38,8 +39,20 @@ extension View {
     func appStyle() -> some View {
         font(.system(size: 13))
             .foregroundStyle(AppDesign.foreground)
-            .tint(AppDesign.foreground)
             .buttonStyle(.bordered)
             .background(AppDesign.canvas)
+    }
+}
+
+extension MountState {
+    /// User-facing wording, matching the drive filter labels.
+    var label: String {
+        switch self {
+        case .unmounted: "Not mounted"
+        case .mounting: "Mounting…"
+        case .mounted: "Mounted"
+        case .unmounting: "Ejecting…"
+        case .error: "Needs attention"
+        }
     }
 }

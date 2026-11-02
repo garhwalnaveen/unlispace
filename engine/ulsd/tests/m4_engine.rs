@@ -107,6 +107,16 @@ fn readiness_route_is_allowed_get_only() {
 }
 
 #[test]
+fn web_handoff_route_is_allowed_post_only() {
+    assert!(allowed_api_request("POST", "/auth/web-handoff"));
+    assert!(!allowed_api_request("GET", "/auth/web-handoff"));
+    assert!(!allowed_api_request("POST", "/auth/refresh"));
+    assert!(!allowed_api_request("POST", "/auth/handoff/exchange"));
+    assert!(allowed_api_request("GET", "/ai/models"));
+    assert!(!allowed_api_request("POST", "/ai/chat"));
+}
+
+#[test]
 fn plan_capacity_is_read_per_drive_from_orgs() {
     let orgs = json!({"orgs":[
         {"id":"o1","quotaBytes":1000,"usedBytes":250,"drives":[{"id":"d1"},{"id":"d2"}]},

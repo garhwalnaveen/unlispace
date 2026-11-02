@@ -12,6 +12,7 @@ import * as R from "./resources";
 import * as K from "./access-keys";
 import * as B from "./billing";
 import * as T from "./teams";
+import * as AI from "./ai";
 import { authenticate, createSession, logout, refreshSession } from "./session";
 import { sha256B64url, timingSafeEqual } from "./util";
 import { findOrCreateUser } from "./users";
@@ -70,6 +71,14 @@ async function route(ctx: Ctx): Promise<Response> {
 				if (!user) throw new HttpError(400, "invalid_handoff");
 				return json(await createSession(ctx, user, !!row.payload?.created));
 			}
+			case "POST /auth/web-handoff": {
+				// A signed-in client (the desktop app) opens the web app as the same user. The web side
+				// proves possession of the verifier when it exchanges the handoff at /auth/handoff/exchange.
+				const a = await authenticate(ctx);
+				const ch = str((await readJson(req)).webChallenge, 128);
+				if (!ch || !/^[A-Za-z0-9_-]{43}$/.test(ch)) throw new HttpError(400, "bad_request", "webChallenge must be a base64url SHA-256 PKCE challenge");
+				return json({ handoff: await putOneTime(ctx, "handoff", 60_000, a.userId, { created: false, webChallenge: ch }) });
+			}
 			case "POST /auth/refresh": {
 				const t = str((await readJson(req)).refreshToken, 128);
 				if (!t) throw new HttpError(401, "invalid_refresh");
@@ -114,7 +123,7 @@ async function route(ctx: Ctx): Promise<Response> {
 	// ---- authenticated resources ----
 	const teamRoute = /^\/orgs\/[^/]+\/(members(\/[^/]+)?|invites(\/[^/]+)?)$/.test(p);
 	const acceptRoute = /^\/invites\/[^/]+\/accept$/.test(p);
-	const known = teamRoute || acceptRoute || p === "/me" || p === "/me/access" || p === "/orgs" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|deleted-drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork|restore))?)$/.test(p);
+	const known = teamRoute || acceptRoute || p === "/me" || p === "/me/access" || p === "/orgs" || p === "/ai/models" || p === "/ai/chat" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|deleted-drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork|restore))?)$/.test(p);
 	if (!known) throw new HttpError(404, "not_found");
 	const a = await authenticate(ctx);
 	if (acceptRoute) {
@@ -133,6 +142,9 @@ async function route(ctx: Ctx): Promise<Response> {
 		if (seg[3] === "checkout" && m === "POST") return B.checkout(ctx, a, seg[1]!);
 		if (seg[3] === "invoices" && m === "GET") return B.invoices(ctx, a, seg[1]!);
 		if (seg[3] === "portal" && m === "POST") return B.portal(ctx, a, seg[1]!);
+	} else if (seg[0] === "ai") {
+		if (p === "/ai/models" && m === "GET") return AI.models(ctx, a);
+		if (p === "/ai/chat" && m === "POST") return AI.chat(ctx, a);
 	} else if (p === "/me/access") {
 		if (m === "GET") return R.getMeAccess(ctx, a);
 	} else if (p === "/me") {

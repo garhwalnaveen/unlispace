@@ -1064,7 +1064,9 @@ pub fn allowed_api_request(method: &str, path: &str) -> bool {
     let parts: Vec<_> = path.split('/').skip(1).collect();
     if !path.starts_with('/') || parts.iter().any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')) { return false; }
     match parts.as_slice() {
-        ["orgs"] | ["client-config"] | ["me","access"] => method == "GET",
+        ["orgs"] | ["client-config"] | ["me","access"] | ["ai","models"] => method == "GET",
+        // Signs the desktop app's embedded web pages (Ask AI) in as the same user via PKCE handoff.
+        ["auth","web-handoff"] => method == "POST",
         ["keys"] => matches!(method,"GET"|"POST"),
         ["keys",_] => method == "DELETE",
         ["drives",_,"fork"] => method == "POST",

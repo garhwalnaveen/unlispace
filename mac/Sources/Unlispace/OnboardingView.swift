@@ -114,13 +114,13 @@ struct OnboardingView: View {
                 }
                 if let message = model.stateMessage { Text(message).font(.callout).foregroundStyle(AppDesign.muted) }
             }
-                if model.signingIn {
-                    ProgressView("Waiting for your browser…").controlSize(.small)
-                    HStack(spacing: 16) {
-                        Button("Open browser again") { model.openSignInBrowser() }
-                        Button("Cancel sign-in") { model.cancelSignIn() }
-                    }
+            if model.signingIn {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Waiting for your browser…").foregroundStyle(AppDesign.muted) }
+                HStack(spacing: 16) {
+                    Button("Open browser again") { model.openSignInBrowser() }
+                    Button("Cancel sign-in") { model.cancelSignIn() }
                 }
+            }
         }.frame(maxWidth: .infinity)
     }
 
@@ -150,7 +150,7 @@ struct OnboardingView: View {
                 Text("The tools you need to keep work moving, together in Unlispace.")
                     .font(.system(size: 17)).foregroundStyle(AppDesign.muted).lineSpacing(5)
             }.frame(maxWidth: 275, alignment: .leading)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .top), GridItem(.flexible(), alignment: .top)], spacing: 16) {
                 feature("Your drives", "Keep projects together in Finder.", "externaldrive.fill")
                 feature("Search files", "Find files by name in a drive.", "magnifyingglass")
                 feature("Transfers", "Follow uploads and retry failures.", "arrow.up.arrow.down")
@@ -313,7 +313,8 @@ struct OnboardingView: View {
 
     private func feature(_ title: String, _ detail: String, _ symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 28, weight: .light)).padding(.bottom, 6)
+            Image(systemName: symbol).font(.system(size: 28, weight: .light))
+                .frame(height: 34, alignment: .leading).padding(.bottom, 6).accessibilityHidden(true)
             Text(title).font(.system(size: 15, weight: .semibold))
             Text(detail).font(.system(size: 12)).foregroundStyle(AppDesign.muted).fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)

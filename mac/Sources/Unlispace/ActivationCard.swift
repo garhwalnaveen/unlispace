@@ -32,7 +32,7 @@ struct ActivationCard: View {
                         HStack(alignment: .top, spacing: 20) { readiness }
                         VStack(alignment: .leading, spacing: 8) { readiness }
                     }
-                    if loading { ProgressView("Checking storage…").controlSize(.small) }
+                    if loading { HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Checking storage…").foregroundStyle(AppDesign.muted) } }
                     if let error { Text(error).font(.callout).foregroundStyle(AppDesign.muted) }
                     HStack {
                         Button("Refresh setup status") {
@@ -49,7 +49,7 @@ struct ActivationCard: View {
                     }
                     Text("Use Add a file above or copy a file in Finder. Your original stays in place. Follow its upload in Transfers to confirm it is saved to cloud.")
                         .font(.callout).foregroundStyle(AppDesign.muted)
-                    if model.copyingFile { ProgressView("Copying selected file…").controlSize(.small) }
+                    if model.copyingFile { HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Copying selected file…").foregroundStyle(AppDesign.muted) } }
                     if model.activation.cloudSaveConfirmed {
                         Text("One upload is confirmed. This does not mean every file is synced or available offline.")
                             .font(.caption).foregroundStyle(AppDesign.muted)

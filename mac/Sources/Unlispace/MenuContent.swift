@@ -33,10 +33,7 @@ struct MenuContent: View {
             } else {
                 if let acct = model.account { Text(acct.email) }
                 Text(model.connectionTitle)
-                if model.usingMock { Text("Engine not running") }
-                if model.status == .engineMissing || model.engineInstall == .notInstalled && !model.usingMock {
-                    Text("Engine not installed")
-                }
+                if model.usingMock { Text(model.engineInstall == .notInstalled ? "Engine not installed" : "Engine not running") }
                 if let n = model.notice { Text(n).lineLimit(3) }
                 Button(model.transferLine ?? "Transfers") { showingTransfers.toggle() }
                     .accessibilityLabel("Show transfers")
@@ -56,7 +53,7 @@ struct MenuContent: View {
                     Text("No drives")
                 }
                 ForEach(model.drives) { d in
-                    Menu("\(d.name) — \(d.mountState.rawValue)") {
+                    Menu("\(d.name) — \(d.mountState.label)") {
                         if let mounts = model.mounts,
                            let mount = mounts.first(where: { $0.driveId == d.driveId }) {
                             Text("\(mount.mountpoint) (\(mount.adapter)\(mount.readOnly ? ", read only" : ""))")
@@ -81,7 +78,7 @@ struct MenuContent: View {
                         }
                     }
                     .disabled(model.usingMock || model.isDriveBusy(d))
-                    .accessibilityLabel("\(d.name), \(d.mountState.rawValue), drive actions")
+                    .accessibilityLabel("\(d.name), \(d.mountState.label), drive actions")
                 }
             }
             Divider()

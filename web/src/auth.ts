@@ -162,6 +162,10 @@ export class AuthStore {
   }
   retry = () => this.refresh(this.memory?.accessToken);
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return readResponse<T>(await this.fetch(path, init));
+  }
+  /** Authenticated fetch that returns the raw response, for streaming endpoints. */
+  async fetch(path: string, init: RequestInit = {}): Promise<Response> {
     if (!this.memory || this.memory.expiresAt <= Date.now() + 60_000)
       await this.refresh();
     const rejectedToken = this.memory?.accessToken;
@@ -178,7 +182,7 @@ export class AuthStore {
       await this.refresh(rejectedToken);
       response = await send();
     }
-    return readResponse<T>(response);
+    return response;
   }
   async logout() {
     // Logout and rotation share a lock so logout always revokes the latest refresh token.

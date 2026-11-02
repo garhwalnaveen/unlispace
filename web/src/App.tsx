@@ -1,5 +1,5 @@
 import { Button } from "./components/ui/button";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import {
   Link,
   NavLink,
@@ -9,7 +9,7 @@ import {
   Routes,
   useLocation,
 } from "react-router-dom";
-import { Callback, Desktop, Login } from "./AuthPages";
+import { Callback, Desktop, Embed, Login } from "./AuthPages";
 import { useAuth } from "./context";
 import { DriveBrowser } from "./DriveBrowser";
 import { Home } from "./Home";
@@ -18,6 +18,8 @@ import { Billing } from "./Billing";
 import { AcceptInvitation, TeamPage } from "./Team";
 import { Settings } from "./Settings";
 import { ErrorNotice, Icon, Loading } from "./ui";
+// The chat UI (markdown renderer, AI SDK) is large, so it loads only when Ask AI opens.
+const AskAI = lazy(() => import("./AskAI").then((m) => ({ default: m.AskAI })));
 function Protected() {
   const { user } = useAuth();
   const location = useLocation();
@@ -34,6 +36,8 @@ export function App() {
   const { auth, ready, user, error } = useAuth();
   const location = useLocation();
   const authPage = ["/login", "/auth/callback", "/desktop"].includes(location.pathname);
+  // Pages embedded in the desktop app render without the web chrome; the app supplies its own.
+  const embedded = location.pathname.startsWith("/embed/");
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem("unlispace.theme");
     return saved === "light" || saved === "dark" ? saved : "system";
@@ -52,6 +56,17 @@ export function App() {
   useEffect(() => {
     document.getElementById("main")?.focus({ preventScroll: true });
   }, [location.pathname]);
+  const askAI = <Suspense fallback={<Loading>Loading Ask AI…</Loading>}><AskAI /></Suspense>;
+  if (embedded)
+    return (
+      <main id="main" className="embedded" tabIndex={-1}>
+        {!ready ? <Loading>Loading your account…</Loading> : (
+          <Routes>
+            <Route path="/embed/ai" element={<Embed>{askAI}</Embed>} />
+          </Routes>
+        )}
+      </main>
+    );
   return (
     <div className={`app ${user && !authPage ? "workspace" : "welcome"}`}>
       <a className="skip-link" href="#main">
@@ -83,6 +98,7 @@ export function App() {
         <aside className="sidebar">
           <nav aria-label="Main navigation">
             <NavLink to="/" end className={location.pathname.startsWith("/drives/") ? "active" : undefined}><Icon name="drive" />Your drives</NavLink>
+            <NavLink to="/ai"><Icon name="sparkles" />Ask AI</NavLink>
             <NavLink to="/settings" end><Icon name="user" />Account</NavLink>
             <NavLink to="/settings/access-keys"><Icon name="key" />Access keys</NavLink>
           </nav>
@@ -112,6 +128,7 @@ export function App() {
             <Route element={<Protected />}>
               <Route path="/" element={<Home />} />
               <Route path="/drives/:id/*" element={<DriveBrowser />} />
+              <Route path="/ai" element={askAI} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/access-keys" element={<AccessKeys />} />
               <Route path="/orgs/:id/billing" element={<Billing />} />

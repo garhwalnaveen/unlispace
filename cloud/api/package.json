@@ -16,5 +16,9 @@
     "typescript": "5.9.3",
     "vitest": "4.1.12",
     "wrangler": "4.152.0"
+  },
+  "dependencies": {
+    "@ai-sdk/moonshotai": "3.0.82",
+    "ai": "7.0.159"
   }
 }

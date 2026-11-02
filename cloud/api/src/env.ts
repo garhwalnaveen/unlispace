@@ -39,4 +39,9 @@ export interface AppEnv {
 	DODO_PRODUCTS?: string;
 	/** Optional JSON, same shape as DODO_PRODUCTS, with {"amount": minor units, "currency": "USD"} per product. Never invented; absent means no price is shown. */
 	DODO_PRICES?: string;
+	/** Moonshot API key for managed Kimi inference; absent means /ai/chat returns 501. */
+	MOONSHOT_API_KEY?: string;
+	/** Free-tier caps per user per UTC day (defaults 50 requests, 100000 tokens). */
+	ULS_AI_DAILY_REQUESTS?: string;
+	ULS_AI_DAILY_TOKENS?: string;
 }

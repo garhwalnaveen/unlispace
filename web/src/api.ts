@@ -265,6 +265,7 @@ export function errorMessage(error: unknown): string {
       fork_depth_exceeded: "This drive has reached the maximum fork depth of 8.",
       slow_down: "The drive is busy. Please try forking again shortly.",
       over_quota: "Your organization is over its storage quota. Writes are paused; existing files remain readable. Delete data or add storage in Billing.",
+      ai_quota_exceeded: "You have used today's free AI allowance. It resets at midnight UTC.",
       plan_limit:
         "Your Individual plan includes one drive. Additional drives require a Teams plan.",
       invalid_code:

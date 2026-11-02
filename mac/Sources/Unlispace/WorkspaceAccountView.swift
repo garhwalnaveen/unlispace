@@ -17,9 +17,10 @@ struct WorkspaceAccountView: View {
     private var loadKey: String { "\(identity)|\(revision)" }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Manage your drives, team, and plan. Team and billing open in your browser, where you may need to sign in.").foregroundStyle(AppDesign.muted)
+            Text("Team and billing open in your browser, where you may need to sign in.").font(.callout).foregroundStyle(AppDesign.muted)
             if !model.isSignedIn || model.usingMock {
                 ContentUnavailableView("Connect your account", systemImage: "person.crop.circle", description: Text("Sign in and connect the engine to manage drives and your workspace."))
+                    .frame(maxWidth: .infinity)
             } else {
                 if let email = model.account?.email {
                     HStack {

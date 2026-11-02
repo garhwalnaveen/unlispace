@@ -73,4 +73,16 @@ public struct ClientConfiguration: Decodable, Sendable {
               !orgId.isEmpty, orgId.utf8.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 45 || $0 == 95 }) else { return nil }
         return url.appendingPathComponent("orgs").appendingPathComponent(orgId).appendingPathComponent(section)
     }
+
+    /// An embedded web page (`/embed/<page>`) with a one-time handoff in the fragment, which never reaches servers or logs.
+    public func embedPage(_ page: String, handoff: String) -> URL? {
+        guard let url = AppSettings.validateEndpoint(webOrigin), url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil, url.path == "" || url.path == "/",
+              ["ai"].contains(page),
+              !handoff.isEmpty, handoff.utf8.count <= 256,
+              handoff.utf8.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 45 || $0 == 95 }),
+              var parts = URLComponents(url: url.appendingPathComponent("embed").appendingPathComponent(page), resolvingAgainstBaseURL: false) else { return nil }
+        parts.fragment = "handoff=\(handoff)"
+        return parts.url
+    }
 }

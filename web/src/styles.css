@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@source "../node_modules/streamdown/dist/*.js";
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme inline {
@@ -15,6 +16,10 @@
   --color-border: var(--border);
   --color-input: var(--border);
   --color-ring: var(--ring);
+  --color-popover: var(--background);
+  --color-popover-foreground: var(--foreground);
+  --color-secondary: var(--muted);
+  --color-secondary-foreground: var(--foreground);
 }
 
 :root {
@@ -143,6 +148,13 @@ main { max-width: 1088px; margin: auto; padding: 32px; }
 .file-table-head { border: 0; min-height: 36px; font-size: 12px; color: var(--muted-foreground); }
 .file-name { display: flex; align-items: center; min-width: 0; gap: 10px; overflow-wrap: anywhere; }
 .file-icon { display: inline-flex; flex-shrink: 0; color: var(--muted-foreground); }
+.ask-ai { display: flex; flex-direction: column; gap: 12px; height: calc(100dvh - 60px - 64px); min-height: 420px; }
+.ask-ai .page-heading { margin-bottom: 0; }
+main.embedded { max-width: none; padding: 16px; }
+main.embedded .ask-ai { height: calc(100dvh - 32px); min-height: 0; }
+.ask-ai-conversation { border: 1px solid var(--border); border-radius: 8px; min-height: 0; }
+.ask-ai-user-text { white-space: pre-wrap; margin: 0; }
+.ask-ai > p.small { margin: 0; }
 .load-more { display: flex; margin: 20px auto 0; }
 .detail-layout { display: grid; gap: 24px; grid-template-columns: minmax(0, 620px); }
 .detail-layout.with-history { grid-template-columns: repeat(2, minmax(0, 1fr)); }

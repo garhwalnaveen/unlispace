@@ -90,4 +90,23 @@ function DialogTitle({
   )
 }
 
-export { Dialog, DialogContent, DialogHeader, DialogTitle }
+function DialogTrigger({
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
+  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
+}
+
+function DialogDescription({
+  className,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Description>) {
+  return (
+    <DialogPrimitive.Description
+      data-slot="dialog-description"
+      className={cn("text-sm text-muted-foreground", className)}
+      {...props}
+    />
+  )
+}
+
+export { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger }
