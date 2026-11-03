@@ -1,4 +1,5 @@
 import { Input } from "./components/ui/input";
+import { NativeSelect } from "./components/ui/native-select";
 import { Button } from "./components/ui/button";
 import { useCallback, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -8,6 +9,7 @@ import { downloadFile, MAX_WEB_DOWNLOAD } from "./download";
 import { driveLink, finderLink } from "./links";
 import {
   ErrorNotice,
+  Icon,
   FileIcon,
   formatBytes,
   formatDate,
@@ -48,17 +50,22 @@ function Breadcrumbs({ drive, path }: { drive: Drive; path: string }) {
 }
 function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | null; path: string }) {
   const listing = useListing(api, path);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("name");
+  const entries = useMemo(() => listing.entries
+    .filter((entry) => entry.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+      return (sort === "modified" ? b.mtimeMs - a.mtimeMs : sort === "size" ? b.size - a.size : 0) || a.name.localeCompare(b.name);
+    }), [listing.entries, query, sort]);
   const content = (
     <>
-      <div className="section-heading folder-toolbar">
-        <p className="muted small">
-          {listing.entries.length} item{listing.entries.length === 1 ? "" : "s"}
-          {listing.cursor ? " loaded" : ""}
-        </p>
-        <Button disabled={listing.loading} onClick={listing.reload}>
-          Refresh folder
-        </Button>
+      <div className="folder-toolbar">
+        <div className="search-field"><Icon name="search" /><Input aria-label="Filter loaded items" placeholder="Filter loaded items…" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+        <div className="folder-toolbar-actions"><NativeSelect aria-label="Sort loaded items" value={sort} onChange={(event) => setSort(event.target.value)}><option value="name">Name (A–Z)</option><option value="modified">Recently modified</option><option value="size">Largest first</option></NativeSelect>
+        <Button disabled={listing.loading} onClick={listing.reload}><Icon name="refresh" />Refresh folder</Button></div>
       </div>
+      <div className="listing-caption"><p className="muted small" role="status">{query.trim() ? `${entries.length} matching · ` : ""}{listing.entries.length} item{listing.entries.length === 1 ? "" : "s"}{listing.cursor ? " loaded" : ""}</p><span className="muted small">Folders first</span></div>
       <ErrorNotice error={listing.error} />
       {Boolean(listing.error) && !listing.entries.length && (
         <Button onClick={listing.reload}>Try again</Button>
@@ -70,7 +77,7 @@ function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | n
           <span>Modified</span>
         </div>
         <ul aria-label="Files and folders">
-          {listing.entries.map((entry) => {
+          {entries.map((entry) => {
             const name = entry.name.replace(/\/$/, "");
             const entryPath =
               path + name + (entry.type === "folder" ? "/" : "");
@@ -97,9 +104,10 @@ function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | n
             );
           })}
         </ul>
+        {!listing.loading && !listing.error && listing.entries.length > 0 && !entries.length && <div className="empty"><span className="empty-symbol"><Icon name="search" /></span><h2>No matching files</h2><p>No loaded items match this filter.{listing.cursor ? " Load more items to search further." : " Try a different name."}</p><Button onClick={() => setQuery("")}>Clear filter</Button></div>}
         {!listing.loading && !listing.error && !listing.entries.length && (
           <div className="empty">
-            <FileIcon folder />
+            <span className="empty-symbol"><FileIcon folder /></span>
             <h2>No files yet</h2>
             <p>{writeApi ? "This folder is empty. Drop files here to get started." : "This folder is empty."}</p>
           </div>
@@ -378,11 +386,13 @@ function DriveContents({
       <Breadcrumbs drive={drive} path={path} />
       <header className="page-heading browser-heading">
         <div>
+          <p className="eyebrow">{path ? drive.name : "Drive"}</p>
           <h1>{title}</h1>
+          <p className="muted small">{path && !path.endsWith("/") ? "File information and version history" : "All your files, organized and ready to work."}</p>
         </div>
-        <Button asChild><a href={finderLink(drive.id, path)}>
-          Show in Finder
-        </a></Button>
+        <div className="actions"><span className="access-badge"><Icon name={writeApi ? "drive" : "key"} />{writeApi ? "Read & write" : "Read only"}</span><Button asChild><a href={finderLink(drive.id, path)}>
+          Show in Finder <Icon name="external" />
+        </a></Button></div>
       </header>
       <ErrorNotice error={error} />
       {Boolean(error) && <Button onClick={reload}>Try again</Button>}

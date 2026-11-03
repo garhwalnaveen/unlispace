@@ -6,59 +6,95 @@ struct WorkspaceView: View {
     @State private var page: Page? = .drives
     @State private var query = ""
     @State private var filter: DriveFilter = .all
-    @State private var showSearch = true
-    @State private var showOffline = false
+    @State private var showSearch = false
     @State private var searchRequest = 0
     @AppStorage("settingsPage") private var settingsPage = "General"
     @AppStorage("appearance") private var appearance = "dark"
     @Environment(\.openSettings) private var openSettings
 
     private enum Page: String, CaseIterable, Identifiable {
-        case drives = "Files", transfers = "Activity"
+        case drives = "Files", transfers = "Activity", offline = "Offline files"
         var id: Self { self }
-        var symbol: String { self == .drives ? "externaldrive" : "arrow.up.arrow.down" }
+        var symbol: String {
+            switch self {
+            case .drives: "externaldrive"
+            case .transfers: "arrow.up.arrow.down"
+            case .offline: "arrow.down.circle"
+            }
+        }
         var subtitle: String {
-            self == .drives ? "Open a drive in Finder to work with your files." : "Follow files as they move between your Mac and your drives."
+            switch self {
+            case .drives: "Your cloud drives, at home on your Mac."
+            case .transfers: "Follow your saves, uploads, and downloads in one place."
+            case .offline: "Choose what stays on this Mac, even without a connection."
+            }
         }
     }
 
     var body: some View {
         NavigationSplitView {
-            VStack(alignment: .leading, spacing: 12) {
-                Label { Text("Orbit") } icon: { OrbitMark() }
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppDesign.foreground)
-                    .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 8)
-                List(selection: $page) {
-                    ForEach(Page.allCases) { item in
-                        Label {
-                            Text(item.rawValue).foregroundStyle(page == item ? .white : AppDesign.foreground)
-                        } icon: {
-                            Image(systemName: item.symbol).foregroundStyle(page == item ? .white : AppDesign.muted)
-                        }.tag(item).padding(.vertical, 5)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    OrbitMark(size: 27)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Orbit").font(.system(size: 18, weight: .semibold))
+                        Text("YOUR WORKSPACE").font(.system(size: 9, weight: .semibold)).tracking(1.3)
+                            .foregroundStyle(AppDesign.muted)
                     }
+                }.padding(22)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            navigationHeading("Workspace")
+                            navigationRow(.drives)
+                            navigationRow(.transfers)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            navigationHeading("On this Mac")
+                            navigationRow(.offline)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 10)
                 }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(model.connectionTitle, systemImage: model.symbolName).font(.callout).foregroundStyle(AppDesign.foreground)
-                    Text(model.account?.email ?? "Sign in to connect your drives.")
-                        .font(.caption).foregroundStyle(AppDesign.muted).lineLimit(2)
-                    Button("Settings…") { openSettings() }.keyboardShortcut(",")
+                .frame(maxHeight: .infinity)
+                VStack(alignment: .leading, spacing: 14) {
+                    Label(model.connectionTitle, systemImage: model.symbolName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(AppDesign.muted)
+                    Button {
+                        settingsPage = "Account"; openSettings()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "person.crop.circle.fill").font(.system(size: 28))
+                                .foregroundStyle(AppDesign.muted)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(model.isSignedIn ? "Your account" : "Welcome to Orbit")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text(model.account?.email ?? "Sign in to get started")
+                                    .font(.caption).foregroundStyle(AppDesign.muted).lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(AppDesign.muted)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain).help("Account settings")
+                    Button { openSettings() } label: { Label("Settings", systemImage: "gearshape") }
+                        .keyboardShortcut(",").frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
                 .background(alignment: .top) { Divider().overlay(AppDesign.border) }
             }
-            .background(AppDesign.surface)
-            .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 260)
+            .background(AppDesign.sidebar)
+            .navigationSplitViewColumnWidth(min: 210, ideal: 224, max: 260)
         } detail: {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: AppDesign.sectionSpacing) {
                     HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text((page ?? .drives).rawValue).font(AppDesign.title).tracking(-0.6)
+                            Text("WORKSPACE / \((page ?? .drives).rawValue.uppercased())")
+                                .font(.system(size: 10, weight: .semibold)).tracking(1.1).foregroundStyle(AppDesign.muted)
+                            Text((page ?? .drives).rawValue).font(AppDesign.title).tracking(-0.8)
                                 .accessibilityAddTraits(.isHeader)
                             Text((page ?? .drives).subtitle)
                                 .foregroundStyle(AppDesign.muted)
@@ -72,6 +108,8 @@ struct WorkspaceView: View {
                     if ConnectionNotice.hasContent(model) { ConnectionNotice(model: model) }
                     if page == .transfers {
                         TransfersView(transfers: model.transfers, uploads: model.uploads, recentUploads: model.recentUploads, state: model.status, embedded: true, available: !model.usingMock && (model.isSignedIn || model.hasDevToken))
+                    } else if page == .offline {
+                        OfflineFilesView(model: model)
                     } else {
                         drives {
                             if searchRequest > 0 {
@@ -107,6 +145,7 @@ struct WorkspaceView: View {
             Group {
                 Button("Files") { page = .drives }.keyboardShortcut("1")
                 Button("Activity") { page = .transfers }.keyboardShortcut("2")
+                Button("Offline files") { page = .offline }.keyboardShortcut("3")
                 Button("Search filenames") { page = .drives; showSearch = true; searchRequest += 1 }.keyboardShortcut("f")
             }.hidden().accessibilityHidden(true)
         }
@@ -114,6 +153,41 @@ struct WorkspaceView: View {
         .frame(minWidth: 800, minHeight: 580)
         .appStyle()
         .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+    }
+
+    private func navigationHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(AppDesign.muted)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func navigationRow(_ item: Page) -> some View {
+        Button { page = item } label: {
+            HStack(spacing: 10) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 16))
+                    .frame(width: 20)
+                    .foregroundStyle(page == item ? AppDesign.foreground : AppDesign.muted)
+                Text(item.rawValue)
+                    .font(.system(size: 13, weight: page == item ? .semibold : .regular))
+                    .foregroundStyle(AppDesign.foreground)
+                Spacer(minLength: 0)
+                if item == .drives && !model.usingMock && !model.drives.isEmpty {
+                    Text("\(model.drives.count)")
+                        .font(.caption).monospacedDigit()
+                        .foregroundStyle(AppDesign.muted)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .background(page == item ? AppDesign.subtle : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(page == item ? .isSelected : [])
+        .help(item.rawValue)
     }
 
     private func drives(onAppear: @escaping () -> Void) -> some View {
@@ -129,15 +203,27 @@ struct WorkspaceView: View {
                 .padding(16).appPanel()
             }
             if (model.isSignedIn || model.hasDevToken) && !model.usingMock && !model.drives.isEmpty {
-                DisclosureGroup("Search filenames", isExpanded: $showSearch) {
-                    FileSearchView(model: model, searchRequest: $searchRequest).padding(.top, 12)
-                }.id("filenameSearch").onAppear(perform: onAppear)
-            }
-            if (model.isSignedIn || model.hasDevToken) && !model.usingMock && model.drives.count > 1 {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 16) { driveFilters; Spacer(minLength: 0); driveCount }
-                    VStack(alignment: .leading, spacing: 12) { driveFilters; driveCount }
-                }
+                HStack(spacing: 0) {
+                    workspaceMetric("Connected drives", value: "\(model.drives.count)", symbol: "externaldrive")
+                    Divider().frame(height: 40)
+                    workspaceMetric("Mounted", value: "\(model.drives.filter { $0.mountState == .mounted }.count)", symbol: "checkmark.circle")
+                    Divider().frame(height: 40)
+                    workspaceMetric("Kept offline", value: model.pins.map { "\($0.count)" } ?? "—", symbol: "arrow.down.circle")
+                }.padding(.vertical, 18).appPanel()
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("Your drives").font(.system(size: 16, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                        driveCount
+                        Spacer()
+                        Button { showSearch = true; searchRequest += 1 } label: { Label("Find a file", systemImage: "magnifyingglass") }
+                    }
+                    if model.drives.count > 1 {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 12) { driveFilters; Spacer(minLength: 0) }
+                            VStack(alignment: .leading, spacing: 12) { driveNameFilter; driveStateFilter }
+                        }
+                    }
+                }.padding(.top, 6)
             }
             if !model.isSignedIn && !model.hasDevToken {
                 ContentUnavailableView {
@@ -160,7 +246,7 @@ struct WorkspaceView: View {
                 ContentUnavailableView("No drives yet", systemImage: "externaldrive", description: Text("Drives available to your account will appear here. Refresh to check again."))
                     .frame(maxWidth: .infinity)
             } else {
-                let filtered = model.drives.count > 1 ? filter.apply(to: model.drives, query: query) : model.drives
+                let filtered = filteredDrives
                 if filtered.isEmpty {
                     ContentUnavailableView {
                         Label("No matching drives", systemImage: "line.3.horizontal.decrease.circle")
@@ -173,7 +259,7 @@ struct WorkspaceView: View {
                 if !filtered.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(filtered) { drive in
-                            if drive.id != filtered.first?.id { Divider().padding(.leading, 54) }
+                            if drive.id != filtered.first?.id { Divider().overlay(AppDesign.border).padding(.horizontal, 20) }
                             DriveCard(model: model, drive: drive)
                         }
                     }
@@ -182,27 +268,55 @@ struct WorkspaceView: View {
             }
             if let message = model.copyMessage { Text(message).font(.callout).textSelection(.enabled).accessibilityAddTraits(.updatesFrequently) }
             if (model.isSignedIn || model.hasDevToken) && !model.usingMock && !model.drives.isEmpty {
-                DisclosureGroup("Offline files", isExpanded: $showOffline) {
-                    OfflineFilesView(model: model).padding(.top, 12)
+                DisclosureGroup(isExpanded: $showSearch) {
+                    FileSearchView(model: model, searchRequest: $searchRequest).padding(.top, 16)
+                } label: {
+                    Label("Search filenames", systemImage: "magnifyingglass").font(.system(size: 13, weight: .semibold))
                 }
+                .padding(18).appPanel().id("filenameSearch").onAppear(perform: onAppear)
             }
             if model.isSignedIn { ActivationCard(model: model) }
         }
     }
 
+    private func workspaceMetric(_ title: String, value: String, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: symbol).font(.system(size: 11)).foregroundStyle(AppDesign.muted)
+            Text(value).font(.system(size: 24, weight: .semibold)).monospacedDigit()
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20)
+            .accessibilityElement(children: .combine)
+    }
+
+    private var filteredDrives: [DriveInfo] {
+        model.drives.count > 1 ? filter.apply(to: model.drives, query: query) : model.drives
+    }
+
     private var driveCount: some View {
-        Text("\(model.drives.count) drive\(model.drives.count == 1 ? "" : "s")")
-            .font(.callout).foregroundStyle(AppDesign.muted).fixedSize()
+        Text("\(filteredDrives.count) of \(model.drives.count)")
+            .font(.caption).monospacedDigit().foregroundStyle(AppDesign.muted).fixedSize()
+            .accessibilityLabel("\(filteredDrives.count) of \(model.drives.count) drives shown")
     }
 
     private var driveFilters: some View {
+        HStack(spacing: 12) { driveNameFilter; driveStateFilter }
+    }
+
+    private var driveNameFilter: some View {
         HStack(spacing: 8) {
-            TextField("Filter drives", text: $query).textFieldStyle(.roundedBorder).frame(width: 200)
+            Image(systemName: "magnifyingglass").foregroundStyle(AppDesign.muted).accessibilityHidden(true)
+            TextField("Filter drive names", text: $query).textFieldStyle(.plain)
                 .accessibilityLabel("Filter drives")
-            Picker("Show drives", selection: $filter) {
-                ForEach(DriveFilter.allCases) { Text($0.rawValue).tag($0) }
-            }.labelsHidden().frame(width: 140).accessibilityLabel("Show drives")
-        }
+            if !query.isEmpty {
+                Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).accessibilityLabel("Clear drive name filter")
+            }
+        }.padding(9).frame(minWidth: 150, idealWidth: 210, maxWidth: 260).appPanel()
+    }
+
+    private var driveStateFilter: some View {
+        Picker("Show drives", selection: $filter) {
+            ForEach(DriveFilter.allCases) { Text($0.rawValue).tag($0) }
+        }.labelsHidden().frame(width: 145).accessibilityLabel("Show drives")
     }
 }
 
@@ -258,20 +372,24 @@ struct DriveCard: View {
             HStack(spacing: 16) { identity; Spacer(minLength: 16); actions }
             VStack(alignment: .leading, spacing: 16) {
                 identity
-                actions.padding(.leading, 40)
+                actions.padding(.leading, 62)
             }
         }
-        .padding(16)
+        .padding(20)
     }
 
     private var identity: some View {
         HStack(spacing: 14) {
-            Image(systemName: "externaldrive").font(.title2).foregroundStyle(AppDesign.muted)
-                .frame(width: 26)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(drive.name).font(.system(size: 14, weight: .medium)).lineLimit(2)
-                Text(drive.mountState.label).font(.callout).foregroundStyle(AppDesign.muted)
-                if let path = drive.mountPath { Text(path).font(.caption).foregroundStyle(AppDesign.muted).textSelection(.enabled).lineLimit(2) }
+            Image(systemName: "externaldrive.fill").font(.system(size: 23)).foregroundStyle(AppDesign.accent)
+                .frame(width: 48, height: 48).background(AppDesign.subtle, in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(drive.name).font(.system(size: 14, weight: .semibold)).lineLimit(2)
+                DriveStatusBadge(state: drive.mountState)
+                if let path = drive.mountPath {
+                    Text(path).font(.system(size: 11)).foregroundStyle(AppDesign.muted)
+                        .textSelection(.enabled).lineLimit(1).truncationMode(.middle).help(path)
+                }
                 if let mounts = model.mounts, let mount = mounts.first(where: { $0.driveId == drive.driveId }), mount.readOnly {
                     Text("Read only").font(.caption).foregroundStyle(AppDesign.muted)
                 }

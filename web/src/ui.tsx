@@ -1,20 +1,22 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
-import { Monitor, Sun, Moon, HardDrive, UserRound, KeyRound, ChevronRight, Folder, File, Sparkles } from "lucide-react";
+import { Monitor, Sun, Moon, HardDrive, UserRound, KeyRound, ChevronRight, Folder, File, Sparkles, Menu, X, Search, RefreshCw, ArrowUpRight, Plus, AlertCircle, LoaderCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { errorMessage } from "./api";
 
 export function ErrorNotice({ error }: { error: unknown }) {
   return error ? (
-    <p className="notice error" role="alert" aria-live="assertive">
-      {typeof error === "string" ? error : errorMessage(error)}
-    </p>
+    <div className="notice error" role="alert" aria-live="assertive">
+      <AlertCircle size={18} aria-hidden="true" />
+      <span>{typeof error === "string" ? error : errorMessage(error)}</span>
+    </div>
   ) : null;
 }
 export function Loading({ children = "Loading…" }: { children?: ReactNode }) {
   return (
-    <p className="muted" role="status">
-      {children}
-    </p>
+    <div className="loading-state muted" role="status">
+      <LoaderCircle className="loading-spinner" size={18} aria-hidden="true" />
+      <span>{children}</span>
+    </div>
   );
 }
 export function formatBytes(bytes: number): string {
@@ -81,7 +83,7 @@ export function Modal({
     </Dialog>
   );
 }
-const icons = { monitor: Monitor, sun: Sun, moon: Moon, drive: HardDrive, user: UserRound, key: KeyRound, chevron: ChevronRight, folder: Folder, file: File, sparkles: Sparkles };
+const icons = { monitor: Monitor, sun: Sun, moon: Moon, drive: HardDrive, user: UserRound, key: KeyRound, chevron: ChevronRight, folder: Folder, file: File, sparkles: Sparkles, menu: Menu, close: X, search: Search, refresh: RefreshCw, external: ArrowUpRight, plus: Plus };
 export function Icon({ name }: { name: keyof typeof icons }) {
   const Component = icons[name];
   return <Component size={18} strokeWidth={1.75} aria-hidden="true" />;

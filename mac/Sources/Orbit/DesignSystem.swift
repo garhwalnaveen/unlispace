@@ -4,15 +4,17 @@ import OrbitKit
 
 /// Shared surfaces and type for the native workspace.
 enum AppDesign {
-    static let canvas = adaptive(light: 0xf6f6f6, dark: 0x000000)
-    static let surface = adaptive(light: 0xfdfdfd, dark: 0x0c0c0c)
-    static let subtle = adaptive(light: 0xf2f2f2, dark: 0x191919)
-    static let border = adaptive(light: 0xe4e4e4, dark: 0x272727)
-    static let foreground = adaptive(light: 0x000000, dark: 0xfdfdfd)
-    static let muted = adaptive(light: 0x606060, dark: 0xa0a0a0)
-    static let accent = adaptive(light: 0x000000, dark: 0xfdfdfd)
-    static let title = Font.system(size: 26, weight: .semibold)
-    static let pageInset: CGFloat = 32
+    static let canvas = adaptive(light: 0xf5f5f3, dark: 0x17181a)
+    static let surface = adaptive(light: 0xffffff, dark: 0x202124)
+    static let sidebar = adaptive(light: 0xedeeec, dark: 0x1b1c1e)
+    static let subtle = adaptive(light: 0xf0f1ef, dark: 0x2a2c30)
+    static let border = adaptive(light: 0xdcdeda, dark: 0x383b40)
+    static let foreground = adaptive(light: 0x242629, dark: 0xf1f2f3)
+    static let muted = adaptive(light: 0x62666c, dark: 0xadb1ba)
+    static let accent = adaptive(light: 0x303b39, dark: 0xd4dfda)
+    static let title = Font.system(size: 30, weight: .semibold)
+    static let pageInset: CGFloat = 28
+    static let panelRadius: CGFloat = 12
     static let sectionSpacing: CGFloat = 24
     static let contentWidth: CGFloat = 1040
 
@@ -48,9 +50,9 @@ private struct AppPanel: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(AppDesign.surface, in: RoundedRectangle(cornerRadius: 6))
+            .background(AppDesign.surface, in: RoundedRectangle(cornerRadius: AppDesign.panelRadius))
             .overlay {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppDesign.panelRadius)
                     .strokeBorder(contrast == .increased ? AppDesign.muted : AppDesign.border)
                     .allowsHitTesting(false)
             }
@@ -64,12 +66,36 @@ extension View {
         font(.system(size: 13))
             .foregroundStyle(AppDesign.foreground)
             .buttonStyle(.bordered)
-            .tint(AppDesign.accent)
+            .tint(.accentColor)
             .background(AppDesign.canvas)
     }
 }
 
+/// State is always conveyed by a symbol and text, never color alone.
+struct DriveStatusBadge: View {
+    var state: MountState
+
+    var body: some View {
+        Label(state.label, systemImage: state.symbol)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(state == .error ? Color.red : AppDesign.muted)
+            .padding(.horizontal, 7).padding(.vertical, 4)
+            .background(AppDesign.subtle, in: Capsule())
+            .accessibilityLabel("Drive status: \(state.label)")
+    }
+}
+
 extension MountState {
+    var symbol: String {
+        switch self {
+        case .unmounted: "minus.circle"
+        case .mounting: "arrow.triangle.2.circlepath"
+        case .mounted: "checkmark.circle"
+        case .unmounting: "eject.circle"
+        case .error: "exclamationmark.circle"
+        }
+    }
+
     /// User-facing wording, matching the drive filter labels.
     var label: String {
         switch self {

@@ -41,6 +41,22 @@ export function App() {
   const marketing = location.pathname === "/overview" || (location.pathname === "/" && ready && !user);
   // Pages embedded in the desktop app render without the web chrome; the app supplies its own.
   const embedded = location.pathname.startsWith("/embed/");
+  const workspace = Boolean(user && !authPage && !marketing);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 760px)").matches);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px)");
+    const update = () => setMobile(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => setNavigationOpen(false), [location.pathname]);
+  const section = location.pathname.startsWith("/drives/") ? "File browser"
+    : location.pathname === "/ai" ? "Ask AI"
+    : location.pathname.includes("access-keys") ? "Access keys"
+    : location.pathname.includes("billing") ? "Billing"
+    : location.pathname.includes("/team") ? "Team"
+    : location.pathname === "/settings" ? "Account" : "Your drives";
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem("orbit.theme");
     return saved === "light" || saved === "dark" || saved === "system" ? saved : "dark";
@@ -76,10 +92,12 @@ export function App() {
         Skip to content
       </a>
       <header className="topbar">
+        {workspace && <Button className="mobile-nav-toggle" variant="ghost" size="icon" aria-label={navigationOpen ? "Close navigation" : "Open navigation"} aria-expanded={navigationOpen} aria-controls="workspace-navigation" onClick={() => setNavigationOpen(!navigationOpen)}><Icon name={navigationOpen ? "close" : "menu"} /></Button>}
         <Link className="brand" to={user ? "/" : "/overview"} aria-label={marketing ? "OrbitFS home" : "Orbit home"}>
           <OrbitMark className="brand-mark" />
           <span className="brand-name">{marketing ? "OrbitFS" : "orbit"}</span>
         </Link>
+        {workspace && <div className="workspace-context"><span>Workspace</span><Icon name="chevron" /><strong>{section}</strong></div>}
         {marketing && <LandingNavigation />}
         <div className="topbar-right">
           {marketing ? (user ? <Link className="marketing-signin" to="/">Open workspace</Link> : <>
@@ -102,11 +120,12 @@ export function App() {
         </div>
       </header>
       {user && !authPage && !marketing && (
-        <aside className="sidebar">
+        <aside id="workspace-navigation" className="sidebar" hidden={mobile && !navigationOpen} onKeyDown={(event) => { if (event.key === "Escape" && mobile) { setNavigationOpen(false); document.querySelector<HTMLButtonElement>(".mobile-nav-toggle")?.focus(); } }}>
+          <Link className="brand sidebar-brand" to="/" aria-label="Orbit workspace"><OrbitMark className="brand-mark" /><span className="brand-name">orbit<span className="brand-caption">Your cloud workspace</span></span></Link>
           <nav aria-label="Main navigation">
             <div className="nav-group">
               <p className="nav-heading">Workspace</p>
-              <NavLink to="/" end className={location.pathname.startsWith("/drives/") ? "active" : undefined}><Icon name="drive" />Your drives</NavLink>
+              {location.pathname.startsWith("/drives/") ? <Link to="/" className="active" aria-current="page"><Icon name="drive" />Your drives</Link> : <NavLink to="/" end><Icon name="drive" />Your drives</NavLink>}
               <NavLink to="/ai"><Icon name="sparkles" />Ask AI</NavLink>
             </div>
             <div className="nav-group">
@@ -116,6 +135,7 @@ export function App() {
             </div>
           </nav>
           <div className="sidebar-bottom">
+            <div className="sidebar-hint"><Icon name="monitor" /><div><strong>Made for your desktop</strong><p>Open any drive in Finder to work with your files.</p></div></div>
             <Link className="profile-link" to="/settings">
               <span className="profile-avatar" aria-hidden="true">{user.email.charAt(0).toUpperCase()}</span>
               <span><strong>Your account</strong><span>{user.email}</span></span>
