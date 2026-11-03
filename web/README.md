@@ -71,9 +71,15 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
 - `/desktop?state&code_challenge`: preserves the desktop return location through either login
   flow, mints a PKCE-bound code on an explicit button press, then opens `uls://auth/callback`.
   “Use another account” revokes the current session before returning to login.
-- Signed-in `/`: workspaces, trial days, drives, create, rename, exact-name confirmation for delete.
+- Signed-in `/`: workspace/drive summary, searchable drive-card library grouped by workspace, trial days,
+  create, rename, exact-name confirmation for delete. The desktop shell keeps grouped navigation and an
+  account footer visible; at 760 px and below, an explicitly labeled navigation disclosure supports
+  Escape, closes after route changes, and restores focus to its toggle.
   Plan-limit errors explain that additional drives require Teams; each organization links to Billing.
 - `/drives/:id/*`: root/folder listing, cursor-based Load more, breadcrumbs and file details.
+  The toolbar filters **loaded items only** and sorts them by name, modification date or size, keeping
+  folders first. An active filter does not hide Load more; no-match copy explains that additional pages
+  may contain matches. A permission badge distinguishes read-only from writable drives.
   Version history has its own cursor pagination and is a panel (`?panel=versions`) backed by the data plane's `/versions` endpoint.
   Current and historical file downloads assemble shards in manifest order, checking sizes and
   SHA-256; progress reports received bytes. Files above 512 MiB direct users to the desktop app.
@@ -161,8 +167,8 @@ black surfaces, a centered sans-serif hero, white primary buttons, compact navig
 subtle bordered product panels. This is an independent implementation: the public Liveblocks
 repository contains SDKs, examples and starter-kit marketing components, not its production homepage.
 `src/landing.css` owns the public design tokens, responsive layout and component styling;
-`src/Landing.tsx` reuses the installed Button and DropdownMenu components. The signed-in app keeps
-its existing theme and controls. The homepage uses system sans-serif fonts rather than Suisse.
+`src/Landing.tsx` reuses the installed Button and DropdownMenu components. The signed-in app uses
+its own calm neutral light/dark canvas, sidebar-first shell, and existing shadcn controls. The homepage uses system sans-serif fonts rather than Suisse.
 Legacy `orbit.*` storage keys, `uls://` links, deployed
 service names, and sender domains stay compatible with existing clients and infrastructure.
 

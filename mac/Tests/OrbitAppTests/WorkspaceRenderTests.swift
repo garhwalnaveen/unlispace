@@ -24,6 +24,7 @@ import OrbitKit
                 DriveInfo(driveId: "design", name: "Design & brand", mountState: .mounted, mountPath: "/Volumes/Design & brand"),
                 DriveInfo(driveId: "archive", name: "Archive", mountState: .unmounted),
                 DriveInfo(driveId: "work", name: "Work in progress", mountState: .mounting),
+                DriveInfo(driveId: "attention", name: "Needs attention", mountState: .error),
             ]
             model.pins = []
             try render(WorkspaceView(model: model).preferredColorScheme(scheme), name: "drives-\(suffix)", output: output, scheme: scheme)
@@ -54,12 +55,22 @@ import OrbitKit
                                         bytesDone: 50, bytesTotal: 100, status: .active)
             try render(TransfersView(transfers: [transfer], embedded: true).preferredColorScheme(scheme), name: "transfers-\(suffix)", output: output, scheme: scheme)
             try render(TransfersView(transfers: [transfer], embedded: true).preferredColorScheme(scheme), name: "transfers-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
+            let failedTransfer = TransferInfo(id: "failed", driveId: "design", path: "/Brand/A long filename for an interrupted file upload.pdf", direction: .upload,
+                                              bytesDone: 20, bytesTotal: 100, status: .failed)
+            let download = TransferInfo(id: "download", driveId: "design", path: "/Reference/Reference images.zip", direction: .download,
+                                        bytesDone: 10, bytesTotal: 0, status: .active)
+            try render(TransfersView(transfers: [transfer, failedTransfer, download], embedded: true).preferredColorScheme(scheme), name: "activity-mixed-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 760))
+            try render(HStack(spacing: 10) {
+                ForEach([MountState.unmounted, .mounting, .mounted, .unmounting, .error], id: \.rawValue) { state in
+                    DriveStatusBadge(state: state)
+                }
+            }.padding(20).preferredColorScheme(scheme), name: "drive-states-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 800, height: 120))
             let pending = PendingUpload(driveId: "design", path: "/.DS_Store", bytes: 6000)
             let summary = TransferInfo(id: "design:upload", driveId: "design", path: "/", direction: .upload,
                                        bytesDone: 0, bytesTotal: 6000, status: .queued)
             try render(TransfersView(transfers: [summary], uploads: UploadsSnapshot(pending: [pending], journalBytes: 7000, journalCapBytes: 10_000_000_000), state: .syncing, embedded: true).preferredColorScheme(scheme), name: "activity-pending-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
         }
-        for name in ["signed-out", "service-unavailable", "drives", "settings", "permissions", "transfers", "offline-empty", "offline-progress", "search", "workspace", "ai", "setup", "menu", "drives-compact", "offline-compact"] {
+        for name in ["signed-out", "service-unavailable", "drives", "settings", "permissions", "transfers", "offline-empty", "offline-progress", "search", "workspace", "ai", "setup", "menu", "drives-compact", "offline-compact", "activity-mixed", "drive-states"] {
             let light = try Data(contentsOf: output.appendingPathComponent("\(name)-light.png"))
             let dark = try Data(contentsOf: output.appendingPathComponent("\(name)-dark.png"))
             #expect(light != dark, "Light and dark fixtures must have different appearances")

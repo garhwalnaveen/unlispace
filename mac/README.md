@@ -5,10 +5,13 @@ the Command Line Tools; no Xcode project.
 
 ## Daily file workflow — 2 November 2026
 
-The main window has **Files** and **Activity**. Files includes filename search (⌘F),
-drive actions, and an Offline files disclosure. Drive-name filters appear only with multiple
-drives. Workspace administration and optional Ask AI are in Settings; New drive opens the
-Workspace settings page. ⌘1 opens Files, ⌘2 opens Activity, and ⌘R refreshes.
+The main window groups **Files** and **Activity** under Workspace, with **Offline files**
+under On this Mac. The account footer opens account settings and keeps the engine state visible.
+Files starts with drive, mount, and offline-selection counts, then a filterable drive list.
+Find a file and ⌘F expand and focus filename search below the list; drive-name filters are
+separate and appear only with multiple drives. Workspace administration and optional Ask AI
+are in Settings; New drive opens Workspace settings. ⌘1 opens Files, ⌘2 opens Activity,
+⌘3 opens Offline files, and ⌘R refreshes.
 
 Setup now has three stages: sign in, connect drives, and open Finder. It retains explicit
 permission actions and verifies mounting before continuing. The first-file checklist disappears
@@ -223,14 +226,18 @@ Drive operations reject duplicate in-flight requests and mock connections.
 
 ## Shared desktop styling
 
-`Sources/Orbit/DesignSystem.swift` defines the neutral light/dark palette, panel borders,
-and heading scale used by the workspace, setup, settings, and menu-bar UI. Buttons and group
-boxes use native SwiftUI styles.
+`Sources/Orbit/DesignSystem.swift` defines a layered neutral light/dark palette, inset icon
+surfaces, rounded panel borders, and heading scale used by the workspace, setup, settings,
+and menu-bar UI. Buttons and group boxes use native SwiftUI styles and the system accent,
+including native selection and prominent-button contrast. Drive badges pair a distinct
+symbol with every mount state. Transfer rows separate filename, full path, and progress so
+pending saves, failures, and drive summaries remain explicit.
 System typography, SF Symbols, native navigation and form controls remain in use. Drive
 and offline-file actions stack when horizontal space is limited. Increased Contrast uses
 stronger panel borders; status labels retain their semantic colors.
 
-`DesignSystemTests` checks AA text contrast in both appearances.
+`DesignSystemTests` checks AA text contrast across canvas, panel, sidebar, and inset surfaces
+in both appearances, distinct drive-state symbols/labels, and transfer filename presentation.
 `WorkspaceRenderTests` renders window-backed fixtures, including the 800 × 580 workspace,
 compact offline actions, setup, and menu-bar UI. Images are written under the system
 temporary directory at `orbit-ui-review/`. These fixtures do not sign in or mount drives.
