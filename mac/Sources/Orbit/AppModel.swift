@@ -20,7 +20,8 @@ final class AppModel {
     let updates = UpdateController()
     var usingMock = false
     var engineInstall: EngineInstallState = .notInstalled
-    var lastError: String?
+    var lastError: String? { didSet { refreshErrorVisible = false } }
+    private var refreshErrorVisible = false
     var hasDevToken = false
     /// Signed-in account (from `auth.status`, or the pending session while the engine is absent).
     var account: AuthUser? {
@@ -138,7 +139,7 @@ final class AppModel {
         }
         do {
             try await refreshConnected(using: client)
-            lastError = nil
+            setRefreshError(nil)
         } catch {
             if !usingMock {
                 // Daemon went away: fall back to mock and say so.
@@ -152,11 +153,20 @@ final class AppModel {
                 clearDistribution()
             }
             status = .error
-            lastError = LogFormat.describe(error)
+            setRefreshError(LogFormat.describe(error))
             Log.app.error("refresh failed: \(LogFormat.describe(error))")
         }
         if engineInstall == .notInstalled && usingMock {
             status = (account != nil || hasDevToken) ? .engineMissing : .signedOut
+        }
+    }
+
+    func setRefreshError(_ message: String?) {
+        if let message {
+            lastError = message
+            refreshErrorVisible = true
+        } else if refreshErrorVisible {
+            lastError = nil
         }
     }
 
@@ -443,13 +453,15 @@ final class AppModel {
         }
     }
 
-    func openInFinder(_ d: DriveInfo) {
-        guard !usingMock, d.mountState == .mounted, let p = d.mountPath else { return }
+    @discardableResult func openInFinder(_ d: DriveInfo) -> Bool {
+        guard !usingMock, d.mountState == .mounted, let p = d.mountPath else { return false }
         if NSWorkspace.shared.open(URL(fileURLWithPath: p)) {
             activation.finderOpened = true
             saveActivation()
+            return true
         } else {
             lastError = "Finder could not open this drive. Refresh its connection and try again."
+            return false
         }
     }
 
@@ -464,7 +476,9 @@ final class AppModel {
     private func recordUpload(_ transfer: TransferInfo) {
         guard !usingMock, isSignedIn, !sessionPending, transfer.direction == .upload,
               drives.contains(where: { $0.driveId == transfer.driveId }) else { return }
-        if transfer.status != .failed {
+        let filename = transfer.path.split(separator: "/").last ?? ""
+        // Drive summaries and Finder metadata do not establish a user's first file upload.
+        if !filename.isEmpty, filename != ".DS_Store", !filename.hasPrefix("._"), transfer.status != .failed {
             activation.fileAdded = true
             if transfer.status == .done { activation.cloudSaveConfirmed = true }
             saveActivation()
@@ -482,7 +496,7 @@ final class AppModel {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Copy to drive"
-        panel.message = "Choose one file to copy into \(drive.name). The original stays where it is. Orbit uploads the copy to your configured service; follow its cloud save in Transfers."
+        panel.message = "Choose one file to copy into \(drive.name). The original stays where it is. Orbit uploads the copy to your configured service; follow its cloud save in Activity."
         guard panel.runModal() == .OK, let source = panel.url else { return }
         let size = (try? source.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init)
         let alert = NSAlert()
@@ -523,7 +537,7 @@ final class AppModel {
                 guard owner == account?.id else { return }
                 activation.fileAdded = true
                 saveActivation()
-                copyMessage = "\(source.lastPathComponent) copied to \(drive.name). The original is unchanged. Check Transfers for cloud confirmation."
+                copyMessage = "\(source.lastPathComponent) copied to \(drive.name). The original is unchanged. Check Activity for cloud confirmation."
             } catch {
                 guard owner == account?.id else { return }
                 copyMessage = "Could not finish copying \(source.lastPathComponent). The original is unchanged. Check the destination before retrying. \(LogFormat.describe(error))"

@@ -8,10 +8,10 @@ if [[ -n "${ULS_SIGN_IDENTITY:-}" || -n "${ULS_NOTARY_PROFILE:-}" ]]; then
   [[ -n "${ULS_SIGN_IDENTITY:-}" && "$ULS_SIGN_IDENTITY" != - && -n "${ULS_NOTARY_PROFILE:-}" ]] || { echo 'Signed releases require both a Developer ID identity and notary profile' >&2; exit 1; }
 fi
 [[ -x "$ULSD_BIN" ]] || { echo 'Release requires an executable engine' >&2; exit 1; }
-[[ -n "${ULS_API_URL:-}${ULS_WORKERS_DOMAIN:-}" ]] || { echo 'Release requires a production API endpoint' >&2; exit 1; }
+[[ -n "${ULS_API_URL:-}" ]] || { echo 'Release requires ULS_API_URL for the production API endpoint' >&2; exit 1; }
 python3 - <<'PYURL'
 import os, urllib.parse
-url = os.environ.get('ULS_API_URL') or 'https://orbit-api.' + os.environ.get('ULS_WORKERS_DOMAIN', '')
+url = os.environ['ULS_API_URL']
 u = urllib.parse.urlparse(url)
 if u.scheme != 'https' or not u.hostname or u.hostname in ('localhost', '127.0.0.1') or u.username or u.password or u.query or u.fragment:
     raise SystemExit('Release requires a valid HTTPS production API endpoint')

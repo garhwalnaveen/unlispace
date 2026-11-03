@@ -3,10 +3,9 @@
 Set `ULS_WORKERS_DOMAIN` to the production `workers.dev` domain, such as
 `naveen-f3d.workers.dev`. Production Worker endpoints use a placeholder in Wrangler configs;
 the wrapper substitutes this environment variable for each Wrangler command and removes its
-temporary config afterwards. Keep the value as a hostname, without `https://`. The Mac app
-bundle and web build use the same setting to point sign-in and control-plane requests at
-`https://orbit-api.$ULS_WORKERS_DOMAIN`. `ULS_API_URL` can override that full API URL when
-building the Mac app or web app. The API's production `ULS_WEB_ORIGIN` is `https://orbitfs.io`;
+temporary config afterwards. Keep the value as a hostname, without `https://`. Set
+`ULS_API_URL` to the deployed API base explicitly for the Mac app and web builds; the current
+endpoint is `https://unlispace-api.naveen-f3d.workers.dev`. The API's production `ULS_WEB_ORIGIN` is `https://orbitfs.io`;
 it must match the canonical web origin for sign-in, browser CORS, and desktop handoff.
 
 Run Wrangler production commands through `node scripts/wrangler-production.mjs`, passing the
@@ -15,9 +14,9 @@ usual Wrangler arguments. Deploy Workers in this order:
 1. `node scripts/wrangler-production.mjs deploy --env production -c cloud/data-plane/wrangler.jsonc`
 2. `node scripts/wrangler-production.mjs d1 migrations apply orbit-control --remote --env production -c cloud/api/wrangler.jsonc`, then `node scripts/wrangler-production.mjs deploy --env production -c cloud/api/wrangler.jsonc`.
 3. `node scripts/wrangler-production.mjs deploy --env production -c cloud/s3-gateway/wrangler.jsonc`
-4. Build `web` with `VITE_API_URL="${ULS_API_URL:-https://orbit-api.$ULS_WORKERS_DOMAIN}" npm run build --prefix web`, then `node scripts/wrangler-production.mjs deploy --env production -c web/wrangler.jsonc`.
+4. Build `web` with `VITE_API_URL="${ULS_API_URL:?Set ULS_API_URL to the deployed API base}" npm run build --prefix web`, then `node scripts/wrangler-production.mjs deploy --env production -c web/wrangler.jsonc`.
 
-Build the Mac app with `ULS_WORKERS_DOMAIN="$ULS_WORKERS_DOMAIN" bash mac/scripts/bundle.sh`.
+Build the Mac app with `ULS_API_URL="${ULS_API_URL:?Set ULS_API_URL to the deployed API base}" bash mac/scripts/bundle.sh`.
 The engine CLI accepts the same API base through its existing `ULS_API` environment variable.
 
 Set these secrets on the corresponding Worker before deployment:
@@ -71,7 +70,7 @@ these changes are used for a broad public launch. Existing mounted SMB shares ca
 local journal writes after their account loses write access; publication is denied until access
 returns, but an automatic read-only remount still needs implementation.
 
-`mac/scripts/release.sh` requires `ULSD_BIN`, a production API endpoint, `ULS_VERSION` and
+`mac/scripts/release.sh` requires `ULSD_BIN`, `ULS_API_URL`, `ULS_VERSION` and
 `ULS_BUILD`, and produces a DMG and SHA-256 manifest after Swift tests, signature verification
 and an isolated LaunchAgent/RPC check. The isolated probe does not replace installed upgrade,
 Keychain and real mounted-file acceptance. Without Apple credentials it produces

@@ -28,3 +28,26 @@ public enum UploadLimit {
             || m.contains("unknown field") || m.contains("unsupported")
     }
 }
+
+/// A queue entry and its matching event describe the same file activity.
+public struct TransferActivity: Sendable {
+    public var pending: PendingUpload?
+    public var transfer: TransferInfo?
+
+    public static func list(pending: [PendingUpload], transfers: [TransferInfo], recentUploads: [TransferInfo]) -> [TransferActivity] {
+        let allEvents = transfers + recentUploads.filter { recent in !transfers.contains { $0.id == recent.id } }
+        var events = allEvents.filter { event in
+            guard event.direction == .upload, event.path == "/", event.status == .queued || event.status == .done else { return true }
+            if pending.contains(where: { $0.driveId == event.driveId }) { return false }
+            return event.status != .done || !allEvents.contains {
+                $0.driveId == event.driveId && $0.direction == .upload && $0.path != "/" && $0.status == .done
+            }
+        }
+        var rows = pending.map { upload in
+            let index = events.firstIndex { $0.direction == .upload && $0.driveId == upload.driveId && $0.path == upload.path }
+            return TransferActivity(pending: upload, transfer: index.map { events.remove(at: $0) })
+        }
+        rows += events.map { TransferActivity(pending: nil, transfer: $0) }
+        return rows
+    }
+}

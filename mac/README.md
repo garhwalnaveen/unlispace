@@ -3,6 +3,25 @@
 Menu-bar app (SwiftUI + AppKit, Swift 6) that controls the `ulsd` engine. Built with SwiftPM and
 the Command Line Tools; no Xcode project.
 
+## Daily file workflow — 2 November 2026
+
+The main window has **Files** and **Activity**. Files includes filename search (⌘F),
+drive actions, and an Offline files disclosure. Drive-name filters appear only with multiple
+drives. Workspace administration and optional Ask AI are in Settings; New drive opens the
+Workspace settings page. ⌘1 opens Files, ⌘2 opens Activity, and ⌘R refreshes.
+
+Setup now has three stages: sign in, connect drives, and open Finder. It retains explicit
+permission actions and verifies mounting before continuing. The first-file checklist disappears
+when dismissed or complete; account blockers remain separate. Only an individual file upload
+completion advances its cloud-save milestone; drive summaries and Finder metadata do not.
+
+Activity combines pending saves with matching events and omits redundant drive summaries.
+Pending files and failures remain visible. Upload-journal storage is under a disclosure, with a
+full-storage warning outside it. SMB still journals Finder metadata, including `.DS_Store`;
+this change does not discard pending writes or change storage behavior.
+
+These changes supersede the navigation and setup descriptions in the historical sections below.
+
 ## Build and test
 ```
 swift build -c release
@@ -41,9 +60,8 @@ Menu or Settings -> "Sign in to Orbit". Flow (`docs/design/m1-contract.md` 5.1):
    only long-term holder of the refresh token. The app keeps no copy once the daemon acks, and
    deletes the old M0 `refresh-token` Keychain item on launch.
 
-No production API base is assumed. Set `ULS_WORKERS_DOMAIN` when running
-`scripts/bundle.sh` to embed the production API URL, or set `ULS_API_URL` to embed a specific
-base. Override under Settings -> Advanced -> Developer (e.g. `http://127.0.0.1:8788`).
+No production API base is assumed. Set `ULS_API_URL` when running `scripts/bundle.sh` to
+embed the API base. Override under Settings -> Advanced -> Developer (e.g. `http://127.0.0.1:8788`).
 
 **Daemon absent fallback.** If the daemon is unreachable when sign-in finishes (no socket, the
 mock is active, connection lost, or it answers `offline`/`internal`), the session is stored as
@@ -120,7 +138,7 @@ Protocol: see `DAEMON-PROTOCOL.md`.
 `bash mac/scripts/release.sh` tests, bundles, signs inside-out, creates a compressed read-only
 DMG with an Applications shortcut, and verifies the mounted copy before detaching. It never
 launches the app. It requires `ULSD_BIN`, `ULS_VERSION`, `ULS_BUILD`, and a production
-API endpoint (`ULS_API_URL` or `ULS_WORKERS_DOMAIN`). Default signing is ad-hoc; the
+API endpoint (`ULS_API_URL`). Default signing is ad-hoc; the
 unnotarized app requires users to explicitly allow it in macOS settings. Developer ID
 builds enable hardened runtime.
 
@@ -165,7 +183,7 @@ The bundle is for local review; this does not establish notarization or cloud-fl
 
 ## Completed desktop acceptance (26 October 2026)
 
-The review build is configured for `https://orbit-api.naveen-f3d.workers.dev` and includes
+The October 2026 review build was configured for `https://orbit-api.naveen-f3d.workers.dev` and included
 the SMB-enabled engine. An unconfigured build shows an endpoint setup message rather than
 silently using an unavailable hostname. Sign-in checks the service with a 15-second deadline;
 Open browser offers a state-checked custom-scheme fallback when the system sheet is unavailable.

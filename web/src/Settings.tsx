@@ -47,8 +47,9 @@ export function Settings() {
           <p className="muted">Manage your profile and browser session.</p>
         </div>
       </header>
-      <p><Link to="/settings/access-keys">Manage access keys</Link></p>
       <section className="panel settings">
+        <h2>Profile</h2>
+        <p className="muted">Your email identifies your account. Choose how your name appears.</p>
         <ErrorNotice error={error} />
         {Boolean(error) && <Button onClick={reload}>Try again</Button>}
         {loading && <Loading />}
@@ -87,6 +88,11 @@ export function Settings() {
           <Button disabled={busy} onClick={() => void logout()}>
             Sign out
           </Button>
+        </div>
+        <div className="signout">
+          <h2>Connected tools</h2>
+          <p className="muted small">Manage credentials for apps that access your drives.</p>
+          <Button asChild><Link to="/settings/access-keys">Manage access keys</Link></Button>
         </div>
       </section>
     </>

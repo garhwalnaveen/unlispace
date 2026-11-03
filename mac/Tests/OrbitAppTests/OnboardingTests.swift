@@ -4,6 +4,13 @@ import OrbitKit
 @testable import Orbit
 
 @Suite @MainActor struct OnboardingTests {
+    @Test func setupHasThreeSteps() {
+        #expect(OnboardingStep.allCases == [.welcome, .access, .ready])
+        #expect(OnboardingStep.welcome.next == .access)
+        #expect(OnboardingStep.access.next == .ready)
+        #expect(OnboardingStep.ready.previous == .access)
+    }
+
     @Test func aMountMustHaveBothAConfirmedStateAndFinderPath() {
         let mounting = DriveInfo(driveId: "one", name: "Personal", mountState: .mounting)
         let noPath = DriveInfo(driveId: "one", name: "Personal", mountState: .mounted)

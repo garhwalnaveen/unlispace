@@ -1,0 +1,72 @@
+{
+  "sourceCommit": "fde681a4baa8246d168368e6c905adaede7549d2",
+  "clientMachine": "Mac16,12; Apple silicon; 16 GiB RAM; macOS 27.0.1 (26A434)",
+  "powerAtStart": "Battery, 15%, discharging",
+  "sleepPrevention": "caffeinate -i scoped to benchmark process",
+  "keyScope": "write; Space drive only; revoke after completion",
+  "observedFailures": [
+    {
+      "scenario": "get 32 MiB",
+      "status": "failed",
+      "detail": "Two concurrent reads failed SHA-256 assertions; three sequential warmups had passed. Full byte count/digests were not serialized in the initial harness error report. User already notified. Diagnose after benchmark traffic ends to avoid interfering with samples; original fixture version can be located with listVersions even after prefix cleanup. Do not call this a passing latency result."
+    }
+  ],
+  "lastHeartbeatNotification": {
+    "time": "2026-11-03T04:06:04Z",
+    "state": "Original runner exited unexpectedly after 22 saved rows; restarting only 27 unattempted rows. Original results preserved.",
+    "power": "Battery 19%, discharging"
+  },
+  "environmentEvents": [
+    {
+      "time": "2026-11-03T03:35:50Z",
+      "power": "AC connected, 4% charging",
+      "interruption": "Heartbeat gap after 1% battery; runner survived. ENOTFOUND observed in 64 MiB streaming and both 256 MiB cases; these are network-affected failures, not evidence of Orbit content corruption."
+    },
+    {
+      "time": "2026-11-03T04:06:04Z",
+      "power": "Battery 19%, discharging again",
+      "interruption": "Original PID 3546 and execution session no longer exist; no finishedAt/cleanup in report and no fatal error in log. Cause unknown. Twenty-two rows preserved; resuming only 27 unattempted rows in a fresh prefix."
+    }
+  ],
+  "targetedRetestSupport": {
+    "ready": true,
+    "usage": "Append exact scenario names as separate CLI arguments after credentials path and NEW results path. Default remains all 49. Do not start while initial PID is running.",
+    "tests": "Five local tests pass, including selection validation",
+    "activeProcessUnchanged": true
+  },
+  "recovery": {
+    "resultsFile": "/tmp/orbit-s3-benchmark-xkRT5n/recovery-results.json",
+    "logFile": "/tmp/orbit-s3-benchmark-xkRT5n/recovery.log",
+    "selectedCount": 27,
+    "selection": [
+      "append 4 KiB to 64 MiB",
+      "truncate 4 KiB, end of 64 MiB",
+      "delete 4 KiB, middle of 64 MiB",
+      "insert 4 KiB, middle of 64 MiB",
+      "append 4 KiB to 32 MiB",
+      "delete 4 KiB, start of 64 MiB",
+      "insert 4 KiB, start of 64 MiB",
+      "write at 4 KiB in 64 MiB",
+      "fanout get 200 \u00d7 256 KiB, 32 at once",
+      "truncate 4 KiB, end of 32 MiB",
+      "write at 4 KiB in 32 MiB",
+      "delete 4 KiB, middle of 32 MiB",
+      "delete 4 KiB, start of 32 MiB",
+      "insert 4 KiB, middle of 32 MiB",
+      "insert 4 KiB, start of 32 MiB",
+      "patch 16 \u00d7 4 KiB in 64 MiB",
+      "patch 16 \u00d7 4 KiB in 32 MiB",
+      "append 4 KiB to 1 MiB",
+      "delete 4 KiB, middle of 1 MiB",
+      "insert 4 KiB, middle of 1 MiB",
+      "patch 16 \u00d7 4 KiB in 1 MiB",
+      "delete 4 KiB, start of 1 MiB",
+      "write at 4 KiB in 1 MiB",
+      "insert 4 KiB, start of 1 MiB",
+      "truncate 4 KiB, end of 1 MiB",
+      "fanout put 1000 \u00d7 4 KiB, 64 at once",
+      "fanout put 200 \u00d7 256 KiB, 32 at once"
+    ],
+    "initialPrefixNeedsCleanup": "orbit-benchmark-e438ba06-bea5-4076-aada-36518b88913c/"
+  }
+}

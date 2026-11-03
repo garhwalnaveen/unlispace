@@ -2,15 +2,11 @@ import SwiftUI
 import OrbitKit
 
 enum OnboardingStep: Int, CaseIterable {
-    case welcome, storage, search, features, ai, access, ready
+    case welcome, access, ready
 
     var label: String {
         switch self {
         case .welcome: "Welcome"
-        case .storage: "Your files"
-        case .search: "Search"
-        case .features: "Features"
-        case .ai: "Ask AI"
         case .access: "Drive access"
         case .ready: "Ready"
         }
@@ -47,10 +43,6 @@ struct OnboardingView: View {
                 Group {
                     switch step {
                     case .welcome: welcome
-                    case .storage: storage
-                    case .search: search
-                    case .features: features
-                    case .ai: ai
                     case .access: access
                     case .ready: ready
                     }
@@ -90,7 +82,7 @@ struct OnboardingView: View {
         .onChange(of: model.account?.id) { old, new in
             selected = []; selectedDefault = false; error = nil
             if new == nil { step = .welcome }
-            else if old == nil && step == .welcome { step = .storage }
+            else if old == nil && step == .welcome { step = .access }
         }
         .onChange(of: Set(model.drives.map(\.driveId))) { _, ids in
             selected.formIntersection(ids)
@@ -122,52 +114,6 @@ struct OnboardingView: View {
                 }
             }
         }.frame(maxWidth: .infinity)
-    }
-
-    private var storage: some View {
-        VStack(spacing: 30) {
-            heading("Your files. More room on your Mac.", "Work with cloud files in Finder, just like the files already on your computer.")
-            OnboardingPreview(kind: .storage)
-            Text("Files download as you use them. Cache and files you keep offline use space on your Mac.")
-                .font(.callout).foregroundStyle(AppDesign.muted)
-        }
-    }
-
-    private var search: some View {
-        VStack(spacing: 30) {
-            heading("Find the file you’re looking for", "Search filenames across a chosen Orbit drive, then open them in Finder.")
-            OnboardingPreview(kind: .search)
-            Text("Type at least three characters. Search uses your cloud drive; it needs an internet connection.")
-                .font(.callout).foregroundStyle(AppDesign.muted)
-        }
-    }
-
-    private var features: some View {
-        HStack(spacing: 48) {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("More than\na place for files").font(.system(size: 38, weight: .semibold)).tracking(-1)
-                    .accessibilityAddTraits(.isHeader)
-                Text("The tools you need to keep work moving, together in Orbit.")
-                    .font(.system(size: 17)).foregroundStyle(AppDesign.muted).lineSpacing(5)
-            }.frame(maxWidth: 275, alignment: .leading)
-            LazyVGrid(columns: [GridItem(.flexible(), alignment: .top), GridItem(.flexible(), alignment: .top)], spacing: 16) {
-                feature("Your drives", "Keep projects together in Finder.", "externaldrive.fill")
-                feature("Search files", "Find files by name in a drive.", "magnifyingglass")
-                feature("Transfers", "Follow uploads and retry failures.", "arrow.up.arrow.down")
-                feature("Offline files", "Keep chosen files on this Mac.", "checkmark.icloud")
-                feature("File history", "Browse and restore past versions in the browser.", "clock.arrow.circlepath")
-                feature("Your workspace", "Manage your plan and team.", "person.2")
-            }
-        }
-    }
-
-    private var ai: some View {
-        VStack(spacing: 30) {
-            heading("Ask AI, with your files", "Get help with the text you choose to share.")
-            OnboardingPreview(kind: .ai)
-            Text("Optional. Connect a provider in Ask AI. Review the selected text and destination before sending.")
-                .font(.callout).foregroundStyle(AppDesign.muted)
-        }
     }
 
     private var access: some View {
@@ -206,7 +152,7 @@ struct OnboardingView: View {
 
     private var ready: some View {
         VStack(spacing: 30) {
-            heading("You’re ready for Orbit", "One shortcut to your drives, transfers, and files.")
+            heading("You’re ready for Orbit", "One shortcut to your files and activity.")
             HStack(spacing: 18) {
                 keycap(model.workspaceShortcut.modifierLabel, width: 120)
                 keycap("space", width: 340)
@@ -219,14 +165,9 @@ struct OnboardingView: View {
                     if let shortcut { model.setWorkspaceShortcut(shortcut) }
                 }.frame(width: 1, height: 1)
             }
-            HStack(spacing: 14) {
-                Button(recordingShortcut ? "Cancel" : "Change shortcut") { recordingShortcut.toggle() }
-                if let drive = model.drives.first(where: { $0.mountState == .mounted && $0.mountPath != nil }) {
-                    Button("Open \(drive.name) in Finder") { model.openInFinder(drive) }
-                }
-            }
+            Button(recordingShortcut ? "Cancel" : "Change shortcut") { recordingShortcut.toggle() }
             if let message = model.shortcutMessage { Text(message).font(.callout).foregroundStyle(AppDesign.muted) }
-            Text("Find Orbit in your menu bar anytime. Add your first file from My drives or Finder.")
+            Text("Find Orbit in your menu bar anytime. Add your first file from Files or Finder.")
                 .font(.callout).foregroundStyle(AppDesign.muted)
         }
     }
@@ -265,7 +206,7 @@ struct OnboardingView: View {
         if mounting { return "Connecting drives…" }
         switch step {
         case .welcome: return model.isSignedIn ? "Continue" : "Sign in with browser"
-        case .ready: return "Open Orbit"
+        case .ready: return selected.isEmpty ? "Finish setup" : "Open Finder"
         default: return "Continue"
         }
     }
@@ -289,6 +230,13 @@ struct OnboardingView: View {
                 } catch { self.error = "Could not connect your drives: \(LogFormat.describe(error)). Try again." }
             }
         } else if step == .ready {
+            guard connected, Self.mountsReady(selected, drives: model.drives) else {
+                error = "Your connection or drive is no longer available. Go back to reconnect."
+                return
+            }
+            if let drive = model.drives.first(where: { selected.contains($0.driveId) && $0.mountState == .mounted && $0.mountPath != nil }) {
+                guard model.openInFinder(drive) else { return }
+            }
             completed = true
             finish()
         } else { step = step.next }
@@ -309,16 +257,6 @@ struct OnboardingView: View {
             Text(title).font(.system(size: 36, weight: .semibold)).tracking(-1).accessibilityAddTraits(.isHeader)
             Text(subtitle).font(.system(size: 17)).foregroundStyle(AppDesign.muted).lineSpacing(4)
         }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
-    }
-
-    private func feature(_ title: String, _ detail: String, _ symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 28, weight: .light))
-                .frame(height: 34, alignment: .leading).padding(.bottom, 6).accessibilityHidden(true)
-            Text(title).font(.system(size: 15, weight: .semibold))
-            Text(detail).font(.system(size: 12)).foregroundStyle(AppDesign.muted).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
-            .padding(18).background(AppDesign.subtle, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func keycap(_ label: String, width: CGFloat) -> some View {

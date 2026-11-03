@@ -121,7 +121,7 @@ function Chat({ initial }: { initial: AIModels }) {
           </p>
         </div>
         {messages.length > 0 && (
-          <PromptInputButton variant="outline" onClick={() => { stop(); setMessages([]); clearError(); }}>
+          <PromptInputButton size="sm" variant="outline" onClick={() => { stop(); setMessages([]); clearError(); }}>
             New conversation
           </PromptInputButton>
         )}
@@ -196,7 +196,7 @@ function Chat({ initial }: { initial: AIModels }) {
           <PromptInputTools>
             <ModelSelector open={pickerOpen} onOpenChange={setPickerOpen}>
               <ModelSelectorTrigger asChild>
-                <PromptInputButton aria-label="Choose model">
+                <PromptInputButton size="sm" aria-label="Choose model">
                   <ModelSelectorName>{selected?.name}</ModelSelectorName>
                 </PromptInputButton>
               </ModelSelectorTrigger>

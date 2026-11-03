@@ -10,16 +10,20 @@ struct SettingsView: View {
     @State private var message: String?
     private let keychain = Keychain()
 
-    @State private var page: SettingsPage? = .general
+    @AppStorage("settingsPage") private var pageName = "General"
+    @State private var hasVisitedAI = false
+    private var page: SettingsPage { SettingsPage(rawValue: pageName) ?? .general }
     @AppStorage("appearance") private var appearance = "dark"
 
     private enum SettingsPage: String, CaseIterable, Identifiable {
-        case general = "General", account = "Account", cache = "Storage & uploads", permissions = "Permissions", advanced = "Advanced"
+        case general = "General", account = "Account", workspace = "Workspace", ai = "Ask AI", cache = "Storage & uploads", permissions = "Permissions", advanced = "Advanced"
         var id: Self { self }
         var symbol: String {
             switch self {
             case .general: "gearshape"
             case .account: "person.crop.circle"
+            case .workspace: "person.2"
+            case .ai: "sparkles"
             case .cache: "internaldrive"
             case .permissions: "hand.raised"
             case .advanced: "slider.horizontal.3"
@@ -29,7 +33,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsPage.allCases, selection: $page) { item in
+            List(SettingsPage.allCases, selection: Binding<SettingsPage?>(get: { page }, set: { if let value = $0 { pageName = value.rawValue } })) { item in
                 Label {
                     Text(item.rawValue)
                 } icon: {
@@ -42,25 +46,39 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationSplitViewColumnWidth(190)
         } detail: {
-            Form {
-                switch page ?? .general {
-                case .general: general
-                case .account: account
-                case .cache: cache
-                case .permissions: permissions
-                case .advanced: advanced
+            ZStack {
+                if page == .workspace {
+                    ScrollView { WorkspaceAccountView(model: model).padding(AppDesign.pageInset) }
+                } else if page != .ai {
+                    Form {
+                        switch page {
+                        case .general: general
+                        case .account: account
+                        case .cache: cache
+                        case .permissions: permissions
+                        case .advanced: advanced
+                        case .workspace, .ai: EmptyView()
+                        }
+                        if let message { Section { Text(message).foregroundStyle(AppDesign.muted).textSelection(.enabled) } }
+                        if let error = model.lastError { Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
+                    }
+                    .formStyle(.grouped)
+                    .scrollContentBackground(.hidden)
                 }
-                if let message { Section { Text(message).foregroundStyle(AppDesign.muted).textSelection(.enabled) } }
-                if let error = model.lastError { Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
+                if hasVisitedAI || page == .ai {
+                    AIView(model: model).id(model.account?.id)
+                        .padding(AppDesign.pageInset)
+                        .frame(height: page == .ai ? nil : 0)
+                        .clipped().disabled(page != .ai).accessibilityHidden(page != .ai)
+                }
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
             .background(AppDesign.canvas)
-            .navigationTitle((page ?? .general).rawValue)
+            .navigationTitle(page.rawValue)
         }
         .frame(minWidth: 780, idealWidth: 860, minHeight: 560, idealHeight: 620)
         .appStyle()
         .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
+        .onChange(of: page, initial: true) { _, value in if value == .ai { hasVisitedAI = true } }
         .task { await model.refreshPermissions() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refreshPermissions() }
@@ -143,10 +161,10 @@ struct SettingsView: View {
                 else if model.usingMock { Text("Connect the engine to limit upload speed.").font(.caption).foregroundStyle(AppDesign.muted) }
                 else if model.uploadBandwidthBps == nil { Text("Current limit is not reported by this engine.").font(.caption).foregroundStyle(AppDesign.muted) }
                 if let message = model.uploadLimitMessage { Text(message).font(.caption).foregroundStyle(.red) }
-                Text("Slows uploads so they do not use all of your connection. Check Transfers to see when files are saved to the cloud.").font(.caption).foregroundStyle(AppDesign.muted)
+                Text("Slows uploads so they do not use all of your connection. Check Activity to see when files are saved to the cloud.").font(.caption).foregroundStyle(AppDesign.muted)
             }
             Section("Available offline") {
-                Text("Manage what stays on this Mac in Offline files in the main window.").foregroundStyle(AppDesign.muted)
+                Text("Manage what stays on this Mac under Offline files on the Files page.").foregroundStyle(AppDesign.muted)
             }
         }
     }

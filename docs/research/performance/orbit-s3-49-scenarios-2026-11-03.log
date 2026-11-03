@@ -1,0 +1,36 @@
+1/49 passed get 4 KiB: 1922.0 ms
+2/49 passed put 4 KiB: 3938.5 ms
+3/49 passed get 1 MiB: 7331.9 ms
+4/49 passed put 1 MiB: 10381.4 ms
+5/49 failed get 32 MiB
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+6/49 failed put 32 MiB
+7/49 failed get 64 MiB
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+@smithy/node-http-handler - [WARN] a request has exceeded the configured 120000 ms requestTimeout. Init client requestHandler with throwOnRequestTimeout=true to turn this into an error.
+8/49 failed put 64 MiB
+9/49 failed overwrite 4 KiB
+10/49 failed overwrite 1 MiB
+11/49 failed multipart put 64 MiB × 8 MiB
+12/49 failed stream get 64 MiB
+13/49 failed multipart put 256 MiB × 16 MiB
+14/49 failed stream get 256 MiB
+15/49 failed range 64 KiB of 64 MiB
+16/49 passed head: 1488.1 ms
+17/49 failed list 200 keys
+18/49 failed rename 64 MiB
+19/49 failed move dir 200 × 64 KiB
+20/49 failed fanout get 1000 × 4 KiB, 32 at once
+21/49 failed fanout put 1000 × 4 KiB, 32 at once
+22/49 failed fanout get 1000 × 4 KiB, 64 at once

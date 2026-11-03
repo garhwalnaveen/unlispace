@@ -1,0 +1,26 @@
+[
+  {
+    "path": "unlispace-desktop-acceptance-2026-10-26.txt",
+    "bytes": 103,
+    "sha256": "653bd3069b77a514c1d464735baf78ceaa90b3c9570d495ac1e2825ee2dac81a",
+    "seconds": 0.06,
+    "matchesRecordedHash": true
+  },
+  {
+    "path": "performance-comparison-20261026-50MB-awake.bin",
+    "bytes": 50000000,
+    "sha256": "85d955e73778e989dbdbb58b65e2c24ab91a0766ac9f347568ce254509033b1d",
+    "seconds": 48.99,
+    "matchesRecordedHash": true,
+    "adapter": "read-only NFS",
+    "note": "Retry after Mac sleep; not a cold throughput benchmark"
+  },
+  {
+    "file": "Unlispace-final-acceptance-20261030/payload.bin",
+    "bytes": 1048576,
+    "sha256": "836fcf06ee5212c5f3ff9de8d82e393faa220ae3542c3be669f68eddf7b8e684",
+    "route": "native read-only NFS",
+    "matchesRecordedHash": null,
+    "note": "Read completed; independent expected hash unavailable"
+  }
+]

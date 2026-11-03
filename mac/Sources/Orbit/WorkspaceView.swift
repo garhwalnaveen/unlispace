@@ -6,33 +6,19 @@ struct WorkspaceView: View {
     @State private var page: Page? = .drives
     @State private var query = ""
     @State private var filter: DriveFilter = .all
-    @State private var hasVisitedAI = false
-    @FocusState private var searchFocused: Bool
+    @State private var showSearch = true
+    @State private var showOffline = false
+    @State private var searchRequest = 0
+    @AppStorage("settingsPage") private var settingsPage = "General"
     @AppStorage("appearance") private var appearance = "dark"
     @Environment(\.openSettings) private var openSettings
 
     private enum Page: String, CaseIterable, Identifiable {
-        case drives = "My drives", transfers = "Transfers", offline = "Offline files", search = "Search files", workspace = "Workspace", ai = "Ask AI"
+        case drives = "Files", transfers = "Activity"
         var id: Self { self }
-        var symbol: String {
-            switch self {
-            case .drives: "externaldrive"
-            case .transfers: "arrow.up.arrow.down"
-            case .offline: "arrow.down.circle"
-            case .search: "magnifyingglass"
-            case .workspace: "person.2"
-            case .ai: "sparkles"
-            }
-        }
+        var symbol: String { self == .drives ? "externaldrive" : "arrow.up.arrow.down" }
         var subtitle: String {
-            switch self {
-            case .drives: "Open a drive in Finder to work with your files."
-            case .transfers: "Follow files as they move between your Mac and your drives."
-            case .offline: "Manage the files you want to keep on this Mac."
-            case .search: "Find files and folders by name across a drive."
-            case .workspace: "Create drives, manage your team, and review your plan."
-            case .ai: "Chat with Kimi models managed by Orbit."
-            }
+            self == .drives ? "Open a drive in Finder to work with your files." : "Follow files as they move between your Mac and your drives."
         }
     }
 
@@ -44,25 +30,12 @@ struct WorkspaceView: View {
                     .foregroundStyle(AppDesign.foreground)
                     .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 8)
                 List(selection: $page) {
-                    Section("Files") {
-                        ForEach([Page.drives, .search, .transfers, .offline]) { item in
-                            Label {
-                                Text(item.rawValue).foregroundStyle(page == item ? .white : AppDesign.foreground)
-                            } icon: {
-                                Image(systemName: item.symbol).foregroundStyle(page == item ? .white : AppDesign.muted)
-                            }.tag(item)
-                                .padding(.vertical, 5)
-                        }
-                    }
-                    Section("Tools") {
-                        ForEach([Page.workspace, .ai]) { item in
-                            Label {
-                                Text(item.rawValue).foregroundStyle(page == item ? .white : AppDesign.foreground)
-                            } icon: {
-                                Image(systemName: item.symbol).foregroundStyle(page == item ? .white : AppDesign.muted)
-                            }.tag(item)
-                                .padding(.vertical, 5)
-                        }
+                    ForEach(Page.allCases) { item in
+                        Label {
+                            Text(item.rawValue).foregroundStyle(page == item ? .white : AppDesign.foreground)
+                        } icon: {
+                            Image(systemName: item.symbol).foregroundStyle(page == item ? .white : AppDesign.muted)
+                        }.tag(item).padding(.vertical, 5)
                     }
                 }
                 .listStyle(.sidebar)
@@ -75,88 +48,96 @@ struct WorkspaceView: View {
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(alignment: .top) { Divider().overlay(AppDesign.border) }
             }
             .background(AppDesign.surface)
             .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 260)
         } detail: {
+            ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text((page ?? .drives).rawValue).font(AppDesign.title).tracking(-0.6)
-                            .accessibilityAddTraits(.isHeader)
-                        Text((page ?? .drives).subtitle)
-                            .foregroundStyle(AppDesign.muted)
+                VStack(alignment: .leading, spacing: AppDesign.sectionSpacing) {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text((page ?? .drives).rawValue).font(AppDesign.title).tracking(-0.6)
+                                .accessibilityAddTraits(.isHeader)
+                            Text((page ?? .drives).subtitle)
+                                .foregroundStyle(AppDesign.muted)
+                        }
+                        Spacer(minLength: 0)
+                        if page == .drives && model.isSignedIn && !model.usingMock {
+                            Button("New drive…") { settingsPage = "Workspace"; openSettings() }.buttonStyle(.borderedProminent)
+                        }
                     }
                     Divider().overlay(AppDesign.border)
                     if ConnectionNotice.hasContent(model) { ConnectionNotice(model: model) }
                     if page == .transfers {
                         TransfersView(transfers: model.transfers, uploads: model.uploads, recentUploads: model.recentUploads, state: model.status, embedded: true, available: !model.usingMock && (model.isSignedIn || model.hasDevToken))
-                    } else if page == .offline {
-                        OfflineFilesView(model: model)
-                    } else if page == .search {
-                        FileSearchView(model: model)
-                    } else if page == .workspace {
-                        WorkspaceAccountView(model: model)
-                    } else if page != .ai {
-                        drives
-                    }
-                    if hasVisitedAI {
-                        AIView(model: model).id(model.account?.id)
-                            .frame(height: page == .ai ? nil : 0)
-                            .clipped()
-                            .disabled(page != .ai)
-                            .accessibilityHidden(page != .ai)
+                    } else {
+                        drives {
+                            if searchRequest > 0 {
+                                Task { @MainActor in
+                                    await Task.yield()
+                                    proxy.scrollTo("filenameSearch", anchor: .center)
+                                }
+                            }
+                        }
                     }
                 }
-                .padding(32).frame(maxWidth: 1000, alignment: .leading).frame(maxWidth: .infinity)
+                .padding(AppDesign.pageInset).frame(maxWidth: AppDesign.contentWidth, alignment: .leading).frame(maxWidth: .infinity, alignment: .top)
+            }
+            .onChange(of: searchRequest) { _, request in
+                if request > 0 {
+                    Task { @MainActor in
+                        await Task.yield()
+                        proxy.scrollTo("filenameSearch", anchor: .center)
+                    }
+                }
+            }
             }
             .background(AppDesign.canvas)
             .toolbar {
                 Button { Task { await model.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .keyboardShortcut("r").help("Refresh (⌘R)")
-                Button("Set up…") { AppDelegate.showOnboarding() }
+                if model.usingMock || (!model.isSignedIn && !model.hasDevToken) {
+                    Button("Set up…") { AppDelegate.showOnboarding() }
+                }
             }
         }
         .background {
             Group {
-                Button("My drives") { page = .drives }.keyboardShortcut("1")
-                Button("Transfers") { page = .transfers }.keyboardShortcut("2")
-                Button("Offline files") { page = .offline }.keyboardShortcut("3")
-                Button("Search files") { page = .search }.keyboardShortcut("4")
-                Button("Workspace") { page = .workspace }.keyboardShortcut("5")
-                Button("Ask AI") { page = .ai }.keyboardShortcut("6")
-                Button("Find a drive") { page = .drives; searchFocused = true }.keyboardShortcut("f")
+                Button("Files") { page = .drives }.keyboardShortcut("1")
+                Button("Activity") { page = .transfers }.keyboardShortcut("2")
+                Button("Search filenames") { page = .drives; showSearch = true; searchRequest += 1 }.keyboardShortcut("f")
             }.hidden().accessibilityHidden(true)
         }
-        .onChange(of: page) { _, page in if page == .ai { hasVisitedAI = true } }
+        .onChange(of: page) { _, value in if value == .transfers { searchRequest = 0 } }
         .frame(minWidth: 800, minHeight: 580)
         .appStyle()
         .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
     }
 
-    private var drives: some View {
+    private func drives(onAppear: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             if (model.isSignedIn || model.hasDevToken) && !model.usingMock
-                && (model.uploads != nil || !model.transfers.isEmpty || model.status != .idle) {
+                && (model.uploads?.pending.isEmpty == false || !model.transfers.isEmpty || model.status != .idle
+                    || model.recentUploads.contains { $0.status == .failed }) {
                 HStack {
                     Label(model.connectionTitle, systemImage: model.symbolName)
                     Spacer()
-                    Button("View transfers") { page = .transfers }
+                    Button("View activity") { page = .transfers }
                 }
                 .padding(16).appPanel()
             }
             if (model.isSignedIn || model.hasDevToken) && !model.usingMock && !model.drives.isEmpty {
-            HStack {
-                Text("\(model.drives.count) drive\(model.drives.count == 1 ? "" : "s")")
-                    .font(.callout).foregroundStyle(AppDesign.muted)
-                Spacer()
-                Picker("Show drives", selection: $filter) {
-                    ForEach(DriveFilter.allCases) { Text($0.rawValue).tag($0) }
-                }.labelsHidden().frame(width: 130).accessibilityLabel("Show drives")
-                TextField("Filter drives", text: $query).textFieldStyle(.roundedBorder).frame(maxWidth: 220)
-                    .accessibilityLabel("Filter drives").focused($searchFocused)
-                Button("New drive…") { page = .workspace }.disabled(!model.isSignedIn || model.usingMock)
+                DisclosureGroup("Search filenames", isExpanded: $showSearch) {
+                    FileSearchView(model: model, searchRequest: $searchRequest).padding(.top, 12)
+                }.id("filenameSearch").onAppear(perform: onAppear)
             }
+            if (model.isSignedIn || model.hasDevToken) && !model.usingMock && model.drives.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 16) { driveFilters; Spacer(minLength: 0); driveCount }
+                    VStack(alignment: .leading, spacing: 12) { driveFilters; driveCount }
+                }
             }
             if !model.isSignedIn && !model.hasDevToken {
                 ContentUnavailableView {
@@ -179,7 +160,7 @@ struct WorkspaceView: View {
                 ContentUnavailableView("No drives yet", systemImage: "externaldrive", description: Text("Drives available to your account will appear here. Refresh to check again."))
                     .frame(maxWidth: .infinity)
             } else {
-                let filtered = filter.apply(to: model.drives, query: query)
+                let filtered = model.drives.count > 1 ? filter.apply(to: model.drives, query: query) : model.drives
                 if filtered.isEmpty {
                     ContentUnavailableView {
                         Label("No matching drives", systemImage: "line.3.horizontal.decrease.circle")
@@ -200,9 +181,27 @@ struct WorkspaceView: View {
                 }
             }
             if let message = model.copyMessage { Text(message).font(.callout).textSelection(.enabled).accessibilityAddTraits(.updatesFrequently) }
-            Label("Mounted drives appear in Finder. Files download as you open them.", systemImage: "info.circle")
-                .font(.callout).foregroundStyle(AppDesign.muted)
+            if (model.isSignedIn || model.hasDevToken) && !model.usingMock && !model.drives.isEmpty {
+                DisclosureGroup("Offline files", isExpanded: $showOffline) {
+                    OfflineFilesView(model: model).padding(.top, 12)
+                }
+            }
             if model.isSignedIn { ActivationCard(model: model) }
+        }
+    }
+
+    private var driveCount: some View {
+        Text("\(model.drives.count) drive\(model.drives.count == 1 ? "" : "s")")
+            .font(.callout).foregroundStyle(AppDesign.muted).fixedSize()
+    }
+
+    private var driveFilters: some View {
+        HStack(spacing: 8) {
+            TextField("Filter drives", text: $query).textFieldStyle(.roundedBorder).frame(width: 200)
+                .accessibilityLabel("Filter drives")
+            Picker("Show drives", selection: $filter) {
+                ForEach(DriveFilter.allCases) { Text($0.rawValue).tag($0) }
+            }.labelsHidden().frame(width: 140).accessibilityLabel("Show drives")
         }
     }
 }
@@ -259,7 +258,7 @@ struct DriveCard: View {
             HStack(spacing: 16) { identity; Spacer(minLength: 16); actions }
             VStack(alignment: .leading, spacing: 16) {
                 identity
-                HStack { Spacer(minLength: 0); actions }
+                actions.padding(.leading, 40)
             }
         }
         .padding(16)
@@ -286,31 +285,33 @@ struct DriveCard: View {
             if busy { ProgressView().controlSize(.small).accessibilityLabel(drive.mountState.label) }
             if drive.mountState == .mounted {
                 Button("Open in Finder") { model.openInFinder(drive) }.disabled(drive.mountPath == nil).buttonStyle(.borderedProminent)
-                Button("Add a file…") { model.addFile(to: drive) }
-                    .disabled(!model.isSignedIn || model.usingMock || drive.mountPath == nil || model.copyingFile || busy || model.mounts?.first(where: { $0.driveId == drive.driveId })?.readOnly == true)
+                Button("Add file…") { model.addFile(to: drive) }
+                    .disabled(!model.isSignedIn || drive.mountPath == nil || model.copyingFile || model.mounts?.first(where: { $0.driveId == drive.driveId })?.readOnly == true || busy || model.usingMock)
                 Button("Eject", systemImage: "eject") { model.unmount(drive) }.labelStyle(.iconOnly)
                     .help("Eject \(drive.name)").accessibilityLabel("Eject \(drive.name)").disabled(busy || model.usingMock)
             } else {
                 Button(busy ? "Please wait…" : "Mount") { model.mount(drive) }
                     .disabled(busy || model.usingMock).buttonStyle(.borderedProminent)
             }
-            if let pins = model.pins {
+            if model.pins != nil {
                 Menu {
-                    Button("Keep entire drive offline") { model.setPin(driveId: drive.driveId, path: "/", pinned: true) }
-                    ForEach(pins.filter { $0.driveId == drive.driveId }) { pin in
-                        Text("\(pin.path) · \(Int(pin.progress * 100))% cached")
-                        Button("Stop keeping \(pin.path) offline") { model.setPin(driveId: drive.driveId, path: pin.path, pinned: false) }
+                    if let pins = model.pins {
+                        Button("Keep entire drive offline") { model.setPin(driveId: drive.driveId, path: "/", pinned: true) }
+                        ForEach(pins.filter { $0.driveId == drive.driveId }) { pin in
+                            Text("\(pin.path) · \(Int(pin.progress * 100))% cached")
+                            Button("Stop keeping \(pin.path) offline") { model.setPin(driveId: drive.driveId, path: pin.path, pinned: false) }
+                        }
                     }
                 } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.button).menuIndicator(.hidden).fixedSize().help("Offline options for \(drive.name)")
-                .accessibilityLabel("Offline options for \(drive.name)").disabled(busy || model.usingMock)
+                    .menuStyle(.button).menuIndicator(.hidden).fixedSize().help("Drive options for \(drive.name)")
+                    .accessibilityLabel("Drive options for \(drive.name)").disabled(busy || model.usingMock)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
 }
 
-/// Drive names are the only searchable metadata exposed by the daemon.
+/// Filters the drive list independently of filename search.
 enum DriveFilter: String, CaseIterable, Identifiable {
     case all = "All", mounted = "Mounted", unmounted = "Not mounted", attention = "Needs attention"
     var id: Self { self }

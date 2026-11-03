@@ -76,15 +76,15 @@ export function App() {
         Skip to content
       </a>
       <header className="topbar">
-        <Link className="brand" to={user ? "/" : "/overview"} aria-label="Orbit home">
+        <Link className="brand" to={user ? "/" : "/overview"} aria-label={marketing ? "OrbitFS home" : "Orbit home"}>
           <OrbitMark className="brand-mark" />
-          <span className="brand-name">orbit</span>
+          <span className="brand-name">{marketing ? "OrbitFS" : "orbit"}</span>
         </Link>
         {marketing && <LandingNavigation />}
         <div className="topbar-right">
           {marketing ? (user ? <Link className="marketing-signin" to="/">Open workspace</Link> : <>
             <Link className="marketing-signin" to="/login">Sign in</Link>
-            <Button asChild variant="default"><Link to="/login">Get started</Link></Button>
+            <Button asChild variant="default"><Link to="/login">Get Early Access</Link></Button>
           </>) : <div className="theme-switch" role="group" aria-label="Appearance">
             {(["system", "light", "dark"] as const).map((value) => (
               <Button
@@ -104,10 +104,16 @@ export function App() {
       {user && !authPage && !marketing && (
         <aside className="sidebar">
           <nav aria-label="Main navigation">
-            <NavLink to="/" end className={location.pathname.startsWith("/drives/") ? "active" : undefined}><Icon name="drive" />Your drives</NavLink>
-            <NavLink to="/ai"><Icon name="sparkles" />Ask AI</NavLink>
-            <NavLink to="/settings" end><Icon name="user" />Account</NavLink>
-            <NavLink to="/settings/access-keys"><Icon name="key" />Access keys</NavLink>
+            <div className="nav-group">
+              <p className="nav-heading">Workspace</p>
+              <NavLink to="/" end className={location.pathname.startsWith("/drives/") ? "active" : undefined}><Icon name="drive" />Your drives</NavLink>
+              <NavLink to="/ai"><Icon name="sparkles" />Ask AI</NavLink>
+            </div>
+            <div className="nav-group">
+              <p className="nav-heading">Manage</p>
+              <NavLink to="/settings" end><Icon name="user" />Account</NavLink>
+              <NavLink to="/settings/access-keys"><Icon name="key" />Access keys</NavLink>
+            </div>
           </nav>
           <div className="sidebar-bottom">
             <Link className="profile-link" to="/settings">

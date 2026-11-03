@@ -42,6 +42,7 @@ import OrbitKit
             try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-progress-\(suffix)", output: output, scheme: scheme)
             try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 520, height: 580))
             try render(FileSearchView(model: model).preferredColorScheme(scheme), name: "search-\(suffix)", output: output, scheme: scheme)
+            try render(FileSearchView(model: model).preferredColorScheme(scheme), name: "search-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
             try render(WorkspaceAccountView(model: AppModel()).preferredColorScheme(scheme), name: "workspace-\(suffix)", output: output, scheme: scheme)
             try render(AIView(model: AppModel()).preferredColorScheme(scheme), name: "ai-\(suffix)", output: output, scheme: scheme)
             try render(SettingsView(model: model).preferredColorScheme(scheme), name: "settings-\(suffix)", output: output, scheme: scheme)
@@ -52,6 +53,11 @@ import OrbitKit
             let transfer = TransferInfo(id: "upload", driveId: "design", path: "/Brand/Style guide.pdf", direction: .upload,
                                         bytesDone: 50, bytesTotal: 100, status: .active)
             try render(TransfersView(transfers: [transfer], embedded: true).preferredColorScheme(scheme), name: "transfers-\(suffix)", output: output, scheme: scheme)
+            try render(TransfersView(transfers: [transfer], embedded: true).preferredColorScheme(scheme), name: "transfers-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
+            let pending = PendingUpload(driveId: "design", path: "/.DS_Store", bytes: 6000)
+            let summary = TransferInfo(id: "design:upload", driveId: "design", path: "/", direction: .upload,
+                                       bytesDone: 0, bytesTotal: 6000, status: .queued)
+            try render(TransfersView(transfers: [summary], uploads: UploadsSnapshot(pending: [pending], journalBytes: 7000, journalCapBytes: 10_000_000_000), state: .syncing, embedded: true).preferredColorScheme(scheme), name: "activity-pending-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
         }
         for name in ["signed-out", "service-unavailable", "drives", "settings", "permissions", "transfers", "offline-empty", "offline-progress", "search", "workspace", "ai", "setup", "menu", "drives-compact", "offline-compact"] {
             let light = try Data(contentsOf: output.appendingPathComponent("\(name)-light.png"))

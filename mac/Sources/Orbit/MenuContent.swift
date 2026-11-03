@@ -35,8 +35,8 @@ struct MenuContent: View {
                 Text(model.connectionTitle)
                 if model.usingMock { Text(model.engineInstall == .notInstalled ? "Engine not installed" : "Engine not running") }
                 if let n = model.notice { Text(n).lineLimit(3) }
-                Button(model.transferLine ?? "Transfers") { showingTransfers.toggle() }
-                    .accessibilityLabel("Show transfers")
+                Button(model.transferLine ?? "Activity") { showingTransfers.toggle() }
+                    .accessibilityLabel("Show activity")
                     .accessibilityValue(model.transferLine ?? "No transfers in progress")
                     .popover(isPresented: $showingTransfers) { TransfersView(transfers: model.transfers, uploads: model.uploads, recentUploads: model.recentUploads, state: model.status, available: !model.usingMock) }
                 if let conflict = model.lastConflict {

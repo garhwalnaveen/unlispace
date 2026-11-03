@@ -7,6 +7,9 @@ struct ActivationProgress: Codable, Equatable {
     var cloudSaveConfirmed = false
     var dismissed = false
 
+    var complete: Bool { finderOpened && fileAdded && cloudSaveConfirmed }
+    var showsChecklist: Bool { !dismissed && !complete }
+
     static func load(accountID: String?, defaults: UserDefaults) -> Self {
         guard let accountID, accountID != "pending",
               let data = defaults.data(forKey: key(accountID)),

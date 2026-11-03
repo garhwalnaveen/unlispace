@@ -5,7 +5,7 @@ struct OfflineFilesView: View {
     var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: AppDesign.sectionSpacing) {
             if model.usingMock || (!model.isSignedIn && !model.hasDevToken) {
                 ContentUnavailableView("Connect to see offline files", systemImage: "arrow.down.circle",
                     description: Text("Sign in and connect the engine to manage files kept on this Mac."))
@@ -14,14 +14,16 @@ struct OfflineFilesView: View {
                     !pins.contains { $0.driveId == drive.driveId && $0.path == "/" }
                 }
                 if !availableDrives.isEmpty {
-                    Menu("Keep a drive offline…") {
-                        ForEach(availableDrives) { drive in
-                            Button(drive.name) { model.setPin(driveId: drive.driveId, path: "/", pinned: true) }
-                                .disabled(model.isDriveBusy(drive) || model.pendingDriveActions.contains(drive.driveId))
+                    VStack(alignment: .leading, spacing: 12) {
+                        Menu("Keep a drive offline…") {
+                            ForEach(availableDrives) { drive in
+                                Button(drive.name) { model.setPin(driveId: drive.driveId, path: "/", pinned: true) }
+                                    .disabled(model.isDriveBusy(drive) || model.pendingDriveActions.contains(drive.driveId))
+                            }
                         }
-                    }
-                    Text("This keeps the entire selected drive on this Mac. Downloading it may use significant disk space.")
-                        .font(.callout).foregroundStyle(AppDesign.muted)
+                        Text("This keeps the entire selected drive on this Mac. Downloading it may use significant disk space.")
+                            .font(.callout).foregroundStyle(AppDesign.muted)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16).appPanel()
                 }
                 if pins.isEmpty {
                     ContentUnavailableView("Choose what stays on your Mac", systemImage: "externaldrive.badge.checkmark",
@@ -29,9 +31,12 @@ struct OfflineFilesView: View {
                 } else {
                     Text("\(pins.count) offline selection\(pins.count == 1 ? "" : "s")")
                         .font(.callout).foregroundStyle(AppDesign.muted)
-                    ForEach(pins) { pin in
-                        pinRow(pin)
-                    }
+                    VStack(spacing: 0) {
+                        ForEach(pins) { pin in
+                            if pin.id != pins.first?.id { Divider() }
+                            pinRow(pin)
+                        }
+                    }.appPanel()
                     Text("Stopping offline access allows these files to leave the local cache. You can download them again while connected.")
                         .font(.callout).foregroundStyle(AppDesign.muted)
                 }
@@ -63,7 +68,7 @@ struct OfflineFilesView: View {
             Text("\(ByteCountFormatter.string(fromByteCount: max(0, pin.cachedBytes), countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: max(0, pin.bytes), countStyle: .file)) cached")
                 .font(.caption).foregroundStyle(AppDesign.muted)
         }
-        .padding(20).appPanel()
+        .padding(16)
     }
 
     private func pinActions(_ pin: OfflinePin, drive: DriveInfo?) -> some View {

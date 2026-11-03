@@ -11,7 +11,10 @@ enum AppDesign {
     static let foreground = adaptive(light: 0x000000, dark: 0xfdfdfd)
     static let muted = adaptive(light: 0x606060, dark: 0xa0a0a0)
     static let accent = adaptive(light: 0x000000, dark: 0xfdfdfd)
-    static let title = Font.system(size: 28, weight: .semibold)
+    static let title = Font.system(size: 26, weight: .semibold)
+    static let pageInset: CGFloat = 32
+    static let sectionSpacing: CGFloat = 24
+    static let contentWidth: CGFloat = 1040
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in

@@ -153,6 +153,28 @@
 .capability-grid article > svg { width: 22px; height: 22px; margin-bottom: 18px; color: #bbb; stroke-width: 1.5; }
 .capability-grid h3 { font-size: 15px; margin-bottom: 10px; }
 .capability-grid p { margin: 0; font-size: 14px; line-height: 1.6; }
+.feature-details { margin-top: 40px; gap: 40px; }
+.feature-details article { scroll-margin-top: 110px; }
+.landing-resource-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 24px; margin-top: 40px; font-size: 14px; }
+.landing-context { border-block: 1px solid var(--border); }
+.landing-context .section-heading-copy { margin-bottom: 0; }
+.workflow-link { display: inline-block; margin-top: 18px; font-size: 13px; }
+.landing-contact { border-block: 1px solid var(--border); }
+.landing-contact [data-slot="button"] { margin-top: 28px; }
+.workspace-options { display: grid; gap: 28px; margin: 0; padding: 0; list-style: none; }
+.workspace-options li { display: flex; align-items: center; gap: 16px; }
+.workspace-options svg { width: 20px; color: #aaa; }
+.landing .landing-plan { display: block; }
+.landing-plan .feature-copy { display: flex; flex-direction: column; align-items: start; height: 100%; }
+.landing-plan .feature-copy > p:first-of-type { min-height: 68px; }
+.landing-plan .plan-availability { margin-block: 24px 16px; color: #fff; font-size: 24px; }
+.landing-plan ul { display: grid; gap: 14px; padding: 0; margin: 28px 0; list-style: none; font-size: 13px; line-height: 1.5; color: #aaa; }
+.landing-plan li { display: flex; align-items: start; gap: 10px; }
+.landing-plan li svg { flex: none; margin-top: 3px; }
+.landing-plan .plan-status, .landing-plan .feature-copy > [data-slot="button"]:last-child { margin-top: auto; }
+.plan-status { color: #aaa; font-size: 12px; }
+.plans-note { max-width: 720px; margin: 28px auto 0; text-align: center; font-size: 13px; line-height: 1.6; }
+.landing .faq-question { margin: 0; padding: 21px 0; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 400; letter-spacing: normal; text-wrap: initial; }
 .landing-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 100px; border-block: 1px solid var(--border); }
 .landing-steps > div > p { margin: 22px 0 25px; font-size: 16px; }
 .landing-steps ol { display: flex; flex-direction: column; gap: 32px; margin: 0; padding: 0; list-style: none; }

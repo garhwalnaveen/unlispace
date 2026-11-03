@@ -3,6 +3,13 @@ import OrbitKit
 
 struct FileSearchView: View {
     var model: AppModel
+    @Binding var searchRequest: Int
+    @FocusState private var searchFocused: Bool
+
+    init(model: AppModel, searchRequest: Binding<Int> = .constant(0)) {
+        self.model = model
+        self._searchRequest = searchRequest
+    }
     @State private var driveId = ""
     @State private var query = ""
     @State private var results: [FileSearchEntry] = []
@@ -17,48 +24,65 @@ struct FileSearchView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Picker("Drive", selection: $driveId) {
-                    Text("Choose a drive").tag("")
-                    ForEach(model.drives) { Text($0.name).tag($0.driveId) }
-                }.frame(maxWidth: 250)
-                TextField("Search filenames (3 or more characters)", text: $query).textFieldStyle(.roundedBorder)
-                    .onSubmit { revision += 1 }
-                Button("Search") { revision += 1 }.disabled(!canSearch)
-            }
-            Text("Searches file and folder names in the selected drive, including unmounted files. It does not search file contents.")
+            HStack(alignment: .bottom, spacing: 12) {
+                if model.drives.count > 1 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Drive").font(.caption).foregroundStyle(AppDesign.muted)
+                        Picker("Drive", selection: $driveId) {
+                            Text("Choose a drive").tag("")
+                            ForEach(model.drives) { Text($0.name).tag($0.driveId) }
+                        }.labelsHidden().frame(width: 160)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Filename").font(.caption).foregroundStyle(AppDesign.muted)
+                    TextField("3 or more characters", text: $query).textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Search filenames").focused($searchFocused).onSubmit { revision += 1 }
+                }
+                Button("Search") { revision += 1 }.disabled(!canSearch).buttonStyle(.borderedProminent)
+            }.padding(16).appPanel()
+            Text("Search file and folder names in a drive. Internet required.")
                 .font(.callout).foregroundStyle(AppDesign.muted)
             if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
             if !model.isSignedIn && !model.hasDevToken {
                 Text("Sign in to search your files.").foregroundStyle(AppDesign.muted)
-            } else if drive == nil {
-                Text("Choose a drive to begin searching.").foregroundStyle(AppDesign.muted)
             }
             if loading { ProgressView("Searching…") }
             if results.isEmpty, searched, !loading, error == nil {
                 ContentUnavailableView("No matching files", systemImage: "magnifyingglass", description: Text("Try another filename."))
             }
-            ForEach(results) { entry in
-                HStack {
-                    Image(systemName: entry.type == "folder" ? "folder" : "doc")
-                    VStack(alignment: .leading) {
-                        Text(entry.path).textSelection(.enabled)
-                        if entry.type != "folder" { Text(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)).font(.caption).foregroundStyle(AppDesign.muted) }
+            if !results.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(results) { entry in
+                        if entry.id != results.first?.id { Divider() }
+                        HStack(spacing: 12) {
+                            Image(systemName: entry.type == "folder" ? "folder" : "doc")
+                            VStack(alignment: .leading) {
+                                Text(entry.path).textSelection(.enabled)
+                                if entry.type != "folder" { Text(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)).font(.caption).foregroundStyle(AppDesign.muted) }
+                            }
+                            Spacer()
+                            if let drive, drive.mountState == .mounted, let path = drive.mountPath,
+                               let url = entry.localURL(mountPath: path) {
+                                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                            } else if let drive {
+                                Button("Mount drive") { model.mount(drive) }.disabled(model.isDriveBusy(drive))
+                            }
+                        }.padding(16)
                     }
-                    Spacer()
-                    if let drive, drive.mountState == .mounted, let path = drive.mountPath,
-                       let url = entry.localURL(mountPath: path) {
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                    } else if let drive {
-                        Button("Mount drive") { model.mount(drive) }.disabled(model.isDriveBusy(drive))
-                    }
-                }.padding(12).appPanel()
+                }.appPanel()
             }
             if cursor != nil {
                 Button("More results") {
                     moreTask?.cancel()
                     moreTask = Task { await search(append: true) }
                 }.disabled(loading)
+            }
+        }
+        .task(id: searchRequest) {
+            if searchRequest > 0 {
+                await Task.yield()
+                searchFocused = true
             }
         }
         .onChange(of: model.drives.map(\.driveId), initial: true) { _, ids in

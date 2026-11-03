@@ -7,9 +7,6 @@ cd "$ROOT"
 source "$ROOT/scripts/swift-env.sh"
 
 API_ENDPOINT="${ULS_API_URL:-}"
-if [[ -z "$API_ENDPOINT" && -n "${ULS_WORKERS_DOMAIN:-}" ]]; then
-  API_ENDPOINT="https://orbit-api.${ULS_WORKERS_DOMAIN}"
-fi
 
 swift build "${SWIFT_OPTIONS[@]}" -c release "$@"
 BIN="$(swift build "${SWIFT_OPTIONS[@]}" -c release --show-bin-path "$@")/Orbit"

@@ -50,7 +50,7 @@ function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | n
   const listing = useListing(api, path);
   const content = (
     <>
-      <div className="section-heading">
+      <div className="section-heading folder-toolbar">
         <p className="muted small">
           {listing.entries.length} item{listing.entries.length === 1 ? "" : "s"}
           {listing.cursor ? " loaded" : ""}
@@ -386,7 +386,6 @@ function DriveContents({
       </header>
       <ErrorNotice error={error} />
       {Boolean(error) && <Button onClick={reload}>Try again</Button>}
-      {!path && <DriveTools drive={drive} canManage={drive.access === "admin"} onDone={onDriveChanged} />}
       {loading && !file ? (
         <Loading>Opening drive…</Loading>
       ) : (
@@ -401,6 +400,7 @@ function DriveContents({
           />
         ))
       )}
+      {!path && <footer className="browser-tools"><DriveTools drive={drive} canManage={drive.access === "admin"} onDone={onDriveChanged} /></footer>}
     </>
   );
 }

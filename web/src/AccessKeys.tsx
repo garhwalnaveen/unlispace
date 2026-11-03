@@ -87,7 +87,7 @@ export function AccessKeys() {
           <Button variant="default" disabled={busy || Boolean(secret) || !org || !label.trim() || (!allDrives && !drives.length)}>{busy ? "Saving…" : "Create access key"}</Button>
         </form>}
       </section>
-      <section aria-labelledby="existing-keys-title"><h2 id="existing-keys-title">Your keys</h2>{keys.loading && <Loading />}
+      <section className="panel" aria-labelledby="existing-keys-title"><h2 id="existing-keys-title">Your keys</h2>{keys.loading && <Loading />}
         {!keys.loading && keys.data?.keys.length === 0 && <p className="muted">No access keys yet.</p>}
         {renderKeys(null)}
       </section>

@@ -16,51 +16,54 @@ struct WorkspaceAccountView: View {
     private var identity: String { "\(model.account?.id ?? "")|\(model.usingMock)" }
     private var loadKey: String { "\(identity)|\(revision)" }
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: AppDesign.sectionSpacing) {
             Text("Team and billing open in your browser, where you may need to sign in.").font(.callout).foregroundStyle(AppDesign.muted)
             if !model.isSignedIn || model.usingMock {
                 ContentUnavailableView("Connect your account", systemImage: "person.crop.circle", description: Text("Sign in and connect the engine to manage drives and your workspace."))
                     .frame(maxWidth: .infinity)
             } else {
                 if let email = model.account?.email {
-                    HStack {
-                        Text("Signed in as \(email)").foregroundStyle(AppDesign.muted)
-                        Button("Use a different account…") { model.useDifferentAccount() }.disabled(model.signingIn)
-                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Signed in as \(email)").foregroundStyle(AppDesign.muted).textSelection(.enabled)
+                        HStack(spacing: 8) {
+                            Button("Use a different account…") { model.useDifferentAccount() }.disabled(model.signingIn)
+                            Spacer()
+                            Button("Refresh workspaces") { revision += 1 }.disabled(loading || creating)
+                        }
+                    }.padding(16).appPanel()
                 }
                 if loading { ProgressView("Loading workspaces…") }
                 if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
-                Button("Refresh workspaces") { revision += 1 }.disabled(loading || creating)
                 ForEach(workspaces) { org in
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(org.name).font(.headline)
                             Text("\(org.tier.capitalized) · \(org.role.capitalized)").font(.callout).foregroundStyle(AppDesign.muted)
-                            if org.trialPending == true {
-                                Text("Your seven-day trial starts when storage is ready.").font(.callout)
-                            } else if let end = org.trialEndDate {
-                                Text("Trial end date: \(end.formatted(date: .abbreviated, time: .omitted))").font(.callout).foregroundStyle(AppDesign.muted)
-                            }
+                        }
+                        if org.trialPending == true {
+                            Text("Your seven-day trial starts when storage is ready.").font(.callout)
+                        } else if let end = org.trialEndDate {
+                            Text("Trial end date: \(end.formatted(date: .abbreviated, time: .omitted))").font(.callout).foregroundStyle(AppDesign.muted)
+                        }
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 16) { workspaceLinks(org) }
+                            VStack(alignment: .leading, spacing: 12) { workspaceLinks(org) }
+                        }
+                        if org.canManage {
+                            Divider()
+                            Text("Create a drive").font(.headline)
                             HStack {
-                                if let url = config?.page(orgId: org.id, section: "team") { Link("Manage team in browser", destination: url) }
-                                if let url = config?.page(orgId: org.id, section: "billing") { Link("Plan & billing in browser", destination: url) }
+                                TextField("New drive name", text: Binding(get: { drafts[org.id] ?? "" }, set: { drafts[org.id] = $0 })).textFieldStyle(.roundedBorder)
+                                    .disabled(creating)
+                                Button(creating && targetId == org.id ? "Creating…" : "Create drive") {
+                                    targetId = org.id
+                                    let creator = identity
+                                    let name = drafts[org.id] ?? ""
+                                    creationTask = Task { await create(org, creator: creator, draft: name) }
+                                }.buttonStyle(.borderedProminent).disabled(creating || (drafts[org.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
-                            if org.canManage {
-                                Divider()
-                                Text("Create a drive").font(.headline)
-                                HStack {
-                                    TextField("New drive name", text: Binding(get: { drafts[org.id] ?? "" }, set: { drafts[org.id] = $0 })).textFieldStyle(.roundedBorder)
-                                        .disabled(creating)
-                                    Button(creating && targetId == org.id ? "Creating…" : "Create drive") {
-                                        targetId = org.id
-                                        let creator = identity
-                                        let name = drafts[org.id] ?? ""
-                                        creationTask = Task { await create(org, creator: creator, draft: name) }
-                                    }.disabled(creating || (drafts[org.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                }
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(20).appPanel()
                 }
                 if !loading, workspaces.isEmpty, error == nil { Text("No workspaces are available for this account.") }
             }
@@ -70,6 +73,11 @@ struct WorkspaceAccountView: View {
             creationTask?.cancel(); creating = false; drafts = [:]; targetId = ""
         }
         .onDisappear { creationTask?.cancel() }
+    }
+
+    @ViewBuilder private func workspaceLinks(_ org: WorkspaceInfo) -> some View {
+        if let url = config?.page(orgId: org.id, section: "team") { Link("Manage team in browser", destination: url) }
+        if let url = config?.page(orgId: org.id, section: "billing") { Link("Plan & billing in browser", destination: url) }
     }
 
     private func load() async {

@@ -5,11 +5,68 @@ import OrbitKit
 @testable import Orbit
 
 @Suite @MainActor struct AppModelTests {
+    @Test func firstFileChecklistStaysDismissedAndIsScopedToAccount() throws {
+        let suite = "activation-tests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var progress = ActivationProgress()
+        #expect(progress.showsChecklist)
+        progress.finderOpened = true
+        progress.fileAdded = true
+        #expect(progress.showsChecklist)
+        progress.cloudSaveConfirmed = true
+        #expect(!progress.showsChecklist)
+        progress.cloudSaveConfirmed = false
+        progress.dismissed = true
+        progress.save(accountID: "one", defaults: defaults)
+        #expect(!ActivationProgress.load(accountID: "one", defaults: defaults).showsChecklist)
+        #expect(ActivationProgress.load(accountID: "two", defaults: defaults).showsChecklist)
+    }
+
+    @Test func firstFileChecklistRequiresKnownWritableAccess() throws {
+        func access(_ workspaces: String) throws -> [MeAccess.Workspace] {
+            try JSONDecoder().decode(MeAccess.self, from: Data("{\"workspaces\":[\(workspaces)]}".utf8)).workspaces
+        }
+        let expired = #"{"id":"a","name":"A","state":"expired","storageReady":true,"writable":false}"#
+        let writable = #"{"id":"b","name":"B","state":"paid","storageReady":true,"writable":true}"#
+        let unknown = #"{"id":"c","name":"C","state":"paid","storageReady":true}"#
+        let drive = DriveInfo(driveId: "one", name: "One", mountState: .mounted)
+        let readOnly = DaemonMount(driveId: "one", mountpoint: "/Volumes/One", readOnly: true, adapter: "smb")
+        #expect(!ActivationCard.canAddFile(access: try access(expired), drives: [], mounts: nil))
+        #expect(ActivationCard.canAddFile(access: try access("\(expired),\(writable)"), drives: [], mounts: nil))
+        #expect(ActivationCard.canAddFile(access: try access(unknown), drives: [], mounts: nil))
+        #expect(ActivationCard.canAddFile(access: nil, drives: [drive], mounts: nil))
+        #expect(!ActivationCard.canAddFile(access: nil, drives: [drive], mounts: [readOnly]))
+    }
+
     @Test func searchSelectsOnlyDriveAndKeepsValidSelection() {
         #expect(FileSearchView.selectedDrive("", available: ["a"]) == "a")
         #expect(FileSearchView.selectedDrive("a", available: ["a", "b"]) == "a")
         #expect(FileSearchView.selectedDrive("a", available: ["b", "c"]) == "")
         #expect(FileSearchView.selectedDrive("a", available: []) == "")
+    }
+
+    @Test func driveSummaryDoesNotConfirmTheFirstFileUpload() throws {
+        let suite = "upload-milestone-tests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppModel(defaults: defaults)
+        model.usingMock = false
+        model.account = AuthUser(id: "one", email: "local@example.invalid")
+        model.drives = [DriveInfo(driveId: "drive", name: "Drive", mountState: .mounted)]
+        var transfer = TransferInfo(id: "drive:upload", driveId: "drive", path: "/", direction: .upload,
+                                    bytesDone: 100, bytesTotal: 100, status: .done)
+        model.apply(.transfer(transfer))
+        #expect(!model.activation.fileAdded)
+        #expect(!model.activation.cloudSaveConfirmed)
+        transfer.path = "/.DS_Store"
+        model.apply(.transfer(transfer))
+        #expect(!model.activation.cloudSaveConfirmed)
+        transfer.id = "drive:upload:/notes.txt"
+        transfer.path = "/notes.txt"
+        model.apply(.transfer(transfer))
+        #expect(model.activation.fileAdded)
+        #expect(model.activation.cloudSaveConfirmed)
     }
 
     @Test func transferEventsReplaceProgressAndRemoveFinishedTransfers() {
@@ -64,6 +121,18 @@ import OrbitKit
         #expect(model.pins == nil)
         #expect(model.uploads == nil)
         #expect(model.mounts == nil)
+    }
+
+    @Test func successfulRefreshOnlyClearsItsOwnError() {
+        let model = AppModel()
+        model.setRefreshError("Engine unavailable")
+        model.setRefreshError(nil)
+        #expect(model.lastError == nil)
+
+        model.setRefreshError("Engine unavailable")
+        model.lastError = "Sign-in failed"
+        model.setRefreshError(nil)
+        #expect(model.lastError == "Sign-in failed")
     }
 
     @Test func refreshUsesM3Mountpoints() async throws {

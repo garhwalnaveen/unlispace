@@ -52,7 +52,7 @@ export function TeamPage() {
           <Button variant="default" disabled={busy || !data.teamAvailable}>{busy ? "Working…" : "Send invitation"}</Button>
         </form>
       </section>}
-      {data.invitations.length > 0 && <section className="panel"><h2>Pending invitations</h2><ul>{data.invitations.map(invite => <li key={invite.id}><strong>{invite.email}</strong> · {invite.role} · expires {formatDate(invite.expiresAt)} { (data.role === "owner" || invite.role !== "admin") && <Button disabled={busy} onClick={() => void run(() => api.revoke(id, invite.id), "Invitation revoked.")}>Revoke</Button>}</li>)}</ul></section>}
+      {data.invitations.length > 0 && <section className="panel"><h2>Pending invitations</h2><ul className="invitation-list">{data.invitations.map(invite => <li key={invite.id}><div><strong>{invite.email}</strong><p className="muted small">{invite.role} · expires {formatDate(invite.expiresAt)}</p></div> { (data.role === "owner" || invite.role !== "admin") && <Button disabled={busy} onClick={() => void run(() => api.revoke(id, invite.id), "Invitation revoked.")}>Revoke</Button>}</li>)}</ul></section>}
     </>}
     {removing && <Modal title="Remove member?" onClose={() => { if (!busy) setRemoving(null); }}><p>{removing.email} will lose access to this workspace. Previously issued drive credentials may remain valid for up to 15 minutes. Existing files remain in the workspace.</p><ErrorNotice error={actionError} /><div className="actions"><Button disabled={busy} onClick={() => setRemoving(null)}>Cancel</Button><Button variant="destructive" disabled={busy} onClick={() => void run(() => api.remove(id, removing.userId), "Member removed.", removing.userId === user?.id)}>Remove member</Button></div></Modal>}
   </>;

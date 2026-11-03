@@ -69,7 +69,7 @@ export function Home() {
                     ` · ${days > 0 ? `${days} trial day${days === 1 ? "" : "s"} remaining` : "Trial ended"}`}
                 </p>
               </div>
-              <div className="actions"><Link to={`/orgs/${encodeURIComponent(org.id)}/team`}>Team</Link><Link to={`/orgs/${encodeURIComponent(org.id)}/billing`}>Billing</Link>
+              <div className="actions"><Button asChild variant="ghost"><Link to={`/orgs/${encodeURIComponent(org.id)}/team`}>Team</Link></Button><Button asChild variant="ghost"><Link to={`/orgs/${encodeURIComponent(org.id)}/billing`}>Billing</Link></Button>
               {canManage && (
                 <Button variant="default" onClick={() => setAction({ kind: "create", org })}>
                   New drive
@@ -79,8 +79,7 @@ export function Home() {
             {trialPending && <p className="notice" role="status">Your account is verified. Your drive is not ready yet, so your seven-day trial has not started.</p>}
             {ws && !trialPending && !ws.storageReady && <p className="notice" role="status">Your account is verified. Your storage is still being prepared.</p>}
             {ws?.state === "expired" && <p className="notice" role="status">Your trial has ended. Your files remain readable; choose a plan in Billing to keep uploading.</p>}
-            {(drives.some((drive) => drive.status === "provisioning_failed") || (ws && !ws.storageReady)) && <Button disabled={loading || accessLoad.loading} onClick={reload}>Retry drive setup</Button>}
-            <OrgUsage orgId={org.id} />
+            {(drives.some((drive) => drive.status === "provisioning_failed") || (ws && !ws.storageReady)) && <div className="workspace-status"><p className="muted small">Storage setup needs attention.</p><Button disabled={loading || accessLoad.loading} onClick={reload}>Retry drive setup</Button></div>}
             <div className="drive-list">
               {drives.map((drive) => (
                 <article className="drive-card" key={drive.id}>
@@ -115,10 +114,11 @@ export function Home() {
               {!drives.length && (
                 <div className="empty">
                   <h3>No drives yet</h3>
-                  <p>Create a drive to get started.</p>
+                  <p>{canManage ? "Create a drive to get started." : "A workspace owner or admin can create a drive."}</p>
                 </div>
               )}
             </div>
+            <footer className="org-storage"><OrgUsage orgId={org.id} /></footer>
           </section>
         );
       })}

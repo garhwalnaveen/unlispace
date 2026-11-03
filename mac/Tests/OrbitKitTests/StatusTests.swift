@@ -35,6 +35,33 @@ import Foundation
         #expect(TransferSummary.uploadTitle(uploads: snapshot, transfers: [], state: .offline, available: true, recentUploads: [failure]) == "Offline · Cloud save not confirmed")
     }
 
+    @Test func activityCombinesQueueAndEventsByDriveAndPath() {
+        let pending = [PendingUpload(driveId: "a", path: "/.DS_Store", bytes: 1),
+                       PendingUpload(driveId: "b", path: "/.DS_Store", bytes: 2)]
+        let failed = TransferInfo(id: "1", driveId: "a", path: "/.DS_Store", direction: .upload, bytesDone: 0, bytesTotal: 1, status: .failed)
+        let download = TransferInfo(id: "2", driveId: "b", path: "/.DS_Store", direction: .download, bytesDone: 0, bytesTotal: 2, status: .active)
+        let rows = TransferActivity.list(pending: pending, transfers: [download], recentUploads: [failed])
+        #expect(rows.count == 3)
+        #expect(rows[0].pending == pending[0] && rows[0].transfer == failed)
+        #expect(rows[1].pending == pending[1] && rows[1].transfer == nil)
+        #expect(rows[2].transfer == download)
+    }
+
+    @Test func activityHandlesDriveAggregateEvents() {
+        let pending = PendingUpload(driveId: "a", path: "/.DS_Store", bytes: 1)
+        let queued = TransferInfo(id: "a:upload", driveId: "a", path: "/", direction: .upload, bytesDone: 0, bytesTotal: 1, status: .queued)
+        var done = queued
+        done.status = .done
+        var failed = queued
+        failed.status = .failed
+        let fileDone = TransferInfo(id: "file", driveId: "a", path: "/file", direction: .upload, bytesDone: 1, bytesTotal: 1, status: .done)
+        #expect(TransferActivity.list(pending: [pending], transfers: [queued], recentUploads: []).count == 1)
+        #expect(TransferActivity.list(pending: [pending], transfers: [failed], recentUploads: []).count == 2)
+        #expect(TransferActivity.list(pending: [], transfers: [queued], recentUploads: []).first?.transfer == queued)
+        let completed = TransferActivity.list(pending: [], transfers: [], recentUploads: [done, fileDone])
+        #expect(completed.count == 1 && completed.first?.transfer == fileDone)
+    }
+
     @Test func endpointValidation() {
         #expect(AppSettings.validateEndpoint("https://api.example.com") != nil)
         #expect(AppSettings.validateEndpoint("http://localhost:8787") != nil)
