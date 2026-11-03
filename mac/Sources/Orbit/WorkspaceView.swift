@@ -42,17 +42,22 @@ struct WorkspaceView: View {
                             .foregroundStyle(AppDesign.muted)
                     }
                 }.padding(22)
-                List(selection: $page) {
-                    Section("Workspace") {
-                        navigationRow(.drives)
-                        navigationRow(.transfers)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            navigationHeading("Workspace")
+                            navigationRow(.drives)
+                            navigationRow(.transfers)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            navigationHeading("On this Mac")
+                            navigationRow(.offline)
+                        }
                     }
-                    Section("On this Mac") {
-                        navigationRow(.offline)
-                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 10)
                 }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
+                .frame(maxHeight: .infinity)
                 VStack(alignment: .leading, spacing: 14) {
                     Label(model.connectionTitle, systemImage: model.symbolName)
                         .font(.system(size: 11, weight: .medium))
@@ -150,15 +155,39 @@ struct WorkspaceView: View {
         .preferredColorScheme(appearance == "system" ? nil : appearance == "dark" ? .dark : .light)
     }
 
+    private func navigationHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(AppDesign.muted)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
     private func navigationRow(_ item: Page) -> some View {
-        HStack(spacing: 10) {
-            Label(item.rawValue, systemImage: item.symbol)
-                .font(.system(size: 13, weight: page == item ? .semibold : .regular))
-            Spacer(minLength: 0)
-            if item == .drives && !model.usingMock && !model.drives.isEmpty {
-                Text("\(model.drives.count)").font(.caption).monospacedDigit()
+        Button { page = item } label: {
+            HStack(spacing: 10) {
+                Image(systemName: item.symbol)
+                    .font(.system(size: 16))
+                    .frame(width: 20)
+                    .foregroundStyle(page == item ? AppDesign.foreground : AppDesign.muted)
+                Text(item.rawValue)
+                    .font(.system(size: 13, weight: page == item ? .semibold : .regular))
+                    .foregroundStyle(AppDesign.foreground)
+                Spacer(minLength: 0)
+                if item == .drives && !model.usingMock && !model.drives.isEmpty {
+                    Text("\(model.drives.count)")
+                        .font(.caption).monospacedDigit()
+                        .foregroundStyle(AppDesign.muted)
+                }
             }
-        }.tag(item).padding(.vertical, 6)
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .background(page == item ? AppDesign.subtle : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(page == item ? .isSelected : [])
+        .help(item.rawValue)
     }
 
     private func drives(onAppear: @escaping () -> Void) -> some View {

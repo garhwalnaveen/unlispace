@@ -141,7 +141,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 36px; }
 .page-heading p { max-width: 68ch; }
 .page-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
 .page-heading p, .section-heading p { margin: 0; color: var(--muted-foreground); }
-.page-heading > div > a { display: inline-block; font-size: 12px; margin-bottom: 8px; color: var(--muted-foreground); }
+.page-heading > div > a:not([data-slot="button"]) { display: inline-block; font-size: 12px; margin-bottom: 8px; color: var(--muted-foreground); }
 .section-heading { margin-bottom: 16px; }
 .section-heading h2 { margin-bottom: 2px; }
 .actions { flex-wrap: wrap; }
