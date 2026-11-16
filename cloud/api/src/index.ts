@@ -5,169 +5,53 @@ export { ControlPlane } from "./control-plane";
 import type { AppEnv } from "./env";
 import type { Ctx, Deps } from "./ctx";
 import { selectSender } from "./email";
-import { HttpError, corsHeaders, errBody, json, preflight, readJson, redirect, str } from "./http";
-import { configured, googleCallback, googleStart } from "./google";
-import { takeOneTime, putOneTime } from "./onetime";
-import { normalizeEmail, otpStart, otpVerify } from "./otp";
+import { HttpError, corsHeaders, errBody, json, preflight } from "./http";
+import { authRoutes } from "./auth-routes";
+import { authed, dispatch, open, type Route } from "./router";
 import * as R from "./resources";
 import * as K from "./access-keys";
 import * as B from "./billing";
 import * as T from "./teams";
 import * as AI from "./ai";
-import { authenticate, createSession, logout, refreshSession } from "./session";
-import { B64URL_RE as B64URL, PKCE_VERIFIER_RE, sha256B64url, timingSafeEqual, TOKEN43_RE } from "./util";
-import { findOrCreateUser } from "./users";
 
-/** Consume a one-time PKCE code and return its user, or throw `error` (400). */
-async function exchangePkceCode<P>(ctx: Ctx, kind: "handoff" | "desktop", code: string, verifier: string, challengeOf: (p: P) => string | undefined, error: string) {
-	const row = await takeOneTime<P>(ctx, kind, code);
-	const challenge = row ? challengeOf(row.payload) : undefined;
-	if (!row?.userId || !challenge || !timingSafeEqual(await sha256B64url(verifier), challenge)) throw new HttpError(400, error);
-	const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.userId).first<{ id: string; email: string }>();
-	if (!user) throw new HttpError(400, error);
-	return { user, payload: row.payload };
-}
+const routes: Route[] = [
+	open("GET", "/healthz", () => json({ ok: true })),
+	open("GET", "/client-config", (ctx) => json({ webOrigin: ctx.env.ULS_WEB_ORIGIN })),
+	open("GET", "/billing/catalog", (ctx) => B.getCatalog(ctx)),
+	open("POST", "/webhooks/dodo", (ctx) => B.webhook(ctx)),
+	...authRoutes,
 
-async function route(ctx: Ctx): Promise<Response> {
-	const { req, url } = ctx;
-	const m = req.method;
-	const p = url.pathname.replace(/\/+$/, "") || "/";
-	const seg = p.split("/").filter(Boolean);
+	authed("GET", "/me", (ctx, a) => R.getMe(ctx, a)),
+	authed("PATCH", "/me", (ctx, a) => R.patchMe(ctx, a)),
+	authed("GET", "/me/access", (ctx, a) => R.getMeAccess(ctx, a)),
 
-	if (p === "/healthz" && m === "GET") return json({ ok: true });
-	if (p === "/client-config" && m === "GET") return json({ webOrigin: ctx.env.ULS_WEB_ORIGIN });
-	if (p === "/billing/catalog") {
-		if (m === "GET") return B.getCatalog(ctx);
-		throw new HttpError(405, "method_not_allowed");
-	}
-	if (p === "/webhooks/dodo") {
-		if (m === "POST") return B.webhook(ctx);
-		throw new HttpError(405, "method_not_allowed");
-	}
+	authed("GET", "/orgs", (ctx, a) => R.listOrgs(ctx, a)),
+	authed("POST", "/orgs/:org/drives", (ctx, a, [org]) => R.createDrive(ctx, a, org!)),
+	authed("GET", "/drives/:drive", (ctx, a, [drive]) => R.getDrive(ctx, a, drive!)),
+	authed("PATCH", "/drives/:drive", (ctx, a, [drive]) => R.patchDrive(ctx, a, drive!)),
+	authed("DELETE", "/drives/:drive", (ctx, a, [drive]) => R.deleteDrive(ctx, a, drive!)),
+	authed("POST", "/drives/:drive/fork", (ctx, a, [drive]) => R.forkDrive(ctx, a, drive!)),
+	authed("POST", "/drives/:drive/token", (ctx, a, [drive]) => R.driveToken(ctx, a, drive!)),
 
-	// ---- auth (unauthenticated unless noted) ----
-	if (seg[0] === "auth") {
-		const r = `${m} ${p}`;
-		switch (r) {
-			case "POST /auth/otp/start": {
-				const email = normalizeEmail((await readJson(req)).email);
-				if (!email) throw new HttpError(400, "bad_request", "valid email required");
-				await otpStart(ctx, email);
-				return json({ ok: true });
-			}
-			case "POST /auth/otp/verify": {
-				const body = await readJson(req);
-				const email = normalizeEmail(body.email);
-				const code = typeof body.code === "string" ? body.code.trim() : "";
-				if (!email || !(await otpVerify(ctx, email, code))) throw new HttpError(400, "invalid_code");
-				const { user, created } = await findOrCreateUser(ctx, email);
-				return json(await createSession(ctx, user, created));
-			}
-			case "GET /auth/google/start":
-				if (!configured(ctx)) throw new HttpError(501, "not_configured");
-				return googleStart(ctx);
-			case "GET /auth/google/callback":
-				if (!configured(ctx)) throw new HttpError(501, "not_configured");
-				return googleCallback(ctx);
-			case "POST /auth/handoff/exchange": {
-				const body = await readJson(req);
-				const h = str(body.handoff, 256);
-				const verifier = str(body.webCodeVerifier, 128);
-				if (!verifier || !PKCE_VERIFIER_RE.test(verifier) || !h) throw new HttpError(400, "invalid_handoff");
-				const { user, payload } = await exchangePkceCode<{ created: boolean; webChallenge: string }>(ctx, "handoff", h, verifier, (p) => p.webChallenge, "invalid_handoff");
-				return json(await createSession(ctx, user, !!payload?.created));
-			}
-			case "POST /auth/web-handoff": {
-				// A signed-in client (the desktop app) opens the web app as the same user. The web side
-				// proves possession of the verifier when it exchanges the handoff at /auth/handoff/exchange.
-				const a = await authenticate(ctx);
-				const ch = str((await readJson(req)).webChallenge, 128);
-				if (!ch || !TOKEN43_RE.test(ch)) throw new HttpError(400, "bad_request", "webChallenge must be a base64url SHA-256 PKCE challenge");
-				return json({ handoff: await putOneTime(ctx, "handoff", 60_000, a.userId, { created: false, webChallenge: ch }) });
-			}
-			case "POST /auth/refresh": {
-				const t = str((await readJson(req)).refreshToken, 128);
-				if (!t) throw new HttpError(401, "invalid_refresh");
-				return json(await refreshSession(ctx, t));
-			}
-			case "POST /auth/logout": {
-				const t = str((await readJson(req)).refreshToken, 128);
-				if (t) await logout(ctx, t);
-				return json({ ok: true });
-			}
-			case "GET /auth/desktop/start": {
-				const q = url.searchParams;
-				const state = q.get("state") ?? "";
-				const ch = q.get("code_challenge") ?? "";
-				if (!B64URL.test(state) || !B64URL.test(ch) || q.get("code_challenge_method") !== "S256") throw new HttpError(400, "bad_request", "state, code_challenge and code_challenge_method=S256 required");
-				return redirect(`${ctx.env.ULS_WEB_ORIGIN}/desktop?${new URLSearchParams({ state, code_challenge: ch, ...(q.get("switch") === "1" ? { switch: "1" } : {}) })}`);
-			}
-			case "POST /auth/desktop/code": {
-				const a = await authenticate(ctx);
-				const body = await readJson(req);
-				const state = str(body.state, 256);
-				const ch = str(body.codeChallenge, 256);
-				if (!state || !ch || !B64URL.test(ch)) throw new HttpError(400, "bad_request");
-				return json({ code: await putOneTime(ctx, "desktop", 120_000, a.userId, { state, codeChallenge: ch }) });
-			}
-			case "POST /auth/desktop/exchange": {
-				const body = await readJson(req);
-				const code = str(body.code, 256);
-				const verifier = str(body.codeVerifier, 256);
-				if (!code || !verifier) throw new HttpError(400, "invalid_grant");
-				// The code is consumed before the PKCE check, so a wrong verifier burns it.
-				const { user } = await exchangePkceCode<{ codeChallenge: string }>(ctx, "desktop", code, verifier, (p) => p.codeChallenge, "invalid_grant");
-				return json(await createSession(ctx, user, false));
-			}
-		}
-		throw new HttpError(404, "not_found");
-	}
+	authed("GET", "/keys", (ctx, a) => K.listKeys(ctx, a)),
+	authed("POST", "/keys", (ctx, a) => K.createKey(ctx, a)),
+	authed("DELETE", "/keys/:key", (ctx, a, [key]) => K.revokeKey(ctx, a, key!)),
 
-	// ---- authenticated resources ----
-	const teamRoute = /^\/orgs\/[^/]+\/(members(\/[^/]+)?|invites(\/[^/]+)?)$/.test(p);
-	const acceptRoute = /^\/invites\/[^/]+\/accept$/.test(p);
-	const known = teamRoute || acceptRoute || p === "/me" || p === "/me/access" || p === "/orgs" || p === "/ai/models" || p === "/ai/chat" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork))?)$/.test(p);
-	if (!known) throw new HttpError(404, "not_found");
-	const a = await authenticate(ctx);
-	if (acceptRoute) {
-		if (m === "POST") return T.acceptInvite(ctx, a, seg[1]!);
-	} else if (teamRoute) {
-		if (seg[2] === "members" && seg.length === 3 && m === "GET") return T.members(ctx, a, seg[1]!);
-		if (seg[2] === "members" && seg.length === 4 && (m === "PATCH" || m === "DELETE")) return T.changeMember(ctx, a, seg[1]!, seg[3]!);
-		if (seg[2] === "invites" && seg.length === 3 && m === "POST") return T.invite(ctx, a, seg[1]!);
-		if (seg[2] === "invites" && seg.length === 4 && m === "DELETE") return T.revokeInvite(ctx, a, seg[1]!, seg[3]!);
-	} else if (seg[0] === "keys") {
-		if (seg.length === 1 && m === "GET") return K.listKeys(ctx, a);
-		if (seg.length === 1 && m === "POST") return K.createKey(ctx, a);
-		if (seg.length === 2 && m === "DELETE") return K.revokeKey(ctx, a, seg[1]!);
-	} else if (seg[0] === "orgs" && seg[2] === "billing") {
-		if (seg.length === 3 && m === "GET") return B.getBilling(ctx, a, seg[1]!);
-		if (seg[3] === "checkout" && m === "POST") return B.checkout(ctx, a, seg[1]!);
-		if (seg[3] === "invoices" && m === "GET") return B.invoices(ctx, a, seg[1]!);
-		if (seg[3] === "portal" && m === "POST") return B.portal(ctx, a, seg[1]!);
-	} else if (seg[0] === "ai") {
-		if (p === "/ai/models" && m === "GET") return AI.models(ctx, a);
-		if (p === "/ai/chat" && m === "POST") return AI.chat(ctx, a);
-	} else if (p === "/me/access") {
-		if (m === "GET") return R.getMeAccess(ctx, a);
-	} else if (p === "/me") {
-		if (m === "GET") return R.getMe(ctx, a);
-		if (m === "PATCH") return R.patchMe(ctx, a);
-	} else if (p === "/orgs") {
-		if (m === "GET") return R.listOrgs(ctx, a);
-	} else if (seg[0] === "orgs") {
-		if (seg[2] === "drives" && m === "POST") return R.createDrive(ctx, a, seg[1]!);
-	} else if (seg[2] === "fork") {
-		if (m === "POST") return R.forkDrive(ctx, a, seg[1]!);
-	} else if (seg[2] === "token") {
-		if (m === "POST") return R.driveToken(ctx, a, seg[1]!);
-	} else {
-		if (m === "GET") return R.getDrive(ctx, a, seg[1]!);
-		if (m === "PATCH") return R.patchDrive(ctx, a, seg[1]!);
-		if (m === "DELETE") return R.deleteDrive(ctx, a, seg[1]!);
-	}
-	throw new HttpError(405, "method_not_allowed");
-}
+	authed("GET", "/orgs/:org/billing", (ctx, a, [org]) => B.getBilling(ctx, a, org!)),
+	authed("POST", "/orgs/:org/billing/checkout", (ctx, a, [org]) => B.checkout(ctx, a, org!)),
+	authed("GET", "/orgs/:org/billing/invoices", (ctx, a, [org]) => B.invoices(ctx, a, org!)),
+	authed("POST", "/orgs/:org/billing/portal", (ctx, a, [org]) => B.portal(ctx, a, org!)),
+
+	authed("GET", "/orgs/:org/members", (ctx, a, [org]) => T.members(ctx, a, org!)),
+	authed("PATCH", "/orgs/:org/members/:user", (ctx, a, [org, user]) => T.changeMember(ctx, a, org!, user!)),
+	authed("DELETE", "/orgs/:org/members/:user", (ctx, a, [org, user]) => T.changeMember(ctx, a, org!, user!)),
+	authed("POST", "/orgs/:org/invites", (ctx, a, [org]) => T.invite(ctx, a, org!)),
+	authed("DELETE", "/orgs/:org/invites/:invite", (ctx, a, [org, invite]) => T.revokeInvite(ctx, a, org!, invite!)),
+	authed("POST", "/invites/:token/accept", (ctx, a, [token]) => T.acceptInvite(ctx, a, token!)),
+
+	authed("GET", "/ai/models", (ctx, a) => AI.models(ctx, a)),
+	authed("POST", "/ai/chat", (ctx, a) => AI.chat(ctx, a)),
+];
 
 export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promise<Response> {
 	const cors = corsHeaders(env, req);
@@ -176,7 +60,7 @@ export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promis
 	const ctx: Ctx = { env, req, url: new URL(req.url), now: deps.now ? deps.now() : Date.now(), clock: deps.now ?? Date.now, fetch: f, email: deps.email ?? selectSender(env, f), dodo: deps.dodo };
 	let res: Response;
 	try {
-		res = await route(ctx);
+		res = await dispatch(routes, ctx);
 	} catch (e) {
 		if (e instanceof HttpError) res = json(errBody(e.code, e.message !== e.code ? e.message : undefined), e.status);
 		else {
