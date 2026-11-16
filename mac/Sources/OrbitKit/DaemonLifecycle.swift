@@ -69,11 +69,6 @@ public enum DaemonLifecycle {
         try completion.wait(timeout: timeout)
     }
 
-    public static func unregister() async {
-        do { try await SMAppService.agent(plistName: plistName).unregister() }
-        catch { Log.daemon.error("agent unregister failed: \(error.localizedDescription)") }
-    }
-
     public static func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
     }

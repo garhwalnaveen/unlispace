@@ -10,7 +10,7 @@ private let contractSession = #"""
     @Test func decodesContractShape() throws {
         let s = try JSONDecoder().decode(Session.self, from: Data(contractSession.utf8))
         #expect(s.expiresIn == 900)
-        #expect(s.user == SessionUser(id: "u_01", email: "a@b.co"))
+        #expect(s.user == AuthUser(id: "u_01", email: "a@b.co"))
         #expect(s.accountCreated)
         #expect(s.refreshToken.hasPrefix("rt_"))
     }
@@ -56,11 +56,17 @@ private let contractSession = #"""
     }
 
     @Test func startURL() throws {
-        let u = try DesktopAuthWire.startURL(api: URL(string: "https://api.orbit.com")!, challenge: "CH", state: "ST")
+        let api = URL(string: "https://api.orbit.com")!
+        let u = try DesktopAuthWire.startURL(api: api, challenge: "CH", state: "ST")
         let c = try #require(URLComponents(url: u, resolvingAgainstBaseURL: false))
         #expect(c.path == "/auth/desktop/start")
+        // Exact query: no `switch` unless requested.
         let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         #expect(q == ["state": "ST", "code_challenge": "CH", "code_challenge_method": "S256"])
+        let sw = try DesktopAuthWire.startURL(api: api, challenge: "CH", state: "ST", switchAccount: true)
+        let s = try #require(URLComponents(url: sw, resolvingAgainstBaseURL: false))
+        #expect(s.queryItems?.contains(URLQueryItem(name: "switch", value: "1")) == true)
+        #expect(s.queryItems?.contains(URLQueryItem(name: "state", value: "ST")) == true)
     }
 }
 
@@ -146,12 +152,15 @@ private let contractSession = #"""
         #expect(try DaemonCodec.decodeServerLine(line) == .event(.state(StateEvent(state: .signedOut))))
     }
 
-    @Test func mockCoversAuthMethods() async throws {
+    @Test func mockCoversDrivesAndAuthMethods() async throws {
         let m = MockDaemonClient()
+        #expect(try await m.listDrives().count == 2)
+        await #expect(throws: DaemonClientError.self) { try await m.mount(driveId: "nope") }
         #expect(try await m.authStatus().signedIn == false)
         let res = try await m.authSet(AuthSetParams(apiEndpoint: "http://x", accessToken: "a", refreshToken: "r"))
         #expect(try await m.authStatus() == AuthStatus(signedIn: true, user: res.user, apiEndpoint: "http://x"))
         try await m.mount(driveId: "demo")
+        #expect(try await m.listDrives().first { $0.driveId == "demo" }?.mountState == .mounted)
         try await m.authSignOut()
         #expect(try await m.authStatus().signedIn == false)
         #expect(try await m.listDrives().allSatisfy { $0.mountState == .unmounted })
@@ -187,7 +196,7 @@ private actor FlakyClient: DaemonClient {
 
 @Suite(.serialized) struct HandoffTests {
     private func makeSession() -> Session {
-        Session(accessToken: "AT", refreshToken: "RT", expiresIn: 900, user: SessionUser(id: "u_1", email: "a@b.co"), accountCreated: false)
+        Session(accessToken: "AT", refreshToken: "RT", expiresIn: 900, user: AuthUser(id: "u_1", email: "a@b.co"), accountCreated: false)
     }
     private func kc() -> Keychain { Keychain(service: "com.orbit.app.tests.\(UUID().uuidString)") }
     private let api = URL(string: "http://127.0.0.1:8788")!
@@ -259,7 +268,7 @@ private actor FlakyClient: DaemonClient {
         for s in [p.description, p.debugDescription, "\(p)", String(reflecting: p)] {
             #expect(!s.contains(jwt) && !s.contains(rt))
         }
-        let sess = Session(accessToken: jwt, refreshToken: rt, expiresIn: 900, user: SessionUser(id: "u", email: "e"), accountCreated: false)
+        let sess = Session(accessToken: jwt, refreshToken: rt, expiresIn: 900, user: AuthUser(id: "u", email: "e"), accountCreated: false)
         for s in ["\(sess)", String(reflecting: sess), sess.description] { #expect(!s.contains(jwt) && !s.contains(rt)) }
         let pend = PendingSession(apiEndpoint: "x", accessToken: jwt, refreshToken: rt, email: "e")
         #expect(!"\(pend)".contains(rt) && !"\(pend)".contains(jwt))
@@ -284,16 +293,6 @@ private actor FlakyClient: DaemonClient {
 }
 
 @Suite struct UploadPhaseAndAccessTests {
-    @Test func switchParameterOnlyWhenRequested() throws {
-        let api = URL(string: "https://api.orbit.com")!
-        let plain = try DesktopAuthWire.startURL(api: api, challenge: "CH", state: "ST")
-        #expect(!plain.absoluteString.contains("switch="))
-        let sw = try DesktopAuthWire.startURL(api: api, challenge: "CH", state: "ST", switchAccount: true)
-        let c = try #require(URLComponents(url: sw, resolvingAgainstBaseURL: false))
-        #expect(c.queryItems?.contains(URLQueryItem(name: "switch", value: "1")) == true)
-        #expect(c.queryItems?.contains(URLQueryItem(name: "state", value: "ST")) == true)
-    }
-
     @Test func pendingUploadDecodesNewAndOldShapes() throws {
         let new = Data(#"{"pending":[{"driveId":"d","path":"a","bytes":10,"phase":"uploading","bytesSent":5,"bytesTotal":10}],"journalBytes":10,"journalCapBytes":100}"#.utf8)
         let s = try JSONDecoder().decode(UploadsSnapshot.self, from: new)

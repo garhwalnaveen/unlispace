@@ -34,7 +34,7 @@ import Testing
             defer { handoff.discardPending() }
             #expect(try await handoff.deliver(session, api: context.api, to: nil) == .deferred)
             #expect(handoff.hasPending)
-            #expect(try await handoff.retryPending(to: client) == .delivered(AuthUser(id: session.user.id, email: session.user.email)))
+            #expect(try await handoff.retryPending(to: client) == .delivered(session.user))
             #expect(!handoff.hasPending)
             #expect(try await client.authStatus().signedIn)
             #expect(!(try await client.listDrives()).isEmpty)
