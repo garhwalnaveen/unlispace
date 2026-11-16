@@ -1,4 +1,4 @@
-//! Serde types for every request and response in `docs/design/m0-contract.md`.
+//! Serde types for every request and response in `docs/design/wire-contract.md`.
 //!
 //! Field names follow the contract exactly (camelCase in JSON, `h`/`n` for shard refs).
 

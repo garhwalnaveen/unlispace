@@ -17,7 +17,7 @@ Open **http://127.0.0.1:5173**. Use the same origin throughout sign-in and redir
 `localhost` and `127.0.0.1`).
 
 Run the control plane on **8788** and data plane on **8787**, following
-[`m1-contract.md`](../docs/design/m1-contract.md). In another terminal, from the repository root:
+[`control-plane-contract.md`](../docs/design/control-plane-contract.md). In another terminal, from the repository root:
 
 ```sh
 node cloud/scripts/dev-keys.mjs

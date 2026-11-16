@@ -1,4 +1,4 @@
-//! Async client for the Orbit M0 wire contract (`docs/design/m0-contract.md`).
+//! Async client for the Orbit M0 wire contract (`docs/design/wire-contract.md`).
 
 mod auth;
 mod access_key;

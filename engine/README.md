@@ -1,7 +1,7 @@
 # Orbit engine (M0)
 
 Rust workspace: chunker, wire types, HTTP/WebSocket client, shard cache, write journal, desktop auth, and the
-`ulsd` / `uls` binary (CLI, daemon, and loopback SMB/NFSv3 mounts). Contract: `../docs/design/m0-contract.md`.
+`ulsd` / `uls` binary (CLI, daemon, and loopback SMB/NFSv3 mounts). Contract: `../docs/design/wire-contract.md`.
 Deviations and open questions: `CONTRACT-NOTES.md`.
 
 | Crate | Role |

@@ -1,6 +1,6 @@
 import Foundation
 
-/// `Session` from docs/design/m1-contract.md §5.1:
+/// `Session` from docs/design/control-plane-contract.md §5.1:
 /// `{"accessToken","refreshToken","expiresIn":900,"user":{"id","email"},"accountCreated":bool}`.
 /// Every field is required; a missing one fails decoding. Deliberately not `Encodable`, and its
 /// `description` redacts the tokens.

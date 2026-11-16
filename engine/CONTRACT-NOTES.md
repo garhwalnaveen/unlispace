@@ -1,6 +1,6 @@
 # Contract notes (engine side)
 
-Where `docs/design/m0-contract.md` was ambiguous, wrong, or where the engine had to choose.
+Where `docs/design/wire-contract.md` was ambiguous, wrong, or where the engine had to choose.
 
 ## Golden vectors
 - Contract vector: `engine/uls-chunk/tests/golden.json` (chunk lengths `n` and SHA-256 `h`, plus input length and input SHA-256).

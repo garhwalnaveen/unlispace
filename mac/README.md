@@ -50,7 +50,7 @@ registered as a URL scheme. The LaunchAgent is registered only when you choose "
 in the menu. "Launch at login" uses `SMAppService.mainApp`.
 
 ## Sign-in (M1, default)
-Menu or Settings -> "Sign in to Orbit". Flow (`docs/design/m1-contract.md` 5.1):
+Menu or Settings -> "Sign in to Orbit". Flow (`docs/design/control-plane-contract.md` 5.1):
 1. `ASWebAuthenticationSession` (callback scheme `uls`) opens
    `GET {api}/auth/desktop/start?state&code_challenge&code_challenge_method=S256`.
 2. The web app returns `uls://auth/callback#code&state`. The app checks `state` (constant time)

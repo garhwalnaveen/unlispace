@@ -1,6 +1,6 @@
 //! `uls login`: headless desktop sign-in with PKCE.
 //!
-//! The contract (m1-contract §5.1) ends the browser flow at the custom-scheme URL
+//! The contract (control-plane-contract.md §5.1) ends the browser flow at the custom-scheme URL
 //! `uls://auth/callback#code=..&state=..`, which a terminal can't receive, so we print the start
 //! URL and ask for that URL to be pasted back. (A loopback redirect would need a contract change.)
 

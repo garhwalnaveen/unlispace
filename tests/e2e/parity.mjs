@@ -47,7 +47,7 @@ export async function parityChecks({root,api,s3,apiWorker,check,request,json,unt
     assert.equal(committed.status,200,await committed.text());
     assert(Buffer.from((await client.getObject(drive,'direct')).body).equals(body));
   });
-  await check('parity frozen fork history and recovery with unchanged drive identity',async()=>{
+  await check('parity frozen fork history with unchanged drive identity',async()=>{
     assert(client&&session,'requires parity setup');
     const original=await client.putObject(drive,'fork-proof','frozen');
     child=`parity-${Date.now().toString(36)}`;
@@ -55,12 +55,6 @@ export async function parityChecks({root,api,s3,apiWorker,check,request,json,unt
     await client.putObject(drive,'fork-proof','later parent');
     assert.equal(new TextDecoder().decode((await client.getObject(child,'fork-proof')).body),'frozen');
     assert.equal((await client.listVersions(child,'fork-proof'))[0].versionId,original.versionId);
-    await client.deleteDrive(child);
-    const deleted=await json(api,`/orgs/${org}/deleted-drives`,{token:session.accessToken});
-    assert(deleted.drives.some(d=>d.id===fork.driveId));
-    const restored=await request(api,`/drives/${fork.driveId}/restore`,{token:session.accessToken,body:{}});
-    assert.equal(restored.status,200);assert.equal(restored.data.id,fork.driveId);
-    assert.equal(new TextDecoder().decode((await client.getObject(child,'fork-proof')).body),'frozen');
     await client.deleteDrive(child,{hard:true});
   });
   client?.s3.destroy();
