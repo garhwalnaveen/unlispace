@@ -23,8 +23,8 @@ The web and native apps share the same hierarchy while retaining platform-approp
 ## Web visual fixture
 
 Run `npm ci --prefix web`, then `npm run dev --prefix web -- --host 0.0.0.0 --port 4187 --strictPort`.
-Open `/design-preview.html` on that development server. This is a **sample-data fixture**, not a
-signed-in account or a production backend verification. Its source is `web/test/visual-preview.tsx`.
+Open `/dev/design-preview.html` on that development server. This is a **sample-data fixture**, not a
+signed-in account or a production backend verification. Its source is `web/dev/visual-preview.tsx`.
 It renders the actual `App`, `Home`, `DriveBrowser`, and shared components, using an isolated
 in-memory auth store and a fail-closed fetch fixture: no action is sent to a real API.
 The production Vite build has only the normal `index.html` entry and does not ship the fixture.
