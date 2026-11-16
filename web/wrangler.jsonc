@@ -8,7 +8,7 @@
   },
   "env": {
     "production": {
-      "name": "orbit-web",
+      "name": "unlispace-web",
       "workers_dev": true,
       "preview_urls": false,
       "assets": {

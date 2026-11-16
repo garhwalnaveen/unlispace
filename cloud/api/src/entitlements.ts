@@ -12,6 +12,7 @@ export interface BillingRow {
 	seats: number;
 	storage_addons: number;
 	current_period_end: number | null;
+	past_due_ends_at: number | null;
 	cancel_at_period_end: number;
 	event_at: number;
 	event_id: string;
@@ -25,7 +26,7 @@ export interface OrgTrialRow { tier: string; trial_ends_at: number | null; trial
 
 /** Pure entitlement computation; `entitlements` and the batched org summaries both use it so they cannot drift. */
 export function computeEntitlements(org: OrgTrialRow, b: BillingRow | null | undefined, now: number) {
-	const paid = b?.status === "active" && b.current_period_end !== null && b.current_period_end > now;
+	const paid = (b?.status === "active" && b.current_period_end !== null && b.current_period_end > now) || (b?.status === "past_due" && b.past_due_ends_at !== null && b.past_due_ends_at > now);
 	const trial = org.trial_ends_at !== null && org.trial_ends_at > now;
 	const seats = paid ? b.seats : 1;
 	const storageAddons = paid ? b.storage_addons : 0;

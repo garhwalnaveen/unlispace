@@ -8,7 +8,7 @@ const input: CheckoutInput = { product_cart: [{ product_id: "p_test", quantity: 
 describe("Dodo HTTP adapter (fake fetch only)", () => {
 	it("uses documented checkout and portal paths, JSON and query shapes", async () => {
 		const w = await makeWorld({ DODO_PAYMENTS_API_KEY: "test-only", DODO_PAYMENTS_ENVIRONMENT: "test_mode" });
-		const fetcher = vi.fn<typeof fetch>(async (_url, _init) => Response.json({ checkout_url: "https://checkout.test/session", session_id: "cks_test" }));
+		const fetcher = vi.fn<typeof fetch>(async (url, init) => { new Request(url, init); return Response.json({ checkout_url: "https://checkout.test/session", session_id: "cks_test" }); });
 		const client = selectDodo(w.env, fetcher);
 		expect(await client.checkout(input)).toEqual({ url: "https://checkout.test/session", sessionId: "cks_test" });
 		const [url, init] = fetcher.mock.calls[0]!;
@@ -16,7 +16,7 @@ describe("Dodo HTTP adapter (fake fetch only)", () => {
 		expect(init?.method).toBe("POST");
 		expect(JSON.parse(String(init?.body))).toEqual(input);
 		expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-only");
-		expect(init?.redirect).toBe("error");
+		expect(init?.redirect).toBe("manual");
 		fetcher.mockResolvedValueOnce(Response.json({ link: "https://portal.test/session" }));
 		expect(await client.portal("cus/encoded", "https://app.test/billing")).toEqual({ url: "https://portal.test/session" });
 		const portal = new URL(String(fetcher.mock.calls[1]![0]));
@@ -60,6 +60,26 @@ describe("Dodo HTTP adapter (fake fetch only)", () => {
 		await expect(client.invoices("cus_test", 0)).rejects.toMatchObject({ status: 502 });
 		fetcher.mockRejectedValueOnce(new Error("network unavailable"));
 		await expect(client.checkout(input)).rejects.toMatchObject({ status: 502 });
+	});
+
+	it("logs only the operation and failure category for provider errors", async () => {
+		const w = await makeWorld({ DODO_PAYMENTS_API_KEY: "test-only", DODO_PAYMENTS_ENVIRONMENT: "live_mode" });
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const client = selectDodo(w.env, async () => new Response("sensitive provider details", { status: 500 }));
+			await expect(client.checkout(input)).rejects.toMatchObject({ code: "billing_unavailable" });
+			expect(log).toHaveBeenCalledWith("Dodo request failed", { operation: "checkout", status: 500, kind: "error" });
+		} finally { log.mockRestore(); }
+	});
+
+	it("rejects redirects without following them", async () => {
+		const w = await makeWorld({ DODO_PAYMENTS_API_KEY: "test-only", DODO_PAYMENTS_ENVIRONMENT: "test_mode" });
+		const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+			expect(new Request(url, init).redirect).toBe("manual");
+			return new Response(null, { status: 302, headers: { location: "https://other.test/" } });
+		});
+		await expect(selectDodo(w.env, fetcher).checkout(input)).rejects.toMatchObject({ code: "billing_unavailable" });
+		expect(fetcher).toHaveBeenCalledTimes(1);
 	});
 });
 

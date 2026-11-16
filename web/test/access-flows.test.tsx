@@ -74,7 +74,7 @@ it("every billing link and return target resolves to a rendered route", async ()
   await userEvent.click(link);
   expect(await screen.findByRole("heading", { name: "Your drives" })).toBeInTheDocument();
   const billing = (await screen.findAllByRole("link", { name: "Billing" }))[0]!;
-  expect(billing).toHaveAttribute("href", `/orgs/${drive.orgId}/billing`);
+  expect(billing).toHaveAttribute("href", "/billing");
   await userEvent.click(billing);
   expect(await screen.findByRole("heading", { name: "Billing" })).toBeInTheDocument();
 });

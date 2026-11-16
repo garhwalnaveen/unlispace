@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { otpFromLog } from './helpers.mjs';
@@ -46,6 +46,39 @@ export async function parityChecks({root,api,s3,apiWorker,check,request,json,unt
     const committed=await signed('PUT','commit',{shards,token:plan.token,size:body.length,contentHash:hash});
     assert.equal(committed.status,200,await committed.text());
     assert(Buffer.from((await client.getObject(drive,'direct')).body).equals(body));
+  });
+  await check('parity 200 nested keys upload concurrently through real Workers',async()=>{
+    assert(client,'requires parity setup');
+    const bytes=randomBytes(4096),prefix='benchmark-fixtures/';
+    for(let start=0;start<200;start+=8) {
+      await Promise.all(Array.from({length:Math.min(8,200-start)},(_,i)=>client.putObject(drive,`${prefix}${start+i}`,bytes)));
+    }
+    assert.deepEqual((await client.listObjects(drive,{prefix})).keys.sort(),Array.from({length:200},(_,i)=>`${prefix}${i}`).sort());
+  });
+  await check('parity published SDK edits and rename preserve bytes through real Workers',async()=>{
+    assert(client,'requires parity setup');
+    await client.putObject(drive,'benchmark-edit/source','abcdef');
+    await client.writeAt(drive,'benchmark-edit/source',1,'B');
+    await client.patch(drive,'benchmark-edit/source',[{offset:2,data:Buffer.from('C')}]);
+    await client.insert(drive,'benchmark-edit/source',3,'!');
+    await client.removeRange(drive,'benchmark-edit/source',3,1);
+    await client.truncate(drive,'benchmark-edit/source',5);
+    await client.rename(drive,'benchmark-edit/source','benchmark-edit/destination');
+    assert.equal(Buffer.from((await client.getObject(drive,'benchmark-edit/destination')).body).toString(),'aBCde');
+    await assert.rejects(()=>client.getObject(drive,'benchmark-edit/source'),error=>error.status===404);
+  });
+  await check('parity eight concurrent 32 and 64 MiB reads match exact uploaded bytes',async()=>{
+    assert(client,'requires parity setup');
+    const source=randomBytes(64*1024*1024);
+    for(const size of [32*1024*1024,64*1024*1024]) {
+      const bytes=source.subarray(0,size),expected=createHash('sha256').update(bytes).digest('hex');
+      await client.putObject(drive,'benchmark-large',bytes);
+      await Promise.all(Array.from({length:8},async(_,reader)=>{
+        const received=await client.getObject(drive,'benchmark-large');
+        assert.equal(received.body.length,size,`reader ${reader}: received byte count for ${size}`);
+        assert.equal(createHash('sha256').update(received.body).digest('hex'),expected,`reader ${reader}: SHA-256 for ${size}`);
+      }));
+    }
   });
   await check('parity frozen fork history with unchanged drive identity',async()=>{
     assert(client&&session,'requires parity setup');

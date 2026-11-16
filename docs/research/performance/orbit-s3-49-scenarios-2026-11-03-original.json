@@ -1,0 +1,560 @@
+{
+  "startedAt": "2026-11-03T01:12:18.533Z",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "bucket": "d-01m64ahpdcnbhv4v1m6n6haprp",
+  "prefix": "orbit-benchmark-e438ba06-bea5-4076-aada-36518b88913c/",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.12.1"
+  },
+  "method": {
+    "rounds": 2,
+    "warmups": 3,
+    "samplesPerRound": 8,
+    "concurrency": 8,
+    "maxSockets": 64,
+    "retries": 0,
+    "figure": "Median of round p50s; fanout rows use individual request latencies",
+    "cache": "No client object cache; server caches uncontrolled",
+    "verification": "SHA-256 after timing; streaming digest during timing",
+    "limitation": "Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment."
+  },
+  "rows": [
+    {
+      "name": "get 4 KiB",
+      "kind": "get",
+      "size": 4096,
+      "rounds": [
+        {
+          "p50Ms": 2478.1660835000002,
+          "samplesMs": [
+            1379.5385000000006,
+            2403.352959,
+            2463.297208,
+            2472.9895419999993,
+            2483.342625000001,
+            2857.428667,
+            3041.407625,
+            3135.942000000001
+          ]
+        },
+        {
+          "p50Ms": 1365.8265005000012,
+          "samplesMs": [
+            1268.3613750000004,
+            1284.6072920000006,
+            1306.8127910000003,
+            1318.9586670000026,
+            1412.6943339999998,
+            1455.5925840000018,
+            1456.18275,
+            1527.8916250000002
+          ]
+        }
+      ],
+      "status": "passed",
+      "medianMs": 1921.9962920000007
+    },
+    {
+      "name": "put 4 KiB",
+      "kind": "put",
+      "size": 4096,
+      "rounds": [
+        {
+          "p50Ms": 4062.1206045,
+          "samplesMs": [
+            3772.5102079999997,
+            4056.3041660000017,
+            4061.587166999998,
+            4062.026417000001,
+            4062.214791999999,
+            4089.6441669999986,
+            4145.389000000003,
+            4301.595999999998
+          ]
+        },
+        {
+          "p50Ms": 3814.794667000002,
+          "samplesMs": [
+            3796.8117500000008,
+            3798.191125000005,
+            3798.344750000004,
+            3798.389959,
+            3831.199375000004,
+            3832.700582999998,
+            3885.686125,
+            4017.7288749999934
+          ]
+        }
+      ],
+      "status": "passed",
+      "medianMs": 3938.457635750001
+    },
+    {
+      "name": "get 1 MiB",
+      "kind": "get",
+      "size": 1048576,
+      "rounds": [
+        {
+          "p50Ms": 7734.287374500003,
+          "samplesMs": [
+            4320.446791999988,
+            4977.023416000011,
+            6966.996082999991,
+            7603.080916000006,
+            7865.493833,
+            8025.827583000006,
+            8062.406333000006,
+            8547.925415999998
+          ]
+        },
+        {
+          "p50Ms": 6929.462604499997,
+          "samplesMs": [
+            4892.826874999999,
+            5399.869292000003,
+            6003.259833999997,
+            6659.4080419999955,
+            7199.517166999998,
+            7620.503625000012,
+            7642.872624999989,
+            7990.106415999995
+          ]
+        }
+      ],
+      "status": "passed",
+      "medianMs": 7331.8749895
+    },
+    {
+      "name": "put 1 MiB",
+      "kind": "put",
+      "size": 1048576,
+      "rounds": [
+        {
+          "p50Ms": 9906.395145499999,
+          "samplesMs": [
+            3411.678083999999,
+            8453.121582999986,
+            8476.121375000002,
+            9899.287457999992,
+            9913.502833000006,
+            9914.272459,
+            10159.75512500001,
+            10931.227290999988
+          ]
+        },
+        {
+          "p50Ms": 10856.375812500002,
+          "samplesMs": [
+            6152.8607090000005,
+            10158.712499999994,
+            10545.622208999994,
+            10793.722666999995,
+            10919.02895800001,
+            11423.114833,
+            11593.972291999991,
+            12243.049416000023
+          ]
+        }
+      ],
+      "status": "passed",
+      "medianMs": 10381.385479
+    },
+    {
+      "name": "get 32 MiB",
+      "kind": "get",
+      "size": 33554432,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          }
+        ]
+      }
+    },
+    {
+      "name": "put 32 MiB",
+      "kind": "put",
+      "size": 33554432,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "TimeoutError",
+            "code": "EPIPE"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "EPIPE"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "EPIPE"
+          }
+        ]
+      }
+    },
+    {
+      "name": "get 64 MiB",
+      "kind": "get",
+      "size": 67108864,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          }
+        ]
+      }
+    },
+    {
+      "name": "put 64 MiB",
+      "kind": "put",
+      "size": 67108864,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "TimeoutError",
+            "code": "EPIPE"
+          }
+        ]
+      }
+    },
+    {
+      "name": "overwrite 4 KiB",
+      "kind": "overwrite",
+      "size": 4096,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "TimeoutError"
+      }
+    },
+    {
+      "name": "overwrite 1 MiB",
+      "kind": "overwrite",
+      "size": 1048576,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "TimeoutError",
+            "code": "EPIPE"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "EPIPE"
+          }
+        ]
+      }
+    },
+    {
+      "name": "multipart put 64 MiB × 8 MiB",
+      "kind": "multipart",
+      "size": 67108864,
+      "part": 8388608,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "AbortError"
+          },
+          {
+            "name": "AbortError"
+          }
+        ]
+      }
+    },
+    {
+      "name": "stream get 64 MiB",
+      "kind": "stream",
+      "size": 67108864,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "Error",
+            "code": "ENOTFOUND"
+          }
+        ]
+      }
+    },
+    {
+      "name": "multipart put 256 MiB × 16 MiB",
+      "kind": "multipart",
+      "size": 268435456,
+      "part": 16777216,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "Error",
+        "code": "ENOTFOUND"
+      }
+    },
+    {
+      "name": "stream get 256 MiB",
+      "kind": "stream",
+      "size": 268435456,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "Error",
+        "code": "ENOTFOUND"
+      }
+    },
+    {
+      "name": "range 64 KiB of 64 MiB",
+      "kind": "range",
+      "size": 67108864,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "TimeoutError"
+          }
+        ]
+      }
+    },
+    {
+      "name": "head",
+      "kind": "head",
+      "size": 4096,
+      "rounds": [
+        {
+          "p50Ms": 1707.6218125000596,
+          "samplesMs": [
+            1293.842166999355,
+            1582.2599589992315,
+            1585.4900419991463,
+            1668.996584000066,
+            1746.2470410000533,
+            1752.217791000381,
+            1962.0317079983652,
+            2647.939332999289
+          ]
+        },
+        {
+          "p50Ms": 1268.5128749990836,
+          "samplesMs": [
+            1158.1806669998914,
+            1188.0057089999318,
+            1189.5064169988036,
+            1268.155332999304,
+            1268.8704169988632,
+            1270.7577919997275,
+            1418.9525419995189,
+            1509.3148329984397
+          ]
+        }
+      ],
+      "status": "passed",
+      "medianMs": 1488.0673437495716
+    },
+    {
+      "name": "list 200 keys",
+      "kind": "list",
+      "size": 4096,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "rename 64 MiB",
+      "kind": "rename",
+      "size": 67108864,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "S3SDKError",
+        "code": "InvalidResponse",
+        "status": 200
+      }
+    },
+    {
+      "name": "move dir 200 × 64 KiB",
+      "kind": "move",
+      "size": 65536,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "fanout get 1000 × 4 KiB, 32 at once",
+      "kind": "fanout-get",
+      "size": 4096,
+      "count": 1000,
+      "concurrency": 32,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          }
+        ]
+      }
+    },
+    {
+      "name": "fanout put 1000 × 4 KiB, 32 at once",
+      "kind": "fanout-put",
+      "size": 4096,
+      "count": 1000,
+      "concurrency": 32,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fanout get 1000 × 4 KiB, 64 at once",
+      "kind": "fanout-get",
+      "size": 4096,
+      "count": 1000,
+      "concurrency": 64,
+      "rounds": [],
+      "status": "failed",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          },
+          {
+            "name": "S3SDKError",
+            "code": "InvalidArgument",
+            "status": 400
+          }
+        ]
+      }
+    }
+  ],
+  "preflight": "passed",
+  "multipartAbortError": "Error"
+}

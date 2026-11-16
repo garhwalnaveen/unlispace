@@ -1,19 +1,24 @@
 # Orbit S3: 49-scenario benchmark preparation
 
-Status on 3 November 2026: **hosted run in progress**, started at 06:42 IST.
-The random 4 KiB publish/retrieve preflight passed.
+Status on 3 November 2026: **run finished with incomplete timings**. All 49 names were
+attempted; five yielded verified two-round timings and 44 failed or were inconclusive.
+A repeat of 37 transport-affected cases also failed. Power/network interruptions prevent
+a reliable full comparison. See the [final report](orbit-s3-49-scenarios-2026-11-03.md)
+and accompanying JSON/CSV for every case and all preserved attempts.
 
-First checkpoint: four scenarios passed; the 32 MiB GET failed SHA-256 verification
-in two concurrent reads. Its sequential warm-ups had passed. The remaining scenarios
-continue; the read failure is not published as a passing latency. Cause is not yet established.
-A quiet completion check in this chat runs every 15 minutes to finish reporting and key revocation.
+Three additional reads of the same 32 MiB immutable version (one sequential, two concurrent)
+returned identical hashes and exact lengths. The original concurrency-eight SDK failures
+remain unresolved. All three generated folders were soft-deleted and verified absent;
+incomplete multipart listings were verified empty. One orphan upload was aborted.
+The temporary scoped key was revoked and confirmed in Orbit's UI at 10:47 IST;
+the private credentials file was removed. Immutable history may retain storage quota.
 
 The deployed endpoint `https://unlispace-s3.naveen-f3d.workers.dev` responds with Orbit's
 `x-uls-protocol: 1` header. The first signed-in workspace reported “Trial ended”.
 At the user's request, switched to Luckas's Gmail account on 3 November; its workspace
 shows three trial days remaining and 465.7 GiB capacity. It has no existing S3 keys.
 A read/write key was created with only the Space drive selected after the user's explicit
-confirmation. It will be revoked after the run. Billing, entitlements and deployments were not changed.
+confirmation. It was revoked after diagnostics and cleanup. Billing, entitlements and deployments were not changed.
 
 ## Runner
 
@@ -82,6 +87,6 @@ can leave generated objects behind; the report records their prefix.
 - This measures the hosted S3 API. It does not measure the native macOS app, SMB mounts,
   sustained throughput, p99 latency or production hardware limits.
 
-Validation: five local tests cover the 49-case inventory, exact-name retest selection, edit byte oracle, median calculation,
+Validation: six local tests cover the 49-case inventory, exact-name retest selection, safe assertion-digest reporting, edit byte oracle, median calculation,
 concurrency limits, draining workers on failure, and refusal-before-workload behavior through
 a real local HTTP socket. All 49 scenario names were also checked against the supplied table.

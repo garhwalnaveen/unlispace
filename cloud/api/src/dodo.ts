@@ -30,14 +30,17 @@ export function selectDodo(env: AppEnv, fetcher: typeof fetch): DodoPayments {
 	const request = async (path: string, body?: unknown): Promise<Record<string, unknown>> => {
 		if (!env.DODO_PAYMENTS_API_KEY || !["test_mode", "live_mode"].includes(env.DODO_PAYMENTS_ENVIRONMENT ?? "")) throw new HttpError(503, "billing_not_configured");
 		const origin = env.DODO_PAYMENTS_ENVIRONMENT === "live_mode" ? "https://live.dodopayments.com" : "https://test.dodopayments.com";
+		const operation = path === "/checkouts" ? "checkout" : path.startsWith("/checkouts/") ? "checkout_status" : path.startsWith("/customers/") ? "portal" : "payments";
+		let status: number | undefined;
 		try {
 			const res = await fetcher(origin + path, {
 				method: body === undefined ? "GET" : "POST",
 				headers: { authorization: `Bearer ${env.DODO_PAYMENTS_API_KEY}`, "content-type": "application/json" },
 				body: body === undefined ? undefined : JSON.stringify(body),
 				signal: AbortSignal.timeout(10_000),
-				redirect: "error",
+				redirect: "manual",
 			});
+			status = res.status;
 			if (!res.ok) {
 				await res.body?.cancel();
 				if (res.status >= 400 && res.status < 500 && ![408, 409, 429].includes(res.status)) throw new HttpError(502, "billing_rejected");
@@ -47,6 +50,7 @@ export function selectDodo(env: AppEnv, fetcher: typeof fetch): DodoPayments {
 			if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid response");
 			return data as Record<string, unknown>;
 		} catch (error) {
+			console.error("Dodo request failed", { operation, status, kind: error instanceof HttpError ? "http_error" : error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "error" });
 			if (error instanceof HttpError) throw error;
 			// Provider bodies can contain payment details. Never log or forward them.
 			throw new HttpError(502, "billing_unavailable");
@@ -60,8 +64,12 @@ export function selectDodo(env: AppEnv, fetcher: typeof fetch): DodoPayments {
 	return {
 		async checkout(input) {
 			const data = await request("/checkouts", input);
-			if (typeof data.session_id !== "string" || !data.session_id) throw new HttpError(502, "billing_unavailable");
-			return { url: url(data.checkout_url), sessionId: data.session_id };
+			if (typeof data.session_id !== "string" || !data.session_id) {
+				console.error("Dodo checkout response invalid", { field: "session_id" });
+				throw new HttpError(502, "billing_unavailable");
+			}
+			try { return { url: url(data.checkout_url), sessionId: data.session_id }; }
+			catch (error) { console.error("Dodo checkout response invalid", { field: "checkout_url" }); throw error; }
 		},
 		async checkoutStatus(sessionId) {
 			const data = await request(`/checkouts/${encodeURIComponent(sessionId)}`);

@@ -28,17 +28,6 @@ export function Settings() {
       setBusy(false);
     }
   }
-  async function logout() {
-    setBusy(true);
-    setActionError(undefined);
-    try {
-      await auth.logout();
-    } catch (reason) {
-      setActionError(reason);
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
     <>
       <header className="page-heading">
@@ -80,16 +69,7 @@ export function Settings() {
           </form>
         )}
         <ErrorNotice error={actionError} />
-        <div className="signout">
-          <h2>End this session</h2>
-          <p className="muted small">
-            Sign out of this browser, including its other tabs.
-          </p>
-          <Button disabled={busy} onClick={() => void logout()}>
-            Sign out
-          </Button>
-        </div>
-        <div className="signout">
+        <div className="connected-tools">
           <h2>Connected tools</h2>
           <p className="muted small">Manage credentials for apps that access your drives.</p>
           <Button asChild><Link to="/settings/access-keys">Manage access keys</Link></Button>

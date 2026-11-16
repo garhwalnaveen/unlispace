@@ -1,0 +1,135 @@
+{
+  "startedAt": "2026-11-03T10:51:35.990Z",
+  "prefix": "orbit-fix-verification-40436a53-104a-46a8-94dd-d22d3e6298ff/",
+  "fixtureSHA256": "c9289cee9c7e96b047fc2688c536fa836a1845074e6d39250163c8618255d2e7",
+  "rounds": [
+    {
+      "transport": "signed fetch",
+      "requests": [
+        {
+          "i": 0,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 400,
+          "reason": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Code>InvalidArgument</Code><Message>upload failed: put: Reduce your concurrent request rate for the same object. (10058)</Message><Resource>/d-01m64ahpdcnbhv4v1m6n6haprp/orbit-fix-verification-40436a53-104a-46a8-94dd-d22d3e6298ff/transport/fetch-0</Resource><RequestId>feb0a501-3844-4eb0-9dc0-2a9ca6829810</RequestId></Error>",
+          "status": "failed",
+          "error": {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          "finishedAt": "2026-11-03T10:51:39.524Z"
+        },
+        {
+          "i": 1,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:40.893Z"
+        },
+        {
+          "i": 2,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:40.446Z"
+        },
+        {
+          "i": 3,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:40.892Z"
+        },
+        {
+          "i": 4,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:40.893Z"
+        },
+        {
+          "i": 5,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:40.893Z"
+        },
+        {
+          "i": 6,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:41.085Z"
+        },
+        {
+          "i": 7,
+          "startedAt": "2026-11-03T10:51:35.991Z",
+          "http": 400,
+          "reason": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Code>InvalidArgument</Code><Message>upload failed: put: Reduce your concurrent request rate for the same object. (10058)</Message><Resource>/d-01m64ahpdcnbhv4v1m6n6haprp/orbit-fix-verification-40436a53-104a-46a8-94dd-d22d3e6298ff/transport/fetch-7</Resource><RequestId>002b3bd1-6842-4f28-a339-6e1184aba959</RequestId></Error>",
+          "status": "failed",
+          "error": {
+            "name": "AssertionError",
+            "code": "ERR_ASSERTION"
+          },
+          "finishedAt": "2026-11-03T10:51:39.650Z"
+        }
+      ]
+    },
+    {
+      "transport": "SDK NodeHttpHandler",
+      "requests": [
+        {
+          "i": 0,
+          "startedAt": "2026-11-03T10:51:41.086Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:46.848Z"
+        },
+        {
+          "i": 1,
+          "startedAt": "2026-11-03T10:51:41.090Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:47.288Z"
+        },
+        {
+          "i": 2,
+          "startedAt": "2026-11-03T10:51:41.091Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:46.296Z"
+        },
+        {
+          "i": 3,
+          "startedAt": "2026-11-03T10:51:41.091Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:47.251Z"
+        },
+        {
+          "i": 4,
+          "startedAt": "2026-11-03T10:51:41.091Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:47.253Z"
+        },
+        {
+          "i": 5,
+          "startedAt": "2026-11-03T10:51:41.091Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:47.168Z"
+        },
+        {
+          "i": 6,
+          "startedAt": "2026-11-03T10:51:41.091Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:47.621Z"
+        },
+        {
+          "i": 7,
+          "startedAt": "2026-11-03T10:51:41.091Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T10:51:47.171Z"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "verifiedAbsent": true
+  },
+  "finishedAt": "2026-11-03T10:51:51.867Z"
+}

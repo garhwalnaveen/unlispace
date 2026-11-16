@@ -12,7 +12,7 @@ Run Wrangler production commands through `node scripts/wrangler-production.mjs`,
 usual Wrangler arguments. Deploy Workers in this order:
 
 1. `node scripts/wrangler-production.mjs deploy --env production -c cloud/data-plane/wrangler.jsonc`
-2. `node scripts/wrangler-production.mjs d1 migrations apply orbit-control --remote --env production -c cloud/api/wrangler.jsonc`, then `node scripts/wrangler-production.mjs deploy --env production -c cloud/api/wrangler.jsonc`.
+2. `node scripts/wrangler-production.mjs d1 migrations apply unlispace-control --remote --env production -c cloud/api/wrangler.jsonc`, then `node scripts/wrangler-production.mjs deploy --env production -c cloud/api/wrangler.jsonc`.
 3. `node scripts/wrangler-production.mjs deploy --env production -c cloud/s3-gateway/wrangler.jsonc`
 4. Build `web` with `VITE_API_URL="${ULS_API_URL:?Set ULS_API_URL to the deployed API base}" npm run build --prefix web`, then `node scripts/wrangler-production.mjs deploy --env production -c web/wrangler.jsonc`.
 
@@ -23,10 +23,10 @@ Set these secrets on the corresponding Worker before deployment:
 
 | Worker | Required secrets |
 | --- | --- |
-| `orbit-data-plane` | `ULS_JWT_PUBLIC_JWKS`, `ULS_BLOCK_KEY` |
-| `orbit-api` | `ULS_JWT_PRIVATE_JWK`, `ULS_JWT_PUBLIC_JWKS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, `DODO_PRODUCTS`, `ULS_ACCESS_KEY_MASTERS`, `MOONSHOT_API_KEY` |
-| `orbit-s3` | `ULS_JWT_PRIVATE_JWK` |
-| `orbit-web` | None |
+| `unlispace-data-plane` | `ULS_JWT_PUBLIC_JWKS`, `ULS_BLOCK_KEY` |
+| `unlispace-api` | `ULS_JWT_PRIVATE_JWK`, `ULS_JWT_PUBLIC_JWKS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, `DODO_PRODUCTS`, `ULS_ACCESS_KEY_MASTERS`, `MOONSHOT_API_KEY` |
+| `unlispace-s3` | `ULS_JWT_PRIVATE_JWK` |
+| `unlispace-web` | None |
 
 Set secrets with `wrangler secret put <NAME> --env production -c <config>`. API Google OAuth, Dodo and `MOONSHOT_API_KEY` values are optional in the runtime type but must be configured to enable those integrations. Without `MOONSHOT_API_KEY`, Ask AI shows as unavailable and `/ai/chat` returns `501`. Free-tier caps default to 50 requests and 100,000 tokens per user per UTC day; override with the `ULS_AI_DAILY_REQUESTS` and `ULS_AI_DAILY_TOKENS` vars.
 
@@ -54,7 +54,8 @@ Email OTP requires an onboarded sending domain. The production API config intent
 ## Production safety changes pending rollout
 
 `0006_production_safety.sql` adds checkout locks and metering retry state;
-`0007_checkout_subscription.sql` binds checkout intents to subscriptions. Apply both before the
+`0007_checkout_subscription.sql` binds checkout intents to subscriptions, and
+`0010_billing_grace.sql` stores Dodo's grace-period deadline. Apply all three before the
 new API. The data-plane `v2` Durable Object migration adds `StorageQuota`; the API and S3
 Workers depend on its `configureQuota` and read-only `quotaUsage` service methods. Roll out the data plane, then API and
 S3, and publish the web build as one coordinated release. Older drive write tokens cannot

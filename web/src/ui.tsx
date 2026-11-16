@@ -89,5 +89,5 @@ export function Icon({ name }: { name: keyof typeof icons }) {
   return <Component size={18} strokeWidth={1.75} aria-hidden="true" />;
 }
 export function FileIcon({ folder = false }: { folder?: boolean }) {
-  return <span className={`file-icon ${folder ? "folder" : ""}`}><Icon name={folder ? "folder" : "file"} /></span>;
+  return <span className="file-icon"><Icon name={folder ? "folder" : "file"} /></span>;
 }

@@ -1,0 +1,41 @@
+{
+  "startedAt": "2026-11-03T10:59:46.529Z",
+  "prefix": "orbit-fix-verification-f950252d-ae8b-45fa-bb62-decbe2746ebd/",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "checks": [
+    {
+      "name": "public SDK protocol",
+      "status": "passed",
+      "startedAt": "2026-11-03T10:59:46.533Z",
+      "headers": {
+        "x-s3sdk-protocol": "1",
+        "x-uls-protocol": "1"
+      },
+      "finishedAt": "2026-11-03T10:59:47.635Z"
+    },
+    {
+      "name": "published SDK edits and rename",
+      "status": "passed",
+      "startedAt": "2026-11-03T10:59:47.636Z",
+      "verifiedBytes": 5,
+      "finishedAt": "2026-11-03T11:00:10.831Z"
+    },
+    {
+      "name": "200 nested fixture uploads at concurrency 8",
+      "status": "passed",
+      "startedAt": "2026-11-03T11:00:10.832Z",
+      "fixtureSHA256": "18dc9b4d250478bb55a8b27ca82f9aa1c5626d7e24ad9c6fb408c116d67ca8bc",
+      "completed": 200,
+      "verifiedKeys": 200,
+      "finishedAt": "2026-11-03T11:02:09.324Z"
+    }
+  ],
+  "purpose": "Targeted correctness checks; not a 49-scenario timing rerun",
+  "requestDeadlineMs": 180000,
+  "cleanup": {
+    "verifiedAbsent": true,
+    "multipartVerifiedEmpty": true,
+    "retention": "Exact test prefix soft-deleted; immutable history may retain quota"
+  },
+  "finishedAt": "2026-11-03T11:02:20.295Z"
+}

@@ -120,7 +120,7 @@ final class AppModel {
 
     /// Picks the real client if the socket is reachable, else the mock.
     func refresh() async {
-        guard !refreshing else { return }
+        guard !Task.isCancelled, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
         engineInstall = DaemonLifecycle.state()

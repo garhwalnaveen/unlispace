@@ -227,6 +227,19 @@ private actor SavedSignInDeniedClient: DaemonClient {
 }
 
 @Suite @MainActor struct SavedSignInRecoveryModelTests {
+    @Test func cancelledSignInRefreshLeavesEngineStatusAlone() async {
+        let model = AppModel()
+        model.stateMessage = "Previous engine status"
+
+        await Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            await model.refresh()
+        }.value
+
+        #expect(model.stateMessage == "Previous engine status")
+        #expect(model.lastError == nil)
+    }
+
     @Test func aCredentialErrorKeepsTheEngineConnectedAndShowsExplicitRecovery() async throws {
         let model=AppModel();model.usingMock=false
         model.drives=[DriveInfo(driveId:"stale",name:"Stale account drive",mountState:.mounted)]

@@ -107,7 +107,7 @@ function object(value: unknown): Record<string, unknown> {
 	return value as Record<string, unknown>;
 }
 
-const subscriptionTypes = new Set(["subscription.active", "subscription.renewed", "subscription.updated", "subscription.plan_changed", "subscription.on_hold", "subscription.cancelled", "subscription.expired", "subscription.failed"]);
+const subscriptionTypes = new Set(["subscription.active", "subscription.renewed", "subscription.updated", "subscription.plan_changed", "subscription.past_due", "subscription.on_hold", "subscription.paused", "subscription.unpaused", "subscription.cancelled", "subscription.expired", "subscription.failed"]);
 
 export async function webhook(ctx: Ctx): Promise<Response> {
 	const raw = await readText(ctx.req);
@@ -128,7 +128,7 @@ export async function webhook(ctx: Ctx): Promise<Response> {
 	const subscriptionId = str(data.subscription_id, 256);
 	const customerId = str(object(data.customer).customer_id, 256);
 	const status = str(data.status, 32);
-	if (!subscriptionId || !customerId || !status || !["active", "on_hold", "cancelled", "expired", "failed", "pending"].includes(status)) throw new HttpError(400, "invalid_webhook");
+	if (!subscriptionId || !customerId || !status || !["active", "past_due", "on_hold", "paused", "cancelled", "expired", "failed", "pending"].includes(status)) throw new HttpError(400, "invalid_webhook");
 	// Existing subscriptions keep working even when metadata is absent on a later event.
 	const existing = await db.prepare("SELECT org_id FROM billing WHERE subscription_id = ? AND customer_id = ?").bind(subscriptionId, customerId).first<{ org_id: string }>();
 	let orgId = existing?.org_id;
@@ -161,16 +161,18 @@ export async function webhook(ctx: Ctx): Promise<Response> {
 	if (storageAddons > 1000) throw new HttpError(400, "invalid_webhook");
 	const periodEnd = typeof data.next_billing_date === "string" ? Date.parse(data.next_billing_date) : NaN;
 	if (!Number.isFinite(periodEnd)) throw new HttpError(400, "invalid_webhook");
+	const pastDueEndsAt = status === "past_due" && typeof data.past_due_ends_at === "string" ? Date.parse(data.past_due_ends_at) : null;
+	if (status === "past_due" && (pastDueEndsAt === null || !Number.isFinite(pastDueEndsAt))) throw new HttpError(400, "invalid_webhook");
 	// D1 batch is transactional: entitlement mutation and receipt cannot diverge on retry.
 	await db.batch([
 		...(checkoutIntent ? [db.prepare("UPDATE billing_checkouts SET subscription_id=? WHERE id=? AND org_id=? AND (subscription_id IS NULL OR subscription_id=?)").bind(subscriptionId, checkoutIntent, orgId, subscriptionId)] : []),
-		db.prepare(`INSERT INTO billing(org_id,customer_id,subscription_id,status,plan,cadence,seats,storage_addons,current_period_end,cancel_at_period_end,event_at,event_id)
-			SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM dodo_events WHERE id = ?)
+		db.prepare(`INSERT INTO billing(org_id,customer_id,subscription_id,status,plan,cadence,seats,storage_addons,current_period_end,cancel_at_period_end,event_at,event_id,past_due_ends_at)
+			SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM dodo_events WHERE id = ?)
 			ON CONFLICT(org_id) DO UPDATE SET customer_id=excluded.customer_id, subscription_id=excluded.subscription_id,
 			status=excluded.status, plan=excluded.plan, cadence=excluded.cadence, seats=excluded.seats, storage_addons=excluded.storage_addons,
-			current_period_end=excluded.current_period_end, cancel_at_period_end=excluded.cancel_at_period_end, event_at=excluded.event_at, event_id=excluded.event_id
+			current_period_end=excluded.current_period_end, cancel_at_period_end=excluded.cancel_at_period_end, event_at=excluded.event_at, event_id=excluded.event_id, past_due_ends_at=excluded.past_due_ends_at
 			WHERE excluded.event_at > billing.event_at OR (excluded.event_at = billing.event_at AND excluded.event_id > billing.event_id)`)
-			.bind(orgId, customerId, subscriptionId, status, selection.plan, selection.cadence, seats, storageAddons, periodEnd, data.cancel_at_next_billing_date === true ? 1 : 0, eventAt, id, id),
+			.bind(orgId, customerId, subscriptionId, status, selection.plan, selection.cadence, seats, storageAddons, periodEnd, data.cancel_at_next_billing_date === true ? 1 : 0, eventAt, id, pastDueEndsAt, id),
 		db.prepare(`UPDATE orgs SET tier = (SELECT plan FROM billing WHERE org_id = ?),
 			trial_ends_at = CASE WHEN (SELECT status FROM billing WHERE org_id = ?) = 'active' THEN NULL ELSE trial_ends_at END,
 			trial_pending = CASE WHEN (SELECT status FROM billing WHERE org_id = ?) = 'active' THEN 0 ELSE trial_pending END

@@ -177,6 +177,24 @@ describe("Dodo Standard Webhooks verification", () => {
 });
 
 describe("subscription event persistence", () => {
+	it("honors grace deadlines and paused and resumed subscriptions", async () => {
+		const { w, call, activate } = await fixture();
+		const { data } = await activate();
+		w.clock.t += 1000;
+		const until = w.clock.t + 5000;
+		const pastDue = { type: "subscription.past_due", timestamp: new Date(w.clock.t).toISOString(), data: { ...data, status: "past_due", past_due_ends_at: new Date(until).toISOString() } };
+		expect((await deliver(w, { ...pastDue, data: { ...pastDue.data, past_due_ends_at: null } }, "bad-grace")).status).toBe(400);
+		expect((await deliver(w, pastDue, "grace")).status).toBe(200);
+		expect(await json(await call())).toMatchObject({ status: "past_due", writable: true });
+		w.clock.t = until;
+		expect(await json(await call())).toMatchObject({ status: "past_due", writable: false });
+		w.clock.t += 1000;
+		expect((await deliver(w, { type: "subscription.paused", timestamp: new Date(w.clock.t).toISOString(), data: { ...data, status: "paused" } }, "pause")).status).toBe(200);
+		expect(await json(await call())).toMatchObject({ status: "paused", writable: false });
+		w.clock.t += 1000;
+		expect((await deliver(w, { type: "subscription.unpaused", timestamp: new Date(w.clock.t).toISOString(), data }, "resume")).status).toBe(200);
+		expect(await json(await call())).toMatchObject({ status: "active", writable: true });
+	});
 	it("keeps a replacement checkout locked when the previous subscription sends terminal events", async () => {
 		const {w, org, call, activate, provider} = await fixture();
 		const {data} = await activate();

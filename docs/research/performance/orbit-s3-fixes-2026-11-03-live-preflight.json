@@ -1,0 +1,36 @@
+{
+  "startedAt": "2026-11-03T10:14:16.484Z",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "bucket": "d-01m64ahpdcnbhv4v1m6n6haprp",
+  "prefix": "orbit-benchmark-e0bc7006-2d68-445b-bbbf-11112db2a67f/",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.12.1"
+  },
+  "method": {
+    "rounds": 2,
+    "warmups": 3,
+    "samplesPerRound": 8,
+    "concurrency": 8,
+    "maxSockets": 64,
+    "awsMaxAttempts": 1,
+    "extension503Retries": 4,
+    "requestDeadlineMs": 120000,
+    "selectedScenarios": [
+      "head"
+    ],
+    "figure": "Median of round p50s; fanout rows use individual request latencies",
+    "cache": "No client object cache; server caches uncontrolled",
+    "verification": "SHA-256 after timing; streaming digest during timing",
+    "limitation": "Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment."
+  },
+  "rows": [],
+  "preflight": "failed",
+  "error": {
+    "name": "IncompatibleGateway"
+  },
+  "cleanup": "No benchmark writes attempted",
+  "finishedAt": "2026-11-03T10:14:18.583Z"
+}

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { App } from "../src/App";
 import { AuthStore } from "../src/auth";
 import { AuthContext } from "../src/context";
+import { session, json } from "./fixtures";
 
 it("follows system appearance, persists a manual choice and restores system tracking", async () => {
   let onChange = () => {};
@@ -31,6 +32,20 @@ it("follows system appearance, persists a manual choice and restores system trac
   expect(document.documentElement.dataset.theme).toBe("dark");
   view.unmount();
   expect(media.removeEventListener).toHaveBeenCalledWith("change", expect.any(Function));
+  auth.dispose();
+});
+
+it("changes workspace appearance through the account menu", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => json({ orgs: [], workspaces: [] })));
+  const auth = new AuthStore(localStorage, null);
+  auth.accept(session);
+  const view = render(<MemoryRouter><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Your workspace" }));
+  await user.click(screen.getByRole("menuitem", { name: "Light" }));
+  expect(document.documentElement.dataset.theme).toBe("light");
+  expect(localStorage.getItem("orbit.theme")).toBe("light");
+  view.unmount();
   auth.dispose();
 });
 

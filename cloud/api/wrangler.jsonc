@@ -30,7 +30,7 @@
   "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] },
   "env": {
     "production": {
-      "name": "orbit-api",
+      "name": "unlispace-api",
       "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] },
       "workers_dev": true,
       "triggers": { "crons": ["17 * * * *"] },
@@ -38,19 +38,21 @@
       "d1_databases": [
         {
           "binding": "DB",
-          "database_name": "orbit-control",
+          "database_name": "unlispace-control",
           "database_id": "5f259a26-5e36-4e7b-8134-52a3043e3fc1",
           "migrations_dir": "migrations"
         }
       ],
       "services": [
-        { "binding": "DATA_PLANE", "service": "orbit-data-plane", "entrypoint": "DataPlaneAdmin" }
+        { "binding": "DATA_PLANE", "service": "unlispace-data-plane", "environment": "production", "entrypoint": "DataPlaneAdmin" }
       ],
       "vars": {
-        "ULS_ISSUER": "https://orbit-api.__WORKERS_DOMAIN__",
-        "ULS_DATA_ENDPOINT": "https://orbit-data-plane.__WORKERS_DOMAIN__",
+        "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
+        "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.__WORKERS_DOMAIN__",
         "ULS_WEB_ORIGIN": "https://orbitfs.io",
-        "DODO_PAYMENTS_ENVIRONMENT": "live_mode"
+        "DODO_PAYMENTS_ENVIRONMENT": "live_mode",
+        "DODO_PRODUCTS": "{\"individual\":{\"monthly\":\"pdt_0NrGLtbKzbFksqxwtMJWt\",\"annual\":\"pdt_0NrGLtcsD6CMQUPt5PouA\"},\"teams\":{\"monthly\":\"pdt_0NrGLteaih8ELBIw5M4Ft\",\"annual\":\"pdt_0NrGLtgGyp6EZnJWaGgLh\"},\"storage\":{\"monthly\":\"adn_0NrGLrhzoPknMhuPmvJS4\",\"annual\":\"adn_0NrGLrjHtdBTvTTRLtCZM\"}}",
+        "DODO_PRICES": "{\"individual\":{\"monthly\":{\"amount\":1500,\"currency\":\"USD\"},\"annual\":{\"amount\":15600,\"currency\":\"USD\"}},\"teams\":{\"monthly\":{\"amount\":2500,\"currency\":\"USD\"},\"annual\":{\"amount\":26400,\"currency\":\"USD\"}},\"storage\":{\"monthly\":{\"amount\":1500,\"currency\":\"USD\"},\"annual\":{\"amount\":15600,\"currency\":\"USD\"}}}"
       }
     }
   }

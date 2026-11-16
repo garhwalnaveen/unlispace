@@ -71,11 +71,11 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
 - `/desktop?state&code_challenge`: preserves the desktop return location through either login
   flow, mints a PKCE-bound code on an explicit button press, then opens `uls://auth/callback`.
   “Use another account” revokes the current session before returning to login.
-- Signed-in `/`: workspace/drive summary, searchable drive-card library grouped by workspace, trial days,
-  create, rename, exact-name confirmation for delete. The desktop shell keeps grouped navigation and an
-  account footer visible; at 760 px and below, an explicitly labeled navigation disclosure supports
-  Escape, closes after route changes, and restores focus to its toggle.
-  Plan-limit errors explain that additional drives require Teams; each organization links to Billing.
+- Signed-in `/`: drive count, searchable drives grouped by workspace, trial days,
+  create, rename, exact-name confirmation for delete. The header keeps horizontal navigation visible,
+  with Billing and Team links and direct sign-out; at narrow widths, navigation scrolls horizontally.
+  Search supports `/` to focus and combines with Ready/Needs setup filters. Plan-limit errors explain that
+  additional drives require Teams; each organization links to Billing.
 - `/drives/:id/*`: root/folder listing, cursor-based Load more, breadcrumbs and file details.
   The toolbar filters **loaded items only** and sorts them by name, modification date or size, keeping
   folders first. An active filter does not hide Load more; no-match copy explains that additional pages
@@ -168,7 +168,8 @@ subtle bordered product panels. This is an independent implementation: the publi
 repository contains SDKs, examples and starter-kit marketing components, not its production homepage.
 `src/landing.css` owns the public design tokens, responsive layout and component styling;
 `src/Landing.tsx` reuses the installed Button and DropdownMenu components. The signed-in app uses
-its own calm neutral light/dark canvas, sidebar-first shell, and existing shadcn controls. The homepage uses system sans-serif fonts rather than Suisse.
+its own neutral light/dark canvas, top navigation, and existing shadcn controls. The homepage
+uses the bundled Satoshi font and Fontshare license in `public/fonts/`.
 Legacy `orbit.*` storage keys, `uls://` links, deployed
 service names, and sender domains stay compatible with existing clients and infrastructure.
 

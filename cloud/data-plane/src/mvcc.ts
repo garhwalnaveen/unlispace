@@ -33,6 +33,7 @@ export function migrateBranches(sql: SqlStorage, root: string): void {
 		sql.exec(`INSERT INTO ${store(name)}(_record,_branch,_rev,_dead,${names.map(table).join(",")}${key.includes("_event") ? ",_event" : ""}) SELECT rowid,?,0,0,${names.map(table).join(",")}${key.includes("_event") ? ",rowid" : ""} FROM ${table(name)}`, root);
 		sql.exec(`CREATE INDEX ${store(name)}_visible ON ${store(name)}(_branch,${key.map(table).join(",")},_rev DESC)`);
 		if (name === "nodes") sql.exec("CREATE INDEX mv_nodes_edges ON mv_nodes(_branch,parent_id,name,_rev DESC)");
+		if (name === "nodes") sql.exec("CREATE INDEX mv_nodes_identity ON mv_nodes(id,_branch,_rev DESC)");
 		sql.exec(`UPDATE mv_clock SET v=MAX(v,(SELECT COALESCE(MAX(rowid),0) FROM ${table(name)}))`);
 		sql.exec(`DROP TABLE ${table(name)}`);
 	}

@@ -1,0 +1,102 @@
+{
+  "startedAt": "2026-11-03T10:45:41.461Z",
+  "prefix": "orbit-fix-verification-40436a53-104a-46a8-94dd-d22d3e6298ff/",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "checks": [
+    {
+      "name": "public SDK protocol",
+      "status": "passed",
+      "startedAt": "2026-11-03T10:45:41.465Z",
+      "headers": {
+        "x-s3sdk-protocol": "1",
+        "x-uls-protocol": "1"
+      },
+      "finishedAt": "2026-11-03T10:45:43.215Z"
+    },
+    {
+      "name": "published SDK edits and rename",
+      "status": "passed",
+      "startedAt": "2026-11-03T10:45:43.217Z",
+      "verifiedBytes": 5,
+      "finishedAt": "2026-11-03T10:46:14.484Z"
+    },
+    {
+      "name": "200 nested fixture uploads at concurrency 8",
+      "status": "failed",
+      "startedAt": "2026-11-03T10:46:14.486Z",
+      "fixtureSHA256": "a585cdfcc55342010758b172f1c3f52699059f1a37810f00b3f564f2f00570a1",
+      "completed": 67,
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          },
+          {
+            "name": "TimeoutError",
+            "code": "ETIMEDOUT"
+          }
+        ]
+      },
+      "finishedAt": "2026-11-03T10:47:02.218Z"
+    },
+    {
+      "name": "eight concurrent 32 MiB reads",
+      "status": "failed",
+      "startedAt": "2026-11-03T10:47:02.219Z",
+      "expectedBytes": 33554432,
+      "expectedSHA256": "951fed39db0f7bffca2b9b888033535269c043dff14d228fbdd6e2cd5b593a42",
+      "phase": "upload",
+      "error": {
+        "name": "TimeoutError",
+        "code": "EPIPE"
+      },
+      "finishedAt": "2026-11-03T10:47:49.755Z"
+    },
+    {
+      "name": "eight concurrent 64 MiB reads",
+      "status": "failed",
+      "startedAt": "2026-11-03T10:47:49.756Z",
+      "expectedBytes": 67108864,
+      "expectedSHA256": "c768f05afd67e39aab38486269ce1a01cd05c3440e3b7b7a56e0d751031f1303",
+      "phase": "upload",
+      "error": {
+        "name": "AbortError"
+      },
+      "finishedAt": "2026-11-03T10:50:49.884Z"
+    }
+  ],
+  "purpose": "Targeted correctness checks; not a 49-scenario timing rerun",
+  "requestDeadlineMs": 180000,
+  "cleanup": {
+    "verifiedAbsent": true,
+    "multipartVerifiedEmpty": true,
+    "retention": "Exact test prefix soft-deleted; immutable history may retain quota"
+  },
+  "finishedAt": "2026-11-03T10:50:57.975Z"
+}

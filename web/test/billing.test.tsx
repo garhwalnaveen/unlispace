@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
-import { externalUrl } from "../src/billing";
+import { externalUrl } from "../src/billing-data";
 import { authStore, catalog, drive, json, org, renderApp } from "./fixtures";
 it("shows trial, invoices and sends checkout selections without losing errors", async () => {
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {

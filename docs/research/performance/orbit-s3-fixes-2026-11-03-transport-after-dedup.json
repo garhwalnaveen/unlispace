@@ -1,0 +1,125 @@
+{
+  "startedAt": "2026-11-03T11:02:34.997Z",
+  "prefix": "orbit-fix-verification-f950252d-ae8b-45fa-bb62-decbe2746ebd/",
+  "fixtureSHA256": "c147cfe843ebd7124c751bcf64007251d0560245f921ec9f56ab378d71722000",
+  "rounds": [
+    {
+      "transport": "signed fetch",
+      "requests": [
+        {
+          "i": 0,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:40.942Z"
+        },
+        {
+          "i": 1,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:40.583Z"
+        },
+        {
+          "i": 2,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:39.634Z"
+        },
+        {
+          "i": 3,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:40.942Z"
+        },
+        {
+          "i": 4,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:40.934Z"
+        },
+        {
+          "i": 5,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:41.130Z"
+        },
+        {
+          "i": 6,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:41.098Z"
+        },
+        {
+          "i": 7,
+          "startedAt": "2026-11-03T11:02:34.999Z",
+          "http": 200,
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:40.941Z"
+        }
+      ]
+    },
+    {
+      "transport": "SDK NodeHttpHandler",
+      "requests": [
+        {
+          "i": 0,
+          "startedAt": "2026-11-03T11:02:41.132Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:45.962Z"
+        },
+        {
+          "i": 1,
+          "startedAt": "2026-11-03T11:02:41.136Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:46.017Z"
+        },
+        {
+          "i": 2,
+          "startedAt": "2026-11-03T11:02:41.136Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:45.816Z"
+        },
+        {
+          "i": 3,
+          "startedAt": "2026-11-03T11:02:41.136Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:45.733Z"
+        },
+        {
+          "i": 4,
+          "startedAt": "2026-11-03T11:02:41.136Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:45.732Z"
+        },
+        {
+          "i": 5,
+          "startedAt": "2026-11-03T11:02:41.136Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:46.715Z"
+        },
+        {
+          "i": 6,
+          "startedAt": "2026-11-03T11:02:41.136Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:51.454Z"
+        },
+        {
+          "i": 7,
+          "startedAt": "2026-11-03T11:02:41.136Z",
+          "status": "passed",
+          "finishedAt": "2026-11-03T11:02:48.208Z"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "verifiedAbsent": true
+  },
+  "finishedAt": "2026-11-03T11:02:55.467Z"
+}

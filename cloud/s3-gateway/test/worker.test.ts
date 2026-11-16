@@ -6,6 +6,8 @@ describe("worker entry point", () => {
 	it("serves /healthz without credentials", async () => {
 		const res = await SELF.fetch("https://s3.test/healthz");
 		expect(res.status).toBe(200);
+		expect(res.headers.get("x-uls-protocol")).toBe("1");
+		expect(res.headers.get("x-s3sdk-protocol")).toBe("1");
 		expect(await res.json()).toEqual({ ok: true });
 	});
 

@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { arch, platform, release } from 'node:os';
 import { resolve } from 'node:path';
+import { addAbortSignal } from 'node:stream';
 
 const require = createRequire(new URL('../../cloud/s3-gateway/package.json', import.meta.url));
 const aws = require('@aws-sdk/client-s3');
@@ -13,6 +14,48 @@ const KiB = 1024, MiB = 1024 * KiB;
 const sizes = [4 * KiB, MiB, 32 * MiB, 64 * MiB];
 const label = n => n < MiB ? `${n / KiB} KiB` : `${n / MiB} MiB`;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+export function requestHandler(timeoutMs = 120000) {
+  const handler = new NodeHttpHandler({ connectionTimeout: 15000, requestTimeout: timeoutMs,
+    throwOnRequestTimeout: true, socketTimeout: timeoutMs, httpsAgent: { maxSockets: 64, keepAlive: true } });
+  return {
+    metadata: handler.metadata,
+    async handle(request, options = {}) {
+      const deadline = AbortSignal.timeout(timeoutMs);
+      const signal = options.abortSignal ? AbortSignal.any([options.abortSignal, deadline]) : deadline;
+      const result = await handler.handle(request, { ...options, abortSignal: signal });
+      if (result.response.body) addAbortSignal(signal, result.response.body);
+      return result;
+    },
+    destroy() { handler.destroy(); },
+  };
+}
+
+export function verifyBytes(actual, expected, key) {
+  const actualSHA256 = hash(actual), expectedSHA256 = hash(expected);
+  if (actual.length !== expected.length || actualSHA256 !== expectedSHA256) {
+    const error = new Error(`Content verification failed: ${key}`);
+    error.name = 'ContentVerificationError';
+    Object.assign(error, { receivedBytes: actual.length, expectedBytes: expected.length, actualSHA256, expectedSHA256 });
+    throw error;
+  }
+}
+
+export function errorDetails(error) {
+  const details = { name: error.name, code: error.code, status: error.status ?? error.$metadata?.httpStatusCode, requestId: error.requestId ?? error.$metadata?.requestId };
+  if (error.code === 'InvalidArgument' && typeof error.message === 'string') details.message = error.message.slice(0, 512);
+  if (error.code === 'InvalidResponse' && /^missing [a-z0-9-]+ header$/i.test(error.message)) details.message = error.message;
+  if (error.name === 'ContentVerificationError') {
+    for (const field of ['receivedBytes', 'expectedBytes', 'actualSHA256', 'expectedSHA256']) details[field] = error[field];
+  }
+  if (error.name === 'AssertionError') {
+    for (const field of ['actual', 'expected']) {
+      const value = error[field];
+      if (typeof value === 'number' || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))) details[field] = value;
+    }
+  }
+  if (error instanceof AggregateError) details.causes = error.errors.map(errorDetails);
+  return details;
+}
 export const median = values => {
   assert(values.length > 0);
   const sorted = [...values].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
@@ -83,13 +126,13 @@ async function run(configPath, output, names = []) {
   assert(url.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(url.hostname), 'Use HTTPS for hosted credentials');
   assert(!url.username && !url.password && !url.search && !url.hash);
   const client = new S3SDKClient({ endpoint, accessKeyId, secretAccessKey, region: config.region ?? 'us-east-1',
-    s3: { maxAttempts: 1, requestHandler: new NodeHttpHandler({ connectionTimeout: 15000, requestTimeout: 120000, httpsAgent: { maxSockets: 64, keepAlive: true } }) },
+    s3: { maxAttempts: 1, requestHandler: requestHandler() },
     fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(120000) }),
   });
   const prefix = `orbit-benchmark-${randomUUID()}/`, rows = [];
   const report = { startedAt: new Date().toISOString(), endpoint, bucket, prefix,
     host: { platform: platform(), release: release(), arch: arch(), node: process.version },
-    method: { rounds: 2, warmups: 3, samplesPerRound: 8, concurrency: 8, maxSockets: 64, retries: 0, selectedScenarios: selected.map(row => row.name),
+    method: { rounds: 2, warmups: 3, samplesPerRound: 8, concurrency: 8, maxSockets: 64, awsMaxAttempts: 1, extension503Retries: 4, requestDeadlineMs: 120000, selectedScenarios: selected.map(row => row.name),
       figure: 'Median of round p50s; fanout rows use individual request latencies',
       cache: 'No client object cache; server caches uncontrolled', verification: 'SHA-256 after timing; streaming digest during timing',
       limitation: 'Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment.' }, rows };
@@ -97,7 +140,7 @@ async function run(configPath, output, names = []) {
   const put = (key, body) => client.putObject(bucket, key, body);
   const get = async key => Buffer.from((await client.getObject(bucket, key)).body);
   const send = command => client.s3.send(command, { abortSignal: AbortSignal.timeout(120000) });
-  async function verify(key, expected) { assert.equal(hash(await get(key)), hash(expected), `SHA-256 mismatch: ${key}`); }
+  async function verify(key, expected) { verifyBytes(await get(key), expected, key); }
   async function multipart(key, body, partSize) {
     const { UploadId } = await send(new aws.CreateMultipartUploadCommand({ Bucket: bucket, Key: key }));
     assert(UploadId);
@@ -119,13 +162,19 @@ async function run(configPath, output, names = []) {
     return { ms: performance.now() - start, result };
   }
   try {
+    const health = await fetch(new URL('/healthz', endpoint), { redirect: 'error', signal: AbortSignal.timeout(15000) });
+    if (!health.ok || health.headers.get('x-s3sdk-protocol') !== '1') {
+      const error = new Error('The deployed gateway does not advertise the SDK protocol required by this benchmark');
+      error.name = 'IncompatibleGateway'; throw error;
+    }
     // Refuse the expensive workload immediately if this account cannot publish and retrieve.
     const probe = randomBytes(4 * KiB);
     await put(`${prefix}preflight`, probe); await verify(`${prefix}preflight`, probe);
     report.preflight = 'passed'; await save();
     for (const [index, scenario] of selected.entries()) {
-      const row = { ...scenario, rounds: [], status: 'running' }; rows.push(row);
       const base = `${prefix}${index}/`, source = randomBytes(scenario.size), data = randomBytes(4 * KiB);
+      const row = { ...scenario, rounds: [], status: 'running', phase: 'setup', fixtureSHA256: hash(source) }; rows.push(row);
+      await save();
       let serial = 0;
       const fanout = scenario.kind.startsWith('fanout');
       async function prepare(i) {
@@ -134,7 +183,7 @@ async function run(configPath, output, names = []) {
         let expected = source, perform, check;
         if (kind === 'get' || kind === 'fanout-get') {
           perform = () => get(`${base}read-${fanout ? i : 0}`);
-          check = result => assert.equal(hash(result), hash(source));
+          check = result => verifyBytes(result, source, `${base}read-${fanout ? i : 0}`);
         } else if (kind === 'stream') {
           perform = async () => {
             const response = await send(new aws.GetObjectCommand({ Bucket: bucket, Key: `${base}read-0` }));
@@ -191,36 +240,46 @@ async function run(configPath, output, names = []) {
         }
         if (scenario.kind === 'list') await pool(200, 8, n => put(`${base}list/${n}`, source));
         for (let round = 0; round < 2; round++) {
+          row.phase = 'warmup';
+          await save();
           for (let warm = 0; warm < 3; warm++) {
             const operation = await prepare(warm);
             await operation.check(await operation.perform());
           }
           const samples = [];
+          const roundResult = { samplesMs: samples, complete: false };
+          row.rounds.push(roundResult);
           const count = scenario.count ?? 8, concurrency = scenario.concurrency ?? 8;
           // Prepare and verify whole waves outside timing, keeping their traffic out of samples.
           for (let start = 0; start < count; start += concurrency) {
             const operations = [], results = [];
+            row.phase = 'prepare';
+            await save();
             await pool(Math.min(concurrency, count - start), concurrency, async n => { operations[n] = await prepare(start + n); });
+            row.phase = 'measure';
+            await save();
             await pool(operations.length, concurrency, async n => {
               const measured = await timed(operations[n].perform);
               samples.push(measured.ms); results[n] = measured.result;
             });
+            row.phase = 'verify';
+            await save();
             await pool(operations.length, concurrency, n => operations[n].check(results[n]));
           }
-          row.rounds.push({ p50Ms: median(samples), samplesMs: samples });
+          Object.assign(roundResult, { p50Ms: median(samples), complete: true });
           await save();
         }
         row.medianMs = median(row.rounds.map(r => r.p50Ms)); row.status = 'passed';
       } catch (error) {
-        row.status = 'failed'; row.error = { name: error.name, code: error.code, status: error.status ?? error.$metadata?.httpStatusCode };
-        if (error instanceof AggregateError) row.error.causes = error.errors.map(e => ({ name: e.name, code: e.code, status: e.status ?? e.$metadata?.httpStatusCode }));
+        row.status = 'failed'; row.error = errorDetails(error);
       }
       await save(); console.log(`${index + 1}/${selected.length} ${row.status} ${row.name}${row.medianMs ? `: ${row.medianMs.toFixed(1)} ms` : ''}`);
     }
   } catch (error) {
-    report.preflight = 'failed'; report.error = { name: error.name, code: error.code, status: error.status ?? error.$metadata?.httpStatusCode };
+    report.preflight = 'failed'; report.error = errorDetails(error);
   } finally {
-    try {
+    if (report.error?.name === 'IncompatibleGateway') report.cleanup = 'No benchmark writes attempted';
+    else try {
       const listing = await client.listObjects(bucket, { prefix });
       assert(listing.keys.every(key => key.startsWith(prefix)));
       await pool(listing.keys.length, 8, i => client.deleteObject(bucket, listing.keys[i]));

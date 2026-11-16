@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { drive, json, renderApp } from "./fixtures";
@@ -22,46 +22,27 @@ function renderWorkspace(path = "/") {
   return renderApp(path);
 }
 
-it("groups persistent navigation and keeps the drive section current inside a drive", async () => {
+it("keeps top navigation and the drive section current inside a drive", async () => {
   renderWorkspace("/drives/d-test/");
   const nav = screen.getByRole("navigation", { name: "Main navigation" });
   expect(within(nav).getByRole("link", { name: "Your drives" })).toHaveAttribute("aria-current", "page");
-  expect(within(nav).getByText("Workspace")).toBeInTheDocument();
-  expect(within(nav).getByText("Manage")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /Your account.*you@example.com/ })).toHaveAttribute("href", "/settings");
+  expect(within(nav).getByRole("link", { name: "Billing" })).toBeInTheDocument();
+  expect(within(nav).getByRole("link", { name: "Team" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "you@example.com" })).toHaveAttribute("href", "/settings");
   expect(await screen.findByText("Read only")).toBeInTheDocument();
 });
 
-it("discloses mobile navigation, closes it on Escape and navigation, and restores it on desktop", async () => {
-  let resize = () => {};
-  const media = { matches: true, addEventListener: vi.fn((_event, callback) => { resize = callback; }), removeEventListener: vi.fn() };
-  vi.stubGlobal("matchMedia", (query: string) => query.includes("max-width") ? media : { matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+it("filters the drive library and clears a no-match result", async () => {
   renderWorkspace();
   const user = userEvent.setup();
-  expect(screen.queryByRole("navigation", { name: "Main navigation" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Open navigation" }));
-  expect(screen.getByRole("button", { name: "Close navigation" })).toHaveAttribute("aria-expanded", "true");
-  const nav = screen.getByRole("navigation", { name: "Main navigation" });
-  within(nav).getByRole("link", { name: "Account" }).focus();
-  await user.keyboard("{Escape}");
-  expect(screen.getByRole("button", { name: "Open navigation" })).toHaveFocus();
-  await user.click(screen.getByRole("button", { name: "Open navigation" }));
-  await user.click(screen.getByRole("link", { name: "Access keys" }));
-  expect(screen.queryByRole("navigation", { name: "Main navigation" })).not.toBeInTheDocument();
-  act(() => { media.matches = false; resize(); });
-  expect(screen.getByRole("navigation", { name: "Main navigation" })).toBeVisible();
-});
-
-it("filters the drive library and recovers from no matches without an API change", async () => {
-  renderWorkspace();
-  const user = userEvent.setup();
-  const search = await screen.findByRole("textbox", { name: "Find a drive" });
-  expect(screen.getByRole("region", { name: "Workspace summary" })).toHaveTextContent("1Active drive1Workspace");
+  const search = await screen.findByRole("searchbox", { name: "Search drives" });
+  await user.keyboard("/");
+  expect(search).toHaveFocus();
   await user.type(search, "missing");
   expect(screen.getByRole("heading", { name: "No matching drives" })).toBeInTheDocument();
-  expect(screen.queryByRole("article", { name: "Space" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Clear search" }));
-  expect(screen.getByRole("article", { name: "Space" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Space" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(screen.getByRole("link", { name: "Space" })).toBeInTheDocument();
 });
 
 it("filters only loaded files, keeps folders first when sorting, and preserves pagination", async () => {

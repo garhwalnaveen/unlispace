@@ -1,0 +1,18 @@
+SETUP applying local D1 migrations (120 s deadline)
+SETUP starting isolated local Workers (45 s deadline)
+PASS  setup local Workers + D1: Wrangler 4.152.0; api :29788, data :29787, inspector :30230; s3 :29789, inspector :30232; migration 0003 applied; D1 migrated
+PASS  parity setup session and published SDK through real Workers
+PASS  parity 200 nested keys upload concurrently through real Workers
+PASS  parity published SDK edits and rename preserve bytes through real Workers
+PASS  parity eight concurrent 32 and 64 MiB reads match exact uploaded bytes
+PASS  cleanup: owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
+
+STATUS | CHECK | DETAIL
+-------|-------|-------
+PASS | setup local Workers + D1 | Wrangler 4.152.0; api :29788, data :29787, inspector :30230; s3 :29789, inspector :30232; migration 0003 applied; D1 migrated
+PASS | parity setup session and published SDK through real Workers |
+PASS | parity 200 nested keys upload concurrently through real Workers |
+PASS | parity published SDK edits and rename preserve bytes through real Workers |
+PASS | parity eight concurrent 32 and 64 MiB reads match exact uploaded bytes |
+PASS | cleanup | owned processes stopped; no NFS/SMB mounts remain; shell trap removes temporary data
+RESULT: 6 passed, 0 failed

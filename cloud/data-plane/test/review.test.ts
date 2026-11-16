@@ -1,6 +1,7 @@
 import {parseOps} from "../src/validate";
 // Regression tests for the Codex review of the data plane (findings #1-#12).
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { api, bytes, commit, newDrive, putFile, selfFetch, sha256Hex, TOKEN, upload } from "./helpers";
 
@@ -93,14 +94,27 @@ describe("review #2: event-id pagination and replay", () => {
 		ws.close(1000, "done");
 	});
 
+	it("replays sparse legacy event IDs without forcing a resync", async () => {
+		const d = await newDrive();
+		const ns = env.DRIVE_AUTHORITY;
+		await runInDurableObject(ns.get(ns.idFromName(d)), (_, ctx) => {
+			ctx.storage.sql.exec("INSERT INTO log(rowid,seq,path,op,version) VALUES(100001,1,'legacy','put',NULL)");
+		});
+		const { ws, msgs } = await collect(d, "after=0", (m) => m.length >= 1);
+		ws.close(1000, "done");
+		expect(msgs[0]).toMatchObject({ path: "legacy", ev: 100001 });
+	});
+
 	it("101 comes back promptly and a backlog over 100k events gets `resync` then close", async () => {
 		const d = await newDrive();
-		const h = (await upload(d, bytes("s"))).h;
-		const ops = Array.from({ length: 1000 }, (_, i) => ({ op: "put", path: `f${i}/g`, size: 1, shards: [{ h, n: 1 }] })); // 2000 events
-		for (let i = 0; i < 51; i++) {
-			const o = ops.map((op) => ({ ...op, path: `c${i}/${op.path}` }));
-			expect((await commit(d, o)).status).toBe(200);
-		}
+		const ns = env.DRIVE_AUTHORITY;
+		await runInDurableObject(ns.get(ns.idFromName(d)), (_, ctx) => {
+			const sql = ctx.storage.sql;
+			sql.exec(`WITH RECURSIVE events(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM events WHERE n<100001)
+				INSERT INTO mv_log(_branch,_rev,_dead,seq,path,op,version,_event)
+				SELECT ?, (SELECT v FROM mv_clock)+n, 0, 1, 'file', 'put', NULL, n FROM events`, d);
+			sql.exec("UPDATE mv_clock SET v=v+100001");
+		});
 		const t0 = Date.now();
 		const res = await selfFetch(new Request(wsUrl(d, "after=0"), { headers: { Upgrade: "websocket" } }));
 		expect(res.status).toBe(101);
@@ -164,10 +178,16 @@ describe("review #4: /versions pagination", () => {
 describe("review #5: subtree limits", () => {
 	it("delete and rename of a subtree over 100,000 nodes -> 400 subtree_too_large, nothing changes", async () => {
 		const d = await newDrive();
-		for (let i = 0; i < 101; i++) {
-			const ops = Array.from({ length: 1000 }, (_, j) => ({ op: "mkdir", path: `big/n${i * 1000 + j}/` }));
-			expect((await commit(d, ops)).status).toBe(200);
-		}
+		expect((await commit(d, [{ op: "mkdir", path: "big/" }])).status).toBe(200);
+		const ns = env.DRIVE_AUTHORITY;
+		await runInDurableObject(ns.get(ns.idFromName(d)), (_, ctx) => {
+			const sql = ctx.storage.sql;
+			const root = sql.exec<{ id: string }>("SELECT id FROM nodes WHERE name='big'").one().id;
+			sql.exec(`WITH RECURSIVE entries(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM entries WHERE n<100001)
+				INSERT INTO mv_nodes(_branch,_rev,_dead,id,parent_id,name,type)
+				SELECT ?, (SELECT v FROM mv_clock)+n, 0, 'fixture:'||n, ?, 'n'||n, 'folder' FROM entries`, d, root);
+			sql.exec("UPDATE mv_clock SET v=v+100001");
+		});
 		const del = await commit(d, [{ op: "delete", path: "big/" }]);
 		expect(del.status).toBe(400);
 		expect(await del.json()).toMatchObject({ error: "subtree_too_large", limit: 100000 });

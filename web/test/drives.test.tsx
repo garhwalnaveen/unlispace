@@ -37,7 +37,7 @@ it("shows the trial, explains plan limits, and requires exact drive-name confirm
 });
 const aliasedOrg = { ...org, trialEndsAt: null, drives: [{ ...drive, alias: "space", usageBytes: 1024 }] };
 const overQuota = { orgId: aliasedOrg.id, usedBytes: 2048, quotaBytes: 1024, plan: "individual", status: "active", state: "paid", writable: false, seats: 1, storageAddons: 0, trialEndsAt: null };
-it("forks with name and alias and shows lineage, fork point, usage and quota on home", async () => {
+it("forks with name and alias and shows lineage, fork point and drive usage on home", async () => {
   let forked = false;
   const child = { ...drive, id: "d-child", name: "Branch", alias: "branch", usageBytes: 0, forkOf: { driveId: drive.id, forkPoint: 1000 }, forks: [] };
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
@@ -47,9 +47,7 @@ it("forks with name and alias and shows lineage, fork point, usage and quota on 
   });
   vi.stubGlobal("fetch", fetcher); renderApp(); const user = userEvent.setup();
   expect(await screen.findByText(/Last measured drive bytes: 1 KiB/)).toBeInTheDocument();
-  expect(await screen.findByText(/Deleting a file keeps its history/)).toBeInTheDocument();
-  expect(await screen.findByRole("alert")).toHaveTextContent("Writes are paused");
-  expect(screen.getByRole("meter", { name: "Organization storage usage" })).toHaveAttribute("value", "1024");
+  expect(screen.queryByRole("meter", { name: "Organization storage usage" })).not.toBeInTheDocument();
   await user.click(screen.getByText("Drive options"));
   await user.click(screen.getByRole("button", { name: "Fork Space" }));
   await user.type(screen.getByLabelText("Drive name"), "Branch");

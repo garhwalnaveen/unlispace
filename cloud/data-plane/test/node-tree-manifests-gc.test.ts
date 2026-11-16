@@ -6,7 +6,7 @@ import { GC_GRACE_MS, LineageGC } from "../src/gc";
 import { INLINE_MANIFEST_BYTES, MAX_STREAM_COMMIT_BYTES, storeManifest } from "../src/manifests";
 import { LIVE_TREE } from "../src/nodes";
 import { parseOps } from "../src/validate";
-import { api, bytes, commit, newDrive, putFile, selfFetch, sha256Hex, TOKEN, upload } from "./helpers";
+import { api, bytes, commit, legacyTables, newDrive, putFile, selfFetch, sha256Hex, TOKEN, upload } from "./helpers";
 
 const stubFor = (drive: string) => {
 	const ns = env.DRIVE_AUTHORITY as DurableObjectNamespace<DriveAuthority>;
@@ -34,6 +34,17 @@ function streamRequest(drive: string, text: string) {
 }
 
 describe("M2 stable node tree", () => {
+	it("adds the node identity index when an existing drive reloads", async () => {
+		const drive = await newDrive();
+		await putFile(drive, "old/child", "retained");
+		await runInDurableObject(stubFor(drive), (_instance, ctx) => ctx.storage.sql.exec("DROP INDEX mv_nodes_identity"));
+		await evictDurableObject(stubFor(drive));
+		expect((await manifest(drive, "old/child")).shards).toHaveLength(1);
+		await runInDurableObject(stubFor(drive), (_instance, ctx) => {
+			expect(ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE type='index' AND name='mv_nodes_identity'").toArray()).toHaveLength(1);
+		});
+	});
+
 	it("changes only the folder root on rename/delete, keeps child IDs and heads, and isolates recreated roots", async () => {
 		const drive = await newDrive();
 		await putFile(drive, "a/deep/f", "hello");
@@ -62,6 +73,7 @@ describe("M2 stable node tree", () => {
 		await runInDurableObject(stubFor(drive), (_instance, ctx) => {
 			const sql = ctx.storage.sql;
 			const rows = sql.exec(LIVE_TREE + " SELECT * FROM tree").toArray();
+			legacyTables(sql);
 			sql.exec("DROP TABLE nodes");
 			sql.exec("CREATE TABLE nodes(path TEXT PRIMARY KEY,type TEXT NOT NULL,head TEXT,size INTEGER,ctype TEXT,mtime INTEGER,seq INTEGER,parent TEXT NOT NULL)");
 			sql.exec("CREATE INDEX nodes_parent ON nodes(parent,path)");

@@ -112,6 +112,7 @@ class DriveStore {
 	constructor(private ctx: DurableObjectState, private env: Env, sql?: SqlStorage, queue = {tail: Promise.resolve() as Promise<unknown>}) {
 		this.queue = queue;
 		this.sql = sql ?? ctx.storage.sql;
+		if (!sql && hasBranches(this.sql)) this.sql.exec("CREATE INDEX IF NOT EXISTS mv_nodes_identity ON mv_nodes(id,_branch,_rev DESC)");
 		if (!sql && !hasBranches(this.sql)) this.ctx.storage.transactionSync(() => {
 			for (const stmt of [...SCHEMA, ...GC_SCHEMA, ...HISTORY_SCHEMA]) this.sql.exec(stmt);
 			migrateNodes(this.sql);
@@ -730,7 +731,7 @@ class DriveStore {
 	}
 
 	private logRow(c: CommitCtx, path: string, op: string, versionId: string | null): void {
-		this.sql.exec("INSERT INTO log(seq,path,op,version) VALUES(?,?,?,?)", c.seq, path, op, versionId);
+		this.sql.exec("INSERT INTO log(rowid,seq,path,op,version) VALUES((SELECT COALESCE(MAX(rowid),0)+1 FROM log),?,?,?,?)", c.seq, path, op, versionId);
 		c.events.push({ ev: this.lastEv(), seq: c.seq, path, op, versionId });
 	}
 
@@ -1007,7 +1008,7 @@ class DriveStore {
 		const server = pair[1];
 		this.ctx.acceptWebSocket(server);
 		const last = this.lastEv();
-		if (last - after > MAX_BACKLOG_EVENTS || (this.getMeta("forkOf") !== null && after === 0)) {
+		if (this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM (SELECT 1 FROM log WHERE rowid>? LIMIT ?)", after, MAX_BACKLOG_EVENTS + 1).one().n > MAX_BACKLOG_EVENTS || (this.getMeta("forkOf") !== null && after === 0)) {
 			server.send(JSON.stringify({ type: "resync", headSeq: this.headSeq(), lastEv: last }));
 			server.close(1000, "resync");
 			return new Response(null, { status: 101, webSocket: client });

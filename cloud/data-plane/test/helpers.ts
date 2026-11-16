@@ -6,6 +6,20 @@ export const selfFetch = (req: Request): Promise<Response> => (exports as unknow
 export const TOKEN = "uls-dev-local-token";
 const BASE = "http://example.com";
 
+// Recreate the pre-branch tables so migration tests start from a real legacy schema.
+export function legacyTables(sql: SqlStorage): void {
+	const keys: Record<string, string> = { nodes: "id", versions: "id", meta: "k", shards_known: "h", retained_shards: "h", drive_shards: "h", commit_receipts: "actor,id", gc_marks: "h", gc_manifest_marks: "h", gc_pending: "k", gc_state: "id" };
+	for (const { name, columns } of sql.exec<{ name: string; columns: string }>("SELECT * FROM mv_columns").toArray()) {
+		const cols = (JSON.parse(columns) as string[]).map(c => `"${c}"`).join(",");
+		sql.exec(`CREATE TABLE legacy_${name} AS SELECT ${cols} FROM ${name}`);
+		sql.exec(`DROP VIEW ${name}`);
+		sql.exec(`ALTER TABLE legacy_${name} RENAME TO ${name}`);
+		if (keys[name]) sql.exec(`CREATE UNIQUE INDEX legacy_${name}_key ON ${name}(${keys[name]})`);
+	}
+	sql.exec("DROP TABLE node_search");
+	for (const { name } of sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'mv_%'").toArray()) sql.exec(`DROP TABLE ${name}`);
+}
+
 export async function sha256Hex(data: Uint8Array): Promise<string> {
 	const d = await crypto.subtle.digest("SHA-256", data);
 	return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");

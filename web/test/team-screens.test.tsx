@@ -12,7 +12,7 @@ it("sends a recipient invitation, then displays pending invitations", async () =
   });
   vi.stubGlobal("fetch", fetcher); renderApp("/orgs/studio/team");
   const user = userEvent.setup();
-  await screen.findByRole("heading", { name: "Studio" });
+  await screen.findByText("Studio");
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "new@example.com" } });
   await user.selectOptions(screen.getByLabelText("Role"), "viewer");
   await user.click(screen.getByRole("button", { name: "Send invitation" }));

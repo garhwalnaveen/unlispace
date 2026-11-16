@@ -5,7 +5,7 @@ import type { DriveAuthority } from "../src/drive";
 import type { DataPlaneAdmin } from "../src/index";
 import { LineageGC } from "../src/gc";
 import { migrateHistory } from "../src/history";
-import { api, commit, newDrive, putFile } from "./helpers";
+import { api, commit, legacyTables, newDrive, putFile } from "./helpers";
 const stub = (id: string) => { const ns = env.DRIVE_AUTHORITY as DurableObjectNamespace<DriveAuthority>; return ns.get(ns.idFromName(id)); };
 const admin = (exports as unknown as {
     DataPlaneAdmin: Pick<DataPlaneAdmin, "forkDrive" | "restoreSnapshot" | "deleteDrive">;
@@ -70,6 +70,7 @@ it("backfills legacy rename pairs and descendant histories without merging reuse
     await move(d, "old/", "new/");
     await runInDurableObject(stub(d), async (_, ctx) => {
         const sql = ctx.storage.sql;
+        legacyTables(sql);
         const rename = sql.exec<{
             id: string;
             seq: number;

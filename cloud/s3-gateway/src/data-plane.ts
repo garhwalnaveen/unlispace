@@ -56,11 +56,12 @@ export class DataPlane {
     for (const [name,value] of Object.entries(extraHeaders)) headers.set(name,value);
     const response = await this.binding.fetch(new Request(url, { method, headers, body }));
     if (!response.ok) {
-      let details: { error?: string; currentVersionId?: string } = {};
+      let details: { error?: string; message?: unknown; currentVersionId?: string } = {};
       try { details = await response.json() as typeof details; } catch { /* non-JSON upstream failure */ }
       const codes: Record<string, string> = { no_such_drive: "NoSuchBucket", no_such_path: "NoSuchKey", not_a_file: "NoSuchKey", no_such_version: "NoSuchVersion", precondition_failed: "PreconditionFailed", path_conflict: "PathConflict", too_large: "EntityTooLarge", unauthorized: "AccessDenied", hash_mismatch: "BadDigest", bad_path: "InvalidArgument" };
       const status = response.status === 401 ? 403 : details.error === "not_a_file" ? 404 : response.status;
-      throw new S3Error(status, codes[details.error ?? ""] ?? (status >= 500 ? "ServiceUnavailable" : "InvalidArgument"), undefined, details.currentVersionId ? { "x-amz-version-id": details.currentVersionId } : {});
+      const message = status === 400 && ["bad_request", "bad_path"].includes(details.error ?? "") && typeof details.message === "string" ? details.message.slice(0, 512) : undefined;
+      throw new S3Error(status, codes[details.error ?? ""] ?? (status >= 500 ? "ServiceUnavailable" : "InvalidArgument"), message, details.currentVersionId ? { "x-amz-version-id": details.currentVersionId } : {});
     }
     return response;
   }
@@ -163,7 +164,14 @@ export class DataPlane {
     }
   }
   async putShard(shard: Shard, bytes: Uint8Array): Promise<void> {
-    await this.request(`shards/${shard.h}`, "PUT", bytes);
+    if (!(await this.missing([shard.h])).length) return;
+    try { await this.request(`shards/${shard.h}`, "PUT", bytes); }
+    catch (error) {
+      if (!(error instanceof S3Error) || error.status !== 400 || !error.message.includes("(10058)")) throw error;
+      // Another request may have stored this same content-addressed chunk first.
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      if ((await this.missing([shard.h])).length) throw new S3Error(503, "SlowDown", "Chunk upload is temporarily busy");
+    }
   }
   async missing(hashes: string[]): Promise<string[]> {
     const missing: string[] = [];

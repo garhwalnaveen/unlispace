@@ -4,8 +4,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { edited, median, pool, scenarios } from './s3-benchmark.mjs';
+import { edited, errorDetails, median, pool, requestHandler, scenarios, verifyBytes } from './s3-benchmark.mjs';
 
 test('all 49 supplied scenarios have unique names and the documented sizes', () => {
   const rows = scenarios();
@@ -21,6 +22,57 @@ test('targeted retests select exact names and reject unknown or duplicate cases'
   assert.deepEqual(scenarios(['head', 'stream get 256 MiB']).map(row => row.name), ['stream get 256 MiB', 'head']);
   assert.throws(() => scenarios(['stream get 256 MB']), /Unknown scenario/);
   assert.throws(() => scenarios(['head', 'head']), /unique/);
+});
+
+test('verification errors retain diagnostic digests without arbitrary payloads or messages', () => {
+  let failure;
+  try { assert.equal('a'.repeat(64), 'b'.repeat(64)); } catch (error) { failure = error; }
+  const details = errorDetails(new AggregateError([failure], 'do not record this message'));
+  assert.equal(details.causes[0].actual, 'a'.repeat(64));
+  assert.equal(details.causes[0].expected, 'b'.repeat(64));
+  assert(!JSON.stringify(details).includes('do not record'));
+  failure.actual = 'private bytes'; failure.expected = ['private bytes'];
+  assert.equal(errorDetails(failure).actual, undefined);
+  assert.equal(errorDetails(failure).expected, undefined);
+  failure.actual = ['a'.repeat(64)];
+  assert.equal(errorDetails(failure).actual, undefined);
+});
+
+test('truncated and changed bodies retain byte counts and both digests', () => {
+  const expected = Buffer.from('original bytes');
+  verifyBytes(Buffer.from(expected), expected, 'fixture');
+  for (const actual of [expected.subarray(0, 3), Buffer.from('modified bytes')]) {
+    assert.throws(() => verifyBytes(actual, expected, 'fixture'), error => {
+      const detail = errorDetails(error);
+      assert.equal(detail.receivedBytes, actual.length);
+      assert.equal(detail.expectedBytes, expected.length);
+      assert.equal(detail.actualSHA256, createHash('sha256').update(actual).digest('hex'));
+      assert.equal(detail.expectedSHA256, createHash('sha256').update(expected).digest('hex'));
+      return true;
+    });
+  }
+  assert.deepEqual(errorDetails({name:'S3SDKError',code:'InvalidArgument',status:400,message:'ops[0]: bad path',requestId:'request-123'}),
+    {name:'S3SDKError',code:'InvalidArgument',status:400,message:'ops[0]: bad path',requestId:'request-123'});
+  assert.equal(errorDetails({name:'S3SDKError',code:'InvalidResponse',message:'missing x-s3sdk-size header'}).message,'missing x-s3sdk-size header');
+});
+
+test('request deadline rejects both stalled headers and a stalled response body', async () => {
+  for (const headersSent of [false, true]) {
+    const server = createServer((_request, response) => {
+      if (headersSent) { response.writeHead(200); response.write('partial body'); }
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const handler = requestHandler(150);
+    try {
+      await assert.rejects(async () => {
+        const {response} = await handler.handle({protocol:'http:',hostname:'127.0.0.1',port:server.address().port,method:'GET',path:'/',headers:{}});
+        for await (const _chunk of response.body) {}
+      }, error => ['AbortError','TimeoutError'].includes(error.name));
+    } finally {
+      handler.destroy(); server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
 });
 
 test('edit oracle preserves exact bytes at splice, write, patch and truncate boundaries', () => {
@@ -50,9 +102,14 @@ test('pool bounds concurrency and waits for in-flight operations before rejectin
 test('a write refusal stops before the 49 workloads and saves a credential-free failure report', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'orbit-benchmark-test-'));
   const requests = [];
+  let compatible = true;
   const server = createServer((request, response) => {
     requests.push({ method: request.method, url: request.url });
     request.resume();
+    if (request.url === '/healthz') {
+      response.writeHead(200, {'content-type':'application/json',...(compatible ? {'x-s3sdk-protocol':'1'} : {'x-uls-protocol':'1'})});
+      response.end('{"ok":true}'); return;
+    }
     response.writeHead(403, { 'content-type': 'application/xml' });
     response.end('<Error><Code>QuotaExceeded</Code><Message>Writes disabled</Message></Error>');
   });
@@ -69,7 +126,15 @@ test('a write refusal stops before the 49 workloads and saves a credential-free 
     assert.equal(result.preflight, 'failed'); assert.deepEqual(result.rows, []);
     assert.equal(result.error.code, 'QuotaExceeded'); assert(!raw.includes(secret));
     assert.equal(requests.filter(request => request.method === 'PUT').length, 1);
-    assert(requests.every(request => request.url.includes('orbit-benchmark-')));
+    assert(requests.every(request => request.url === '/healthz' || request.url.includes('orbit-benchmark-')));
+    compatible = false; requests.length = 0;
+    const incompatible = spawn(process.execPath, [new URL('./s3-benchmark.mjs', import.meta.url).pathname, credentials, output], {stdio:'ignore'});
+    assert.equal(await new Promise((resolve,reject)=>{incompatible.on('error',reject);incompatible.on('close',resolve);}),1);
+    const refused = JSON.parse(await readFile(output,'utf8'));
+    assert.equal(refused.error.name,'IncompatibleGateway');
+    assert.equal(refused.cleanup,'No benchmark writes attempted');
+    assert.deepEqual(requests,[{method:'GET',url:'/healthz'}]);
+    assert.equal(requests.filter(request=>request.method==='PUT').length,0);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(directory, { recursive: true, force: true });

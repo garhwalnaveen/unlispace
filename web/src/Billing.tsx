@@ -5,7 +5,7 @@ import { Button } from "./components/ui/button";
 import { useCallback, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "./context";
-import { billingCatalog, externalUrl, type Checkout } from "./billing";
+import { billingCatalog, externalUrl, type Checkout } from "./billing-data";
 import { ErrorNotice, formatBytes, formatDate, Loading, Modal, useLoad } from "./ui";
 
 import { UsageMeter } from "./Usage";
@@ -45,6 +45,7 @@ export function Billing() {
     } catch (reason) { setError(reason); setBusy(false); }
   }
   const billing = summary.data;
+  const hasSubscription = billing && ["active", "past_due", "on_hold", "paused", "pending"].includes(billing.status);
   const days = billing?.trialEndsAt == null ? null : Math.max(0, Math.ceil((billing.trialEndsAt - Date.now()) / 86_400_000));
   const selectedSeats = tier === "individual" ? 1 : seats;
   const prices = catalog.data?.prices;
@@ -62,9 +63,9 @@ export function Billing() {
       <p className="muted small">{billing.seats} seat{billing.seats === 1 ? "" : "s"}</p>
       <UsageMeter {...billing} />
       {billing.trialPending && <p className="notice">Your trial has not started. It begins when your drive is ready.</p>}
-      {days === 0 && !billing.writable && <p className="notice">Your trial has ended. Choose a plan to keep uploading. Your existing files remain readable.</p>}
+      {days === 0 && !billing.writable && <p className="notice">Your trial has ended. {hasSubscription ? "Manage your subscription" : "Choose a plan"} to keep uploading. Your existing files remain readable.</p>}
       {canManage ? <div className="actions">
-        <Button variant="default" disabled={busy} onClick={() => setChoosing(true)}>Choose a plan</Button>
+        {!hasSubscription && <Button variant="default" disabled={busy} onClick={() => setChoosing(true)}>Choose a plan</Button>}
         <Button disabled={busy} onClick={() => void redirect(false)}>Manage subscription</Button>
       </div> : <p className="muted small">An organization owner or admin can manage your subscription.</p>}
     </section>}

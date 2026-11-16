@@ -1,4 +1,4 @@
-import type { BillingSummary, Checkout, Invoice } from "./billing";
+import type { BillingSummary, Checkout, Invoice } from "./billing-data";
 import type { AccessKey, KeySecret, NewKey } from "./keys";
 import type { Invitation, Role, Team } from "./teams";
 
@@ -304,6 +304,7 @@ export function errorMessage(error: unknown): string {
       keys_not_configured: "Access keys are not configured on this server yet.",
       checkout_pending: "A checkout is already in progress. Resume the same plan, or wait for its payment status to be confirmed.",
       billing_rejected: "The payment provider could not create checkout. Please try again.",
+      billing_unavailable: "Billing could not be reached. Your checkout status must be confirmed before starting another payment.",
       billing_not_configured: "Billing is not configured on this server yet. Please try again later.",
       team_plan_required: "An active Teams plan is required to invite members.",
       already_member: "That account is already a member of this workspace.",

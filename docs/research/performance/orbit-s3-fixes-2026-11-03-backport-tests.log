@@ -1,0 +1,30 @@
+
+ RUN  v4.1.12 /private/var/folders/6c/9k8c__8x1ss6nb_jd5sdyzn40000gn/T/orbit-s3-live-fix-1ramoo3t/backport
+
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+Using secrets defined in process.env
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mMissing required secrets: ULS_JWT_PRIVATE_JWK. Add them to .dev.vars, .env, or set as environment variables.[0m
+
+
+console warning; message = Called .text() on an HTTP body which does not appear to be text. The body's Content-Type is "application/octet-stream". The result will probably be corrupted. Consider checking the Content-Type header before interpreting entities as text.
+
+ Test Files  5 passed (5)
+      Tests  24 passed (24)
+   Start at  16:27:03
+   Duration  13.01s (transform 10.18s, setup 0ms, import 25.08s, tests 3.09s, environment 1ms)
+

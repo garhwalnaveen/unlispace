@@ -220,3 +220,8 @@ The quota integration check injects a deliberately stale per-drive D1 measuremen
 organization billing/token/S3 access to continue using the authoritative data-plane ledger.
 Deleting a current file must retain its historical storage charge. Atomic over-quota rejection
 and reclamation races are covered by data-plane Workers tests with small real byte budgets.
+
+`E2E_API_ONLY=1 E2E_PARITY=1 bash tests/e2e/run.sh` also checks 200 nested uploads at
+concurrency eight, published-SDK edit/rename semantics, and eight simultaneous reads of
+both 32 MiB and 64 MiB random files through the real local services. Each read must match
+the exact uploaded length and SHA-256. These are correctness regressions, not hosted timings.

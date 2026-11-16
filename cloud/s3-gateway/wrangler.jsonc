@@ -20,21 +20,21 @@
   "secrets": { "required": ["ULS_JWT_PRIVATE_JWK"] },
   "env": {
     "production": {
-      "name": "orbit-s3",
+      "name": "unlispace-s3",
       "secrets": { "required": ["ULS_JWT_PRIVATE_JWK"] },
       "workers_dev": true,
       "preview_urls": false,
       "services": [
-        { "binding": "CONTROL_PLANE", "service": "orbit-api", "entrypoint": "ControlPlane" },
-        { "binding": "API", "service": "orbit-api" },
-        { "binding": "DATA_PLANE", "service": "orbit-data-plane" }
+        { "binding": "CONTROL_PLANE", "service": "unlispace-api", "environment": "production", "entrypoint": "ControlPlane" },
+        { "binding": "API", "service": "unlispace-api", "environment": "production" },
+        { "binding": "DATA_PLANE", "service": "unlispace-data-plane", "environment": "production" }
       ],
       "durable_objects": { "bindings": [{ "name": "S3_STATE", "class_name": "S3State" }] },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["S3State"] }],
       "vars": {
-        "ULS_ISSUER": "https://orbit-api.__WORKERS_DOMAIN__",
-        "ULS_S3_HOST": "orbit-s3.__WORKERS_DOMAIN__",
-        "ULS_DATA_ENDPOINT": "https://orbit-data-plane.__WORKERS_DOMAIN__"
+        "ULS_ISSUER": "https://unlispace-api.__WORKERS_DOMAIN__",
+        "ULS_S3_HOST": "unlispace-s3.__WORKERS_DOMAIN__",
+        "ULS_DATA_ENDPOINT": "https://unlispace-data-plane.__WORKERS_DOMAIN__"
       }
     }
   }
