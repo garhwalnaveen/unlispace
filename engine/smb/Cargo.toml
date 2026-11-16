@@ -7,52 +7,19 @@ license = "UNLICENSED"
 publish = false
 build = "build.rs"
 
-[workspace]
-resolver = "3"
-members = [".", "vendor", "uls-vfs-backend"]
-default-members = [".", "vendor"]
-
-[workspace.package]
-version = "0.7.0"
-edition = "2024"
-rust-version = "1.99"
-license = "MIT"
-repository = "https://github.com/paltaio/rust-smb-server"
-
-[workspace.dependencies]
-smb-server = { path = "vendor", version = "=0.7.0", default-features = false }
-tokio = { version = "=1.54.1", features = ["full"] }
-binrw = "=0.15.2"
-bytes = "=1.12.1"
-async-trait = "=0.1.92"
-tracing = "=0.1.44"
-thiserror = "=2.0.21"
-uuid = { version = "=1.18.1", features = ["v4"] }
-cap-std = "=3.4.5"
-cap-primitives = "=3.4.5"
-hmac = "=0.12.1"
-sha2 = "=0.10.9"
-md-5 = "=0.10.6"
-md4 = "=0.10.2"
-aes = "=0.8.4"
-cmac = "=0.7.2"
-rc4 = "=0.2.0"
-aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes"] }
-ccm = { version = "=0.5.0", default-features = false }
-
 [dependencies]
 smb-server.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["full"] }
 bytes.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
-getrandom = "=0.4.2"
-tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+getrandom.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
-socket2 = "=0.6.5"
+socket2.workspace = true
 hmac.workspace = true
-sha2.workspace = true
+sha2 = "=0.10.9"
 md-5.workspace = true
 md4.workspace = true
 aes.workspace = true
@@ -60,16 +27,9 @@ cmac.workspace = true
 rc4.workspace = true
 aes-gcm.workspace = true
 ccm.workspace = true
-tempfile = "=3.27.0"
+tempfile.workspace = true
 smb-server = { workspace = true, features = ["localfs"] }
 
 [build-dependencies]
-cc = "=1.2.43"
+cc.workspace = true
 
-[profile.dev]
-debug = 0
-incremental = false
-
-[profile.test]
-debug = 0
-incremental = false

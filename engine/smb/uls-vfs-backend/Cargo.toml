@@ -15,21 +15,21 @@ path = "src/bin/smb-vfs-demo.rs"
 required-features = ["demo"]
 
 [dependencies]
-uls-smb = { path = "..", version = "=0.1.0" }
-uls-vfs = { path = "../../uls-vfs", version = "=0.0.1" }
-uls-client = { path = "../../uls-client", version = "=0.0.1", optional = true }
-uls-mock = { path = "../../uls-mock", version = "=0.0.1", optional = true }
+uls-smb.workspace = true
+uls-vfs.workspace = true
+uls-client = { workspace = true, optional = true }
+uls-mock = { workspace = true, optional = true }
 async-trait.workspace = true
 bytes.workspace = true
-tokio.workspace = true
-futures-util = { version = "=0.3.34", optional = true }
-tempfile = { version = "=3.27.0", optional = true }
+tokio = { workspace = true, features = ["full"] }
+futures-util = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
-uls-client = { path = "../../uls-client", version = "=0.0.1" }
-uls-mock = { path = "../../uls-mock", version = "=0.0.1" }
-futures-util = "=0.3.34"
-tempfile = "=3.27.0"
+uls-client.workspace = true
+uls-mock.workspace = true
+futures-util.workspace = true
+tempfile.workspace = true
 smb-server.workspace = true
 
 [lints.rust]

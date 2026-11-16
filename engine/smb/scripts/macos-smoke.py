@@ -107,7 +107,7 @@ def main():
     try:
         with LOG.open("w") as log:
             process = subprocess.Popen(
-                [str(ROOT / "target/debug/smb-demo"), str(mount)], cwd=ROOT,
+                [str(ROOT.parent / "target/debug/smb-demo"), str(mount)], cwd=ROOT,
                 stdout=log, stderr=subprocess.STDOUT, env=env)
             deadline = time.monotonic() + 20
             while not os.path.ismount(mount) and process.poll() is None and time.monotonic() < deadline:

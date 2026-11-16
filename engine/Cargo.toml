@@ -1,7 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["uls-chunk", "uls-proto", "uls-client", "ulsd", "uls-mock", "uls-vfs", "uls-auth"]
-exclude = ["smb"]
+members = [
+    "uls-chunk",
+    "uls-proto",
+    "uls-client",
+    "ulsd",
+    "uls-mock",
+    "uls-vfs",
+    "uls-auth",
+    "smb",
+    "smb/vendor",
+    "smb/uls-vfs-backend",
+]
 
 [workspace.package]
 version = "0.0.1"
@@ -19,6 +29,9 @@ uls-client = { path = "uls-client" }
 uls-mock = { path = "uls-mock" }
 uls-vfs = { path = "uls-vfs" }
 uls-auth = { path = "uls-auth" }
+uls-smb = { path = "smb" }
+uls-vfs-backend = { path = "smb/uls-vfs-backend" }
+smb-server = { path = "smb/vendor", default-features = false }
 
 fastcdc = "=3.2.1"
 sha2 = "=0.11.1"
@@ -45,6 +58,24 @@ axum = "=0.8.9"
 rusqlite = { version = "=0.41.0", features = ["bundled"] }
 base64 = "=0.22.1"
 security-framework = "=3.7.0"
+
+# smb/vendor protocol server. sha2 stays on the 0.10 (digest 0.10) line there to
+# match the RustCrypto hmac/md-5/md4/cmac pins, so it is declared per crate.
+binrw = "=0.15.2"
+uuid = { version = "=1.18.1", features = ["v4"] }
+cap-std = "=3.4.5"
+cap-primitives = "=3.4.5"
+hmac = "=0.12.1"
+md-5 = "=0.10.6"
+md4 = "=0.10.2"
+aes = "=0.8.4"
+cmac = "=0.7.2"
+rc4 = "=0.2.0"
+aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes"] }
+ccm = { version = "=0.5.0", default-features = false }
+getrandom = "=0.4.2"
+socket2 = "=0.6.5"
+cc = "=1.2.43"
 
 [profile.release]
 lto = "thin"

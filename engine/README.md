@@ -14,8 +14,8 @@ Deviations and open questions: `CONTRACT-NOTES.md`.
 | `ulsd` | multicall binary: `uls` CLI, daemon, and mount adapters (SMB with `--features smb`, NFSv3 via `nfsserve`) |
 | `uls-mock` | in-memory server implementing the contract, for tests and offline runs (not a product) |
 
-`smb/` is a separate Cargo workspace (excluded here): the SMB server library, its vendored protocol core,
-and the `uls-vfs-backend` bridge. `ulsd --features smb` depends on it by path.
+`smb/` holds workspace members for SMB: the SMB server library (`uls-smb`), its vendored protocol core
+(`smb/vendor`), and the `uls-vfs-backend` bridge. `ulsd --features smb` depends on them.
 
 ## Build and test
 

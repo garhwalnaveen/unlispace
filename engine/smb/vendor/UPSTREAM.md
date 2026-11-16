@@ -15,7 +15,7 @@ those security and concurrency mechanisms from MS-SMB2.
 
 Local changes:
 
-- Joined the enclosing isolated workspace, pinned dependencies, disabled the
+- Joined the enclosing `engine/` workspace, pinned dependencies, disabled the
   default host filesystem backend (enabled only for tests).
 - Added final-component stream parsing, opt-in `named_streams` capabilities,
   `Handle::streams`, stream enumeration, and the named-stream filesystem flag.

@@ -1,6 +1,6 @@
 # uls-smb
 
-Isolated Rust workspace containing the Orbit SMB library, `smb-demo`, the
+Members of the `engine/` Cargo workspace: the Orbit SMB library, `smb-demo`, the
 `uls-vfs-backend` bridge, and an MIT-licensed protocol-server fork. `ulsd` uses
 it as its writable mount adapter when built with `--features smb`. Native macOS
 mounting passes the smoke script (see [VERIFICATION.md](VERIFICATION.md));
