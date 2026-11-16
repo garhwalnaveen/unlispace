@@ -55,7 +55,7 @@ Email OTP requires an onboarded sending domain. The production API config intent
 
 `0006_production_safety.sql` adds checkout locks and metering retry state;
 `0007_checkout_subscription.sql` binds checkout intents to subscriptions, and
-`0010_billing_grace.sql` stores Dodo's grace-period deadline. Apply all three before the
+`0008_billing_grace.sql` stores Dodo's grace-period deadline. Apply all three before the
 new API. The data-plane `v2` Durable Object migration adds `StorageQuota`; the API and S3
 Workers depend on its `configureQuota` and read-only `quotaUsage` service methods. Roll out the data plane, then API and
 S3, and publish the web build as one coordinated release. Older drive write tokens cannot
