@@ -1,6 +1,6 @@
 # M3 contract: forks, drive registry, real S3 keys, quotas, CLI parity
 
-Status: normative for wave 14–20 · 2026-10-25. Extends `m1-contract.md` and `cloud/api/API.md`.
+Status: normative for wave 14–20 · 2026-10-25. Extends `control-plane-contract.md` and `cloud/api/API.md`.
 Reference behaviour is Space's public protocol v1 (`docs.spacefs.com/llms-full.txt`, §1–§9). We
 keep its semantics under our own prefix: every `x-s3sdk-*` name becomes `x-uls-*`, `/_s3sdk/` becomes
 `/_uls/`. Where we deliberately differ it says **Differs**.

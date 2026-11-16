@@ -135,21 +135,6 @@ export class StorageQuota extends DurableObject<Env> {
       if (!await this.releaseAbsent(key)) this.ctx.storage.sql.exec("DELETE FROM quota_deletions WHERE k=?", key);
     });
   }
-  /** One bounded ledger page; never expires active/ambiguous uploads by guessing a timeout. */
-  reconcile(lineages: string[]): Promise<{usedBytes:number;checked:number;unresolved:number;more:boolean}> {
-    return this.serial(async () => {
-      await this.initialize(lineages);
-      const after = this.setting("reconcile_cursor") ?? 0;
-      const rows = this.ctx.storage.sql.exec<ObjectRow & {rid:number}>("SELECT rowid AS rid,* FROM objects WHERE rowid>? ORDER BY rowid LIMIT 100", after).toArray();
-      let unresolved = 0;
-      for (const row of rows) {
-        if (row.inflight) { unresolved++; continue; }
-        await this.releaseAbsent(row.k);
-      }
-      this.set("reconcile_cursor", rows.length === 100 ? rows.at(-1)!.rid : 0);
-      return {usedBytes:this.setting("used")!,checked:rows.length,unresolved,more:rows.length===100};
-    });
-  }
 }
 
 export function quotaFor(env: Env, org: string) {

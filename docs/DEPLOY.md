@@ -95,8 +95,7 @@ S3 new state is partitioned by workspace. Existing multipart uploads keep their 
 legacy authority until completion/abort; legacy annotations remain readable through fallback.
 Do not delete the legacy global state object during rollout.
 
-Keep GC deletion disabled until recovery acceptance. Internal `reconcileQuota(org,lineages)`
-checks a bounded ledger page and reports unresolved active reservations. It never expires a
-possibly live upload by time alone; stop/fence the relevant upload writers before any manual
-release. This release adds verified GC deletion fences and recovery but does not establish a
-new version-retention policy. Deleted files and drives can still consume retained storage.
+Keep GC deletion disabled until recovery acceptance. Quota reservations are never expired by
+time alone; stop/fence the relevant upload writers before any manual release. This release
+adds verified GC deletion fences and recovery but does not establish a new version-retention
+policy. Deleted files and drives can still consume retained storage.

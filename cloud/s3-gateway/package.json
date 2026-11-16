@@ -10,7 +10,7 @@
     "test:ingress": "node node/build.mjs && node --test node/streaming.test.mjs",
     "typecheck:ingress": "tsc --noEmit -p node/tsconfig.json",
     "test:sdk-python": "node node/sdk-test.mjs",
-    "types": "wrangler types"
+    "types": "wrangler types --strict-vars=false"
   },
   "dependencies": {
     "fast-xml-parser": "5.11.2"

@@ -3,7 +3,7 @@
 Status: frozen for M1 · 2026-10-25. Implemented by `cloud/api/` (issuer), `cloud/data-plane/`
 (verifier), `engine/` (daemon client), `web/` and `mac/` (UI clients). Change this file first.
 
-M0's data-plane endpoints (`docs/design/m0-contract.md` §3) are unchanged except for auth (§3
+M0's data-plane endpoints (`docs/design/wire-contract.md` §3) are unchanged except for auth (§3
 below) and drive creation (§4).
 
 ## 1. Local dev topology
@@ -167,8 +167,8 @@ The browser cannot confirm a native connection; opening the custom scheme is onl
   authority, including staged chunks, retained history and spilled manifest/attribute metadata.
   `quotaUsage(org,lineages)` reads/accounting-initializes without changing entitlement limits;
   `configureQuota` changes those limits. Initialization is checkpointed and may return a
-  retryable 503 until complete. `reconcileQuota` is internal service-binding recovery, bounded
-  to one ledger page. Uncertain active upload reservations stay charged until fenced recovery.
+  retryable 503 until complete. Uncertain active upload reservations stay charged until fenced
+  recovery.
 - A drive can read/discover/reference only shards it uploaded with a verified checksum or
   inherited from retained versions. Physical presence in a shared lineage grants no permission.
   Forks copy retained grants, excluding the source's unpublished uploads. Existing metadata

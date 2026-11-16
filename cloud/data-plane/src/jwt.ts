@@ -1,4 +1,4 @@
-// Drive-token verification: EdDSA (Ed25519) JWTs, WebCrypto only. See docs/design/m1-contract.md §2-§3.
+// Drive-token verification: EdDSA (Ed25519) JWTs, WebCrypto only. See docs/design/control-plane-contract.md §2-§3.
 //
 // Wire format (what the issuer in cloud/api must produce):
 //   token   = b64url(header) "." b64url(payload) "." b64url(signature)       (base64url, no padding)

@@ -28,6 +28,7 @@ yarn-error.log*
 cloud/**/node_modules
 cloud/**/.wrangler
 cloud/**/.dev.vars
+cloud/**/worker-configuration.d.ts
 cloud/s3-gateway/node/dist
 engine/target
 /.wrangler

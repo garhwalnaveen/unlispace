@@ -329,4 +329,4 @@ write-heavy users, so batched commits from the desktop matter.
 | `cloud/api/` | Worker: control plane (auth, orgs, drives, keys, billing) on D1. Starts in M1 |
 | `engine/` | Rust workspace: `uls-chunk`, `uls-proto`, `uls-client`, `ulsd` (daemon + `uls` CLI) |
 | `mac/` | Swift: menu-bar app, Finder Sync extension. Starts in M1 |
-| `docs/design/` | this doc, plus `m0-contract.md` (the wire contract shared by cloud and engine) |
+| `docs/design/` | this doc, plus `wire-contract.md` (the wire contract shared by cloud and engine) |

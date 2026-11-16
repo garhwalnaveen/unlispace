@@ -414,10 +414,6 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
         if (typeof org !== "string" || !org || org.length > 128 || !Array.isArray(lineages) || !lineages.every(id => DRIVE_ID_RE.test(id))) throw new TypeError("invalid quota");
         return quotaFor(this.env, org).usage(lineages);
     }
-    async reconcileQuota(org: string, lineages: string[]) {
-        if (typeof org !== "string" || !org || org.length > 128 || !Array.isArray(lineages) || !lineages.every(id => DRIVE_ID_RE.test(id))) throw new TypeError("invalid quota");
-        return quotaFor(this.env, org).reconcile(lineages);
-    }
 	async createDrive(driveId: string, placement?: Placement): Promise<{ driveId: string; placement: string; createdAt: number }> {
 		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
 		if (placement != null && !(PLACEMENTS as readonly unknown[]).includes(placement)) throw new TypeError("invalid placement");
@@ -518,13 +514,6 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
 		if (!r.ok) return null;
 		const {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf} = r.data;
 		return {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf};
-	}
-
-	async restoreDrive(driveId: string): Promise<{ ok: true }> {
-		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
-		const restored = await stubFor(this.env, driveId).restoreDrive();
-		if (!restored.ok) throw adminError(String((restored as unknown as Fail).body.error), (restored as unknown as Fail).status);
-		return { ok: true };
 	}
 }
 

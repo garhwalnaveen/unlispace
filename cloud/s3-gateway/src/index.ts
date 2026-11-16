@@ -13,7 +13,7 @@ import { XMLParser } from "fast-xml-parser";
 import { handleIngressBridge } from "./ingress-bridge";
 import { directPlan, directCommit } from "./direct";
 
-declare global { interface Env { ULS_INGRESS_SECRET?: string; ULS_DATA_ENDPOINT?: string } }
+declare global { interface Env { ULS_INGRESS_SECRET?: string } }
 
 export { S3State } from "./state";
 

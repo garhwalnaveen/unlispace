@@ -1,7 +1,7 @@
 # Orbit control-plane API
 
 Worker `orbit-api`: auth (email OTP, Google OIDC, desktop PKCE), sessions, orgs, drives, and drive-token minting.
-Implements `docs/design/m1-contract.md`. Storage is D1 (`DB`); drive lifecycle goes to the data plane through the
+Implements `docs/design/control-plane-contract.md`. Storage is D1 (`DB`); drive lifecycle goes to the data plane through the
 `DATA_PLANE` service binding (`DataPlaneAdmin` entrypoint).
 
 Also includes versioned HMAC-derived S3 access keys with parent scopes/transitive revocation,
