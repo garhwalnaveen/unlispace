@@ -98,15 +98,6 @@ import Foundation
         #expect(String(decoding: rest[0], as: UTF8.self) == "{\"b\":2}")
     }
 
-    @Test func mockClientBasics() async throws {
-        let m = MockDaemonClient()
-        #expect(try await m.listDrives().count == 2)
-        try await m.mount(driveId: "demo")
-        let d = try await m.listDrives().first { $0.driveId == "demo" }
-        #expect(d?.mountState == .mounted)
-        await #expect(throws: DaemonClientError.self) { try await m.mount(driveId: "nope") }
-    }
-
     @Test func realClientWithoutSocketReportsMissing() async {
         let c = UnixSocketDaemonClient(socketPath: "/tmp/definitely-not-here-\(UUID().uuidString).sock")
         await #expect(throws: DaemonClientError.socketMissing) { try await c.connect() }

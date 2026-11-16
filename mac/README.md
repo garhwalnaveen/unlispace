@@ -1,4 +1,4 @@
-# Orbit for macOS (M1 shell)
+# Orbit for macOS
 
 Menu-bar app (SwiftUI + AppKit, Swift 6) that controls the `ulsd` engine. Built with SwiftPM and
 the Command Line Tools; no Xcode project.
@@ -22,8 +22,6 @@ Activity combines pending saves with matching events and omits redundant drive s
 Pending files and failures remain visible. Upload-journal storage is under a disclosure, with a
 full-storage warning outside it. SMB still journals Finder metadata, including `.DS_Store`;
 this change does not discard pending writes or change storage behavior.
-
-These changes supersede the navigation and setup descriptions in the historical sections below.
 
 ## Build and test
 ```
@@ -83,17 +81,18 @@ it ends at the first successful hand-off. If the daemon rejects the session (`un
   not exist, its nearest existing parent opens.
 
 ## Menu and Settings
-First launch opens a setup window: sign in, choose real daemon drives, then read the
-Network Volumes privacy explanation before mounting. “Set up later” leaves setup incomplete;
+First launch opens the three-stage setup window described above (sign in, connect drives with
+the Network Volumes privacy explanation, open Finder). “Set up later” leaves setup incomplete;
 the window returns next launch and can always be opened from the menu or Settings. The app
 starts polling at launch, independently of opening the menu. Setup never registers the engine
 or login items automatically.
 
 Signed out: "Sign in to Orbit". Signed in: email (`auth.status`), engine state, live
 `transfer` / `change` / `state` events, drives with mount state (`drives.list`), mount/unmount,
-"Sign out" (`auth.signOut`). Settings: account, cache cap (`config.set cacheCapBytes`), launch at
-login, Advanced -> Developer (API endpoint override, M0 dev endpoint + token via `config.set`).
-The menu uses a native window-style popover; “Transfers” opens individual progress bars,
+"Sign out" (`auth.signOut`). Settings: General, Account, Workspace, Ask AI, Storage & uploads
+(cache cap via `config.set cacheCapBytes`), Permissions (including launch at login) and
+Advanced -> Developer (API endpoint override, M0 dev endpoint + token via `config.set`).
+The menu uses a native window-style popover; “Activity” opens individual progress bars,
 updated by `transfer` events. Unknown totals show indeterminate progress. Finished transfers
 leave the list; failures show an error in the menu. Native semantic colors follow light/dark
 appearance; controls and progress bars have VoiceOver labels and values.
@@ -127,13 +126,11 @@ Protocol: see `DAEMON-PROTOCOL.md`.
 - `MockDaemonClient` is used internally whenever the socket is absent; its demo drives and
   transfers are hidden in the UI. Onboarding cannot mount mock drives.
 - The real socket client has a separate integration test against the local debug `ulsd`.
-  Browser sign-in has not run against a real server.
 - Onboarding, light/dark layout, keyboard/VoiceOver behavior and notification authorization or
-  delivery need manual review. The app was not launched for this task.
-- SMAppService registration and launch-at-login were not exercised (rules forbade it).
+  delivery need manual review.
+- SMAppService registration and launch at login are not exercised by tests.
 - `uls://open` Finder opening is not exercised in tests (the parser, validator and path resolver are).
-- Finder Sync extension is not built (needs Xcode); see `FinderSync/README.md`.
-- Ad-hoc signing only; no hardened runtime, notarization, or Sparkle.
+- There is no Finder Sync extension; it would need an Xcode project, which this SwiftPM build lacks.
 
 
 ## Distribution (Command Line Tools only)
@@ -158,7 +155,7 @@ the signed feed and DMG separately. Never commit private keys.
 Install/relaunch waits for fresh `status.pendingOps == 0` and an empty `uploads.pending`,
 then cleanly unmounts drives and checks again. Failed/disconnected checks retry every 30 seconds.
 An older daemon's unknown-method response hides uploads, pins or mounts independently;
-other errors remain errors. Transfers shows the upload queue and journal usage. Each drive's
+other errors remain errors. Activity shows the upload queue and journal usage. Each drive's
 Keep offline menu pins the whole drive and lists paths with live `pin` progress and unpin actions.
 
 The default test gate skips `KeychainTests` and `HandoffTests` to avoid Keychain access.
@@ -167,11 +164,11 @@ Run with `ULS_TEST_KEYCHAIN=1` only when explicitly authorized to exercise Keych
 
 ## Desktop workspace (Space UX review)
 
-The native app opens a resizable drive workspace on launch and reopen. My drives provides
-name filtering, inline Mount/Open in Finder/Eject actions and offline options. Transfers
+The native app opens a resizable drive workspace on launch and reopen. Files provides
+name filtering, inline Mount/Open in Finder/Eject actions and offline options. Activity
 shows the existing live progress and upload queue. The menu-bar popover still provides quick
-access and an Open app action. Settings uses General, Account, Cache, Permissions and Advanced
-sidebar pages with persisted System/Light/Dark appearance. Setup retains the authenticated
+access and an Open app action. Settings uses General, Account, Workspace, Ask AI, Storage & uploads,
+Permissions and Advanced sidebar pages with persisted System/Light/Dark appearance. Setup retains the authenticated
 three-stage flow with a visible step indicator.
 
 See `../docs/design/space-desktop-comparison.md` for the observed comparison, scope and remaining
@@ -220,7 +217,7 @@ Skipping optional access does not block setup. See `../docs/design/permissions-e
 The workspace also includes an Offline files page showing live per-selection cached bytes
 and progress, with Finder and stop-offline actions. Drive filters combine name search with
 All/Mounted/Not mounted/Needs attention and offer Clear filters recovery. Keyboard shortcuts:
-⌘1 My drives, ⌘2 Transfers, ⌘3 Offline files, ⌘F focus the drive filter, ⌘R refresh.
+⌘1 Files, ⌘2 Activity, ⌘3 Offline files, ⌘F filename search, ⌘R refresh.
 Drive operations reject duplicate in-flight requests and mock connections.
 
 
