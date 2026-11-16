@@ -5,7 +5,8 @@ import { HttpError, json, readJson } from "./http";
 import { normalizeEmail } from "./otp";
 import type { Role } from "./resources";
 import type { Authed } from "./session";
-import { randomB64url, sha256Hex } from "./util";
+import { randomB64url, sha256Hex, TOKEN43_RE } from "./util";
+import { canManage } from "./roles";
 
 type OrgAccess = { role: Role; name: string };
 async function access(ctx: Ctx, a: Authed, orgId: string, manage = false): Promise<OrgAccess> {
@@ -22,11 +23,11 @@ const availableSeat = `(SELECT COUNT(*) FROM memberships WHERE org_id=?) <
 
 export async function members(ctx: Ctx, a: Authed, orgId: string): Promise<Response> {
 	const org = await access(ctx, a, orgId);
-	const canManage = org.role === "owner" || org.role === "admin";
+	const manage = canManage(org.role);
 	const members = (await ctx.env.DB.prepare("SELECT u.id AS userId,u.email,u.display_name AS displayName,m.role,m.created_at AS createdAt FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.org_id=? ORDER BY m.created_at,u.id").bind(orgId).all()).results;
-	const invitations = canManage ? (await ctx.env.DB.prepare(`SELECT ${invitationFields} FROM invitations WHERE org_id=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>? ORDER BY created_at,id`).bind(orgId, ctx.now).all()).results : [];
+	const invitations = manage ? (await ctx.env.DB.prepare(`SELECT ${invitationFields} FROM invitations WHERE org_id=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>? ORDER BY created_at,id`).bind(orgId, ctx.now).all()).results : [];
 	const e = await entitlements(ctx, orgId);
-	return json({ name: org.name, role: org.role, canManage, members, invitations, seats: e.seats, teamAvailable: e.plan === "teams" && e.state === "paid" });
+	return json({ name: org.name, role: org.role, canManage: manage, members, invitations, seats: e.seats, teamAvailable: e.plan === "teams" && e.state === "paid" });
 }
 
 export async function invite(ctx: Ctx, a: Authed, orgId: string): Promise<Response> {
@@ -67,7 +68,7 @@ export async function revokeInvite(ctx: Ctx, a: Authed, orgId: string, id: strin
 }
 
 export async function acceptInvite(ctx: Ctx, a: Authed, token: string): Promise<Response> {
-	if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpError(400, "invalid_invite");
+	if (!TOKEN43_RE.test(token)) throw new HttpError(400, "invalid_invite");
 	const hash = await sha256Hex(token);
 	const invite = await ctx.env.DB.prepare(`SELECT i.org_id AS orgId,i.email FROM invitations i JOIN users u ON u.id=? AND u.email=i.email WHERE i.token_hash=? AND i.used_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?`).bind(a.userId, hash, ctx.now).first<{ orgId: string; email: string }>();
 	if (!invite) throw new HttpError(400, "invalid_invite", "This invitation is expired, unavailable, or belongs to a different email address.");

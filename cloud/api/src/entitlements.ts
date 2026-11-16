@@ -58,6 +58,11 @@ export async function accessSummaries(ctx: Ctx, userId: string) {
 	}));
 }
 
+/** Storage lineages (a fork shares its source's) of every drive in the org, deleted ones included. */
+async function orgLineages(ctx: Ctx, orgId: string): Promise<string[]> {
+	return (await ctx.env.DB.prepare("SELECT DISTINCT COALESCE(lineage,id) AS lineage FROM drives WHERE org_id=?").bind(orgId).all<{lineage: string}>()).results.map(d => d.lineage);
+}
+
 async function quotaUsage(ctx: Ctx, orgId: string, lineages: string[]): Promise<number> {
 	try {
 		const {usedBytes} = await ctx.env.DATA_PLANE.quotaUsage(orgId, lineages);
@@ -68,8 +73,7 @@ async function quotaUsage(ctx: Ctx, orgId: string, lineages: string[]): Promise<
 
 /** Physical retained and staged bytes, including soft-deleted drives and spilled manifests. */
 export async function storageUsage(ctx: Ctx, orgId: string): Promise<number> {
-	const rows = (await ctx.env.DB.prepare("SELECT DISTINCT COALESCE(lineage,id) AS lineage FROM drives WHERE org_id=?").bind(orgId).all<{lineage:string}>()).results;
-	return quotaUsage(ctx, orgId, rows.map(d => d.lineage));
+	return quotaUsage(ctx, orgId, await orgLineages(ctx, orgId));
 }
 
 export async function meterUsage(ctx: Ctx): Promise<void> {
@@ -100,6 +104,5 @@ export async function entitledDriveAccess(ctx: Ctx, orgId: string, want: "read" 
 }
 
 export async function configureStorageQuota(ctx: Ctx, orgId: string, quotaBytes: number) {
-	const rows = (await ctx.env.DB.prepare("SELECT DISTINCT COALESCE(lineage,id) AS lineage FROM drives WHERE org_id=?").bind(orgId).all<{lineage: string}>()).results;
-	await ctx.env.DATA_PLANE.configureQuota(orgId, quotaBytes, rows.map(d => d.lineage));
+	await ctx.env.DATA_PLANE.configureQuota(orgId, quotaBytes, await orgLineages(ctx, orgId));
 }

@@ -1,6 +1,7 @@
 import { etag, type Entry } from "./data-plane";
 import { integer, S3Error, tag, xml, xmlEscape } from "./errors";
 import type { ObjectContext } from "./objects";
+import { b64urlEncode } from "../../shared/bytes";
 
 const enc = new TextEncoder();
 /** UTF-8 byte order, which is S3's key order (JS string comparison is UTF-16 order and differs for astral characters). */
@@ -10,7 +11,7 @@ export function compareKeys(a: string, b: string): number {
   for (let i = 0; i < n; i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
   return x.length - y.length;
 }
-const b64 = (s: string): string => btoa(String.fromCharCode(...enc.encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const b64 = (s: string): string => b64urlEncode(enc.encode(s));
 const unb64 = (s: string): string => {
   try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0))); }
   catch { throw new S3Error(400, "InvalidArgument", "Invalid continuation token"); }

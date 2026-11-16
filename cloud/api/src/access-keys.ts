@@ -3,9 +3,8 @@ import type { AppEnv } from "./env";
 import { HttpError, json, readJson, str } from "./http";
 import type { Authed } from "./session";
 
-type Access = "read" | "write" | "admin";
-const rank: Record<Access, number> = { read: 0, write: 1, admin: 2 };
-const roleAccess = (role: string): Access => role === "owner" || role === "admin" ? "admin" : role === "member" ? "write" : "read";
+import { ACCESS_RANK as rank, type Access } from "../../shared/access";
+import { roleAccess } from "./roles";
 
 interface KeyRow {
 	id: string;

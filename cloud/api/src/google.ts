@@ -2,7 +2,7 @@ import type { Ctx } from "./ctx";
 import { MIN } from "./ctx";
 import { b64urlDecode } from "./jwt";
 import { putOneTime, takeOneTime } from "./onetime";
-import { randomB64url, sha256B64url } from "./util";
+import { randomB64url, sha256B64url, TOKEN43_RE } from "./util";
 import { HttpError, redirect } from "./http";
 import { findOrCreateUser } from "./users";
 import { normalizeEmail } from "./otp";
@@ -41,7 +41,7 @@ export function allowedReturn(ctx: Ctx, ret: string | null): string {
 export async function googleStart(ctx: Ctx): Promise<Response> {
 	const ret = allowedReturn(ctx, ctx.url.searchParams.get("return"));
 	const webChallenge = ctx.url.searchParams.get("web_code_challenge") ?? "";
-	if (!/^[A-Za-z0-9_-]{43}$/.test(webChallenge)) throw new HttpError(400, "bad_request", "browser sign-in challenge required");
+	if (!TOKEN43_RE.test(webChallenge)) throw new HttpError(400, "bad_request", "browser sign-in challenge required");
 	const state = randomB64url(32);
 	const nonce = randomB64url(24);
 	const verifier = randomB64url(48);

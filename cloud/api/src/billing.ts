@@ -5,13 +5,14 @@ import { selectDodo, verifyDodoWebhook } from "./dodo";
 import { billingRow, entitlements, storageUsage } from "./entitlements";
 import { HttpError, json, readJson, readText, str } from "./http";
 import type { Authed } from "./session";
+import { canManage } from "./roles";
 
 const dodo = (ctx: Ctx) => ctx.dodo ?? selectDodo(ctx.env, ctx.fetch);
 
 async function authorize(ctx: Ctx, a: Authed, orgId: string, manage = false) {
 	const m = await ctx.env.DB.prepare("SELECT role FROM memberships WHERE user_id = ? AND org_id = ?").bind(a.userId, orgId).first<{ role: string }>();
 	if (!m) throw new HttpError(404, "no_such_org");
-	if (manage && m.role !== "owner" && m.role !== "admin") throw new HttpError(403, "forbidden");
+	if (manage && !canManage(m.role)) throw new HttpError(403, "forbidden");
 }
 
 export const getCatalog = (ctx: Ctx) => json(catalog(ctx.env));

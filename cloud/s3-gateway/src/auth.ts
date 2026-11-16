@@ -1,7 +1,9 @@
 import { base64, digest, hmac, utf8, verifyHmac } from "./crypto";
 import { S3Error } from "./errors";
 
-export type Access = "read" | "write" | "admin";
+import { hasAccess, type Access } from "../../shared/access";
+
+export type { Access };
 export interface KeyRecord {
   keyId: string;
   subject: string;
@@ -112,6 +114,5 @@ export async function authenticate(request: Request, resolver: KeyResolver, now 
 
 export function authorize(key: KeyRecord, drive: string | null, required: Access): void {
   if (drive !== null && key.drives && !key.drives.includes(drive)) throw new S3Error(404, "NoSuchBucket");
-  const rank: Record<Access, number> = { read: 0, write: 1, admin: 2 };
-  if (rank[key.scope] < rank[required]) throw new S3Error(403, "AccessDenied");
+  if (!hasAccess(key.scope, required)) throw new S3Error(403, "AccessDenied");
 }

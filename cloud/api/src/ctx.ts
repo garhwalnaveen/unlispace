@@ -1,6 +1,6 @@
 import type { AppEnv } from "./env";
 import type { EmailSender } from "./email";
-import { createUlid } from "./ulid";
+import { createUlid } from "../../shared/ulid";
 import type { DodoPayments } from "./dodo";
 
 export interface Deps {

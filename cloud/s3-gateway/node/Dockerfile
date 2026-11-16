@@ -1,14 +1,15 @@
 FROM node:22-bookworm-slim AS build
-WORKDIR /app
-COPY package.json package-lock.json ./
+WORKDIR /app/s3-gateway
+COPY s3-gateway/package.json s3-gateway/package-lock.json ./
 RUN npm ci --ignore-scripts
-COPY src ./src
-COPY node ./node
+COPY shared /app/shared
+COPY s3-gateway/src ./src
+COPY s3-gateway/node ./node
 RUN node node/build.mjs
 
 FROM node:22-bookworm-slim
 WORKDIR /app
-COPY --from=build --chown=node:node /app/node/dist ./dist
+COPY --from=build --chown=node:node /app/s3-gateway/node/dist ./dist
 USER node
 ENV PORT=8080 ULS_LISTEN_HOST=0.0.0.0
 EXPOSE 8080

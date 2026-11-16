@@ -5,8 +5,9 @@ import { mintDriveToken, type Authed } from "./session";
 import { newDriveId, provisionDrive } from "./users";
 import { accessSummaries, computeEntitlements, entitledDriveAccess, storageUsage, type BillingRow } from "./entitlements";
 
-export type Role = "owner" | "admin" | "member" | "viewer";
-type Access = "read" | "write" | "admin";
+import { canManage, roleAccess, type Role } from "./roles";
+
+export type { Role };
 export const DRIVE_RECOVERY_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface DriveRow {
@@ -26,8 +27,6 @@ export interface DriveRow {
 	tier: string;
 }
 
-const roleAccess = (role: Role): Access => (role === "owner" || role === "admin" ? "admin" : role === "member" ? "write" : "read");
-const canManage = (role: Role) => role === "owner" || role === "admin";
 
 export async function driveJson(ctx: Ctx, d: DriveRow) {
 	const forks = (await ctx.env.DB.prepare("SELECT id FROM drives WHERE forked_from = ? AND status != 'deleted' ORDER BY created_at,id").bind(d.id).all<{ id: string }>()).results.map(r => r.id);
