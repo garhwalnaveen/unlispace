@@ -6,5 +6,5 @@ mountpoint="$scratch/mount"
 mkdir "$mountpoint"
 # rmdir cannot remove a mounted or nonempty volume after a failed check.
 trap 'rmdir "$mountpoint" "$scratch" 2>/dev/null || true' EXIT
-binary="${SMB_VFS_DEMO:-$engine/target/debug/smb-vfs-demo}"
-"$binary" native-test "$mountpoint" --native-test
+binary="${SMB_DEMO:-$engine/target/debug/smb-demo}"
+"$binary" "$mountpoint" --vfs native-test --native-test

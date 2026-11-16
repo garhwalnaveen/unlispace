@@ -1,38 +1,23 @@
-use std::{error::Error, io::Write, path::{Path, PathBuf}, sync::Arc, time::{Duration, Instant}};
+//! `--vfs`: serves a uls-vfs drive backed by an in-process uls-mock.
+use crate::{Result, start, stop};
 use futures_util::StreamExt;
+use std::{io::Write, path::Path, sync::Arc, time::{Duration, Instant}};
 use uls_client::Client;
 use uls_mock::MockServer;
-use uls_vfs::{Vfs, VfsOptions};
 use uls_smb::VfsBackend;
+use uls_vfs::{Vfs, VfsOptions};
 
-type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
-    let usage = "usage: smb-vfs-demo <drive> <mountpoint> [--native-test]";
-    let drive = args.next().ok_or(usage)?;
-    let mountpoint = PathBuf::from(args.next().ok_or(usage)?);
-    let native = match args.next().as_deref() {
-        None => false,
-        Some("--native-test") => true,
-        _ => return Err(usage.into()),
-    };
-    if args.next().is_some() { return Err(usage.into()); }
-    let created = !mountpoint.exists();
-    std::fs::create_dir_all(&mountpoint)?;
-    let mountpoint = mountpoint.canonicalize()?;
-    if std::fs::read_dir(&mountpoint)?.next().is_some() {
+pub async fn run(drive: &str, mountpoint: &Path, encrypt: bool, serve_only: bool, native: bool) -> Result<()> {
+    if std::fs::read_dir(mountpoint)?.next().is_some() {
         return Err("mountpoint must be empty".into());
     }
     let state = tempfile::Builder::new().prefix("uls-smb-vfs-").tempdir_in("/tmp")?;
     let mock = MockServer::start_on("127.0.0.1:0", "in-process-demo").await?;
     let client = Client::builder(mock.url(), "in-process-demo").build()?;
-    client.create_drive(&drive, None).await?;
-    let vfs = Vfs::open(client.clone(), &drive, state.path(), VfsOptions::default()).await?;
+    client.create_drive(drive, None).await?;
+    let vfs = Vfs::open(client.clone(), drive, state.path(), VfsOptions::default()).await?;
     let backend = Arc::new(VfsBackend::new(vfs.clone()));
-    let server = uls_smb::serve(backend.clone(), false).await?;
-    let mut watch = client.watch(&drive, 0);
+    let mut watch = client.watch(drive, 0);
     let watching = vfs.clone();
     let watcher = tokio::spawn(async move {
         while let Some(event) = watch.next().await {
@@ -42,32 +27,19 @@ async fn main() -> Result<()> {
             }
         }
     });
-    let (addr, user, pass, path) = (server.addr, server.user.clone(), server.password.clone(), mountpoint.clone());
-    let mounted = tokio::task::spawn_blocking(move || uls_smb::mount(addr, &user, &pass, path)).await?;
-    let outcome = match mounted {
-        Err(error) => Err(format!("BLOCKED: native SMB mount failed: {error}").into()),
-        Ok(()) => {
-            println!("Mounted at {}", mountpoint.display());
+    let outcome = match start(backend.clone(), mountpoint, encrypt, serve_only).await {
+        Err(error) => Err(format!("BLOCKED: native SMB {error}").into()),
+        Ok(server) => {
             let outcome = if native {
-                native_checks(&client, &drive, &mountpoint, state.path()).await
+                native_checks(&client, drive, mountpoint, state.path()).await
             } else {
                 tokio::signal::ctrl_c().await.map_err(Into::into)
             };
             // Retain the server while applications still hold the volume open.
-            loop {
-                let path = mountpoint.clone();
-                match tokio::task::spawn_blocking(move || uls_smb::unmount(path)).await? {
-                    Ok(()) => break,
-                    Err(error) => {
-                        eprintln!("Unmount failed: {error}; release open files and press Ctrl-C to retry.");
-                        tokio::signal::ctrl_c().await?;
-                    }
-                }
-            }
-            outcome
+            let stopped = stop(server, mountpoint, serve_only).await;
+            outcome.and(stopped)
         }
     };
-    server.shutdown().await?;
     watcher.abort();
     let _ = watcher.await;
     drop(backend);
@@ -75,7 +47,6 @@ async fn main() -> Result<()> {
         let retained = state.keep();
         return Err(format!("VFS shutdown failed: {error}; journal retained at {}", retained.display()).into());
     }
-    if created { std::fs::remove_dir(&mountpoint)?; }
     outcome?;
     println!("PASS unmounted and VFS drained");
     Ok(())

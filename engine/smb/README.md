@@ -148,6 +148,8 @@ cargo run -p uls-smb --bin smb-demo -- .tmp/mount
 cargo run -p uls-smb --bin smb-demo -- .tmp/mount --encrypt
 # Create a file directly in the backend three seconds after mounting:
 cargo run -p uls-smb --bin smb-demo -- .tmp/mount --backend-event-after 3
+# Serve a uls-vfs drive over an in-process mock instead (see VfsBackend below):
+cargo run -p uls-smb --features demo --bin smb-demo -- .tmp/mount --vfs demo
 # Reproducible native mount/shell/lock/hash/change-notify checks:
 python3 scripts/macos-smoke.py
 ```
@@ -210,13 +212,13 @@ From `engine/`:
 cargo build -p uls-smb --features demo
 cargo clippy -p uls-smb --features demo --all-targets -- -D warnings
 cargo test -p uls-smb --features demo
-cargo run -p uls-smb --features demo --bin smb-vfs-demo -- demo /tmp/uls-vfs-mount
+cargo run -p uls-smb --features demo --bin smb-demo -- /tmp/uls-vfs-mount --vfs demo
 bash smb/scripts/vfs-native-test.sh
 ```
 
 The `demo` feature keeps the in-process mock and its test dependencies out of
-the daemon's production backend dependency graph. The demo creates a temporary
-journal under `/tmp`, starts `uls-mock` on loopback, creates the requested drive,
+the daemon's production backend dependency graph. `smb-demo MOUNTPOINT --vfs DRIVE`
+creates a temporary journal under `/tmp`, starts `uls-mock` on loopback, creates the requested drive,
 forwards the client's actual watch stream to VFS, serves signed/authenticated
 SMB, and mounts with the server's in-memory credentials. Ctrl-C unmounts before
 stopping SMB and draining VFS. Failed drains retain their journal and report its

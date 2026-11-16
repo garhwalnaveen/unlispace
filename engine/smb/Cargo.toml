@@ -11,11 +11,6 @@ build = "build.rs"
 backend = ["dep:uls-vfs"]
 demo = ["backend", "dep:uls-client", "dep:uls-mock", "dep:futures-util", "dep:tempfile"]
 
-[[bin]]
-name = "smb-vfs-demo"
-path = "src/bin/smb-vfs-demo.rs"
-required-features = ["demo"]
-
 [[test]]
 name = "vfs_backend"
 path = "tests/vfs_backend.rs"
