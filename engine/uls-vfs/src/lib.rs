@@ -51,7 +51,6 @@ impl Drop for Lease {
 }
 struct Inner {
     client: Client, drive: String, opts: VfsOptions,
-    budget: Arc<JournalBudget>,
     publish_lock: Mutex<()>,
     /// Shard bytes PUT so far in the current publication attempt, by node id.
     progress: std::sync::Mutex<std::collections::BTreeMap<u64, u64>>,
@@ -85,7 +84,7 @@ impl Vfs {
         let (journal, state) = Journal::open(state_dir, drive)?;
         let events = broadcast::channel(256).0;
         let accounted = state.usage(); budget.used.fetch_add(accounted,Ordering::SeqCst);
-        let inner = Arc::new(Inner { client, drive: drive.into(), budget:budget.clone(), opts, publish_lock: Mutex::new(()),
+        let inner = Arc::new(Inner { client, drive: drive.into(), opts, publish_lock: Mutex::new(()),
             progress: Default::default(), publishing: Default::default(), capacity: Default::default(),
             core: Mutex::new(Core { journal, state, online: SyncState::Online, closed: false, write_blocked: false, budget, accounted, events:events.clone() }),
             events, wake: Arc::new(Notify::new()), task: std::sync::Mutex::new(None) });
@@ -94,13 +93,6 @@ impl Vfs {
         *inner.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
         let lease = Arc::new(Lease(Arc::downgrade(&inner)));
         Ok(Self { inner, _lease: lease })
-    }
-    pub fn set_journal_cap(&self, cap: u64) { self.inner.budget.set_cap(cap); }
-    pub async fn pending_paths(&self) -> Vec<(String, u64)> {
-        let c = self.inner.core.lock().await;
-        let mut paths: std::collections::BTreeMap<String,u64> = c.state.nodes.iter().filter(|(_, n)| n.dirty_since.is_some()).map(|(p,n)| (p.clone(), n.attr.size)).collect();
-        for action in &c.state.actions { if let Action::Meta(op) = action { let p = match op { Op::Mkdir {path} | Op::Delete {path,..} | Op::Put {path,..} => path, Op::Rename {to,..} => to }; paths.entry(p.clone()).or_insert(0); } }
-        paths.into_iter().collect()
     }
     /// Unpublished items with upload phase and progress. A file is `uploading` while a batch
     /// containing it is in flight; otherwise it is only saved in the local journal.

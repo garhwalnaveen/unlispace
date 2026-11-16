@@ -31,5 +31,5 @@ Where `docs/design/m0-contract.md` was ambiguous, wrong, or where the engine had
 
 ## NFS notes
 - nfsserve **0.11.0** (`huggingface/nfsserve`). It has `static mut` + `unsafe` inside the crate; our code stays `#![forbid(unsafe_code)]`.
-- Mount flags used exactly as specified: `port=<p>,mountport=<p>,nolocks,vers=3,tcp,rdonly,actimeo=1`.
+- Mount flags: `port=<p>,mountport=<p>,nolocks,vers=3,tcp,actimeo=1`, plus `rdonly` for read-only mounts (the M0 contract specified a read-only mount).
 - NFS ids are assigned from an in-memory path table and never reused within a process; they are not stable across restarts (nfsserve file handles embed a per-process generation number, so a restart makes old handles `STALE` by design).

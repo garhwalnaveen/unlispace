@@ -23,17 +23,11 @@ pub trait SecretStore: Send + Sync {
 #[derive(Default)]
 pub struct MemoryStore {
     items: Mutex<HashMap<String, String>>,
-    /// Number of successful `set` calls (lets tests assert rotation was persisted).
-    sets: std::sync::atomic::AtomicUsize,
 }
 
 impl MemoryStore {
     pub fn new() -> MemoryStore {
         MemoryStore::default()
-    }
-
-    pub fn set_count(&self) -> usize {
-        self.sets.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn items(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
@@ -47,7 +41,6 @@ impl SecretStore for MemoryStore {
     }
     fn set(&self, account: &str, secret: &str) -> Result<(), StoreError> {
         self.items().insert(account.to_string(), secret.to_string());
-        self.sets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
     fn delete(&self, account: &str) -> Result<(), StoreError> {

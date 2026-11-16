@@ -118,7 +118,7 @@ pub enum AuthEvent {
 }
 
 /// Something that can hand out a currently valid bearer token. This is the shape
-/// `uls_client::Client` needs (see `engine/ulsd/NEEDS.md`).
+/// `uls_client::Client` needs.
 #[async_trait]
 pub trait TokenProvider: Send + Sync {
     async fn token(&self) -> Result<String, AuthError>;

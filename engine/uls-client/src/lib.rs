@@ -13,7 +13,6 @@ pub use access_key::{AccessKeyTokenProvider, MountGrant};
 pub use cache::{DEFAULT_CAP_BYTES, ShardCache, default_cache_dir};
 pub use client::{Client, ClientBuilder, RetryPolicy, UploadLimiter, UploadReport};
 pub use error::{Error, Result};
-pub use range::{ShardSlice, map_range};
-pub use watch::{CLOSE_DRIVE_DELETED, CLOSE_TOKEN_EXPIRED, WatchEvent, WatchStream};
+pub use watch::{WatchEvent, WatchStream};
 
 pub use uls_proto as proto;

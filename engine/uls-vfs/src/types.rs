@@ -82,18 +82,6 @@ pub enum FsError {
     #[error("stale version")] Stale,
     #[error("invalid path or size")] Invalid,
 }
-impl FsError {
-    /// POSIX errno values for the macOS/Linux mount adapters.
-    pub fn errno(&self) -> i32 {
-        match self {
-            Self::NotFound => 2, Self::Exists => 17, Self::NotDir => 20, Self::IsDir => 21,
-            Self::NotEmpty => if cfg!(target_os = "macos") { 66 } else { 39 },
-            Self::NoSpace => 28, Self::Io(_) => 5, Self::ReadOnly => 30,
-            Self::Busy => 16, Self::Stale => if cfg!(target_os = "macos") { 70 } else { 116 },
-            Self::Invalid => 22,
-        }
-    }
-}
 impl From<std::io::Error> for FsError {
     fn from(e: std::io::Error) -> Self {
         if e.raw_os_error() == Some(28) { Self::NoSpace } else { Self::Io(e.to_string()) }

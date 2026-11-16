@@ -33,6 +33,8 @@ macOS `._*` AppleDouble files and `.DS_Store` stay in a per-mount memory overlay
 readback, are hidden when found remotely, and are discarded when the mount ends.
 `ulsd mount <drive> <dir> [--read-only] [--state-dir <journal dir>]` runs it standalone; it
 drains the journal on Ctrl-C.
+Limits: `setattr` stores only size changes (mode, uid/gid and times are accepted but dropped), and
+symlinks and hard links return `NOTSUPP`.
 
 ### Native write test (macOS 26, `uls-mock`, debug build)
 
@@ -119,9 +121,7 @@ snapshots of the path at prefetch time; re-pin to fetch a newer remote head.
 `show --at` and rollback choose by version timestamp, with sequence as the tie-breaker, rather
 than file mtime. Subtree rollback follows the complete change feed and commits one guarded plan;
 `--dry-run` prints that plan without mutating the drive. The data plane must expose moved
-subtree descendant history for rollback across directory renames; see `NEEDS.md`.
-
-Protocol handoff: `PROTOCOL-ADDITIONS.md`. Exact gate output summaries: `GATE-RESULTS.md`.
+subtree descendant history for rollback across directory renames.
 
 
 For an explicitly daemon-less control-plane command, set `ULS_API` and `ULS_ACCESS_TOKEN`

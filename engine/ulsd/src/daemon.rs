@@ -38,10 +38,6 @@ pub struct DaemonOptions {
     pub read_only: bool,
 }
 
-pub fn default_config() -> Result<EngineConfig> {
-    config_for(&DaemonOptions::default())
-}
-
 /// With `state_dir`, everything the daemon writes (state file, `drives/<id>/` journals, shard
 /// cache, socket default, mount root) lives under it; nothing under the user's home is touched.
 pub fn config_for(o: &DaemonOptions) -> Result<EngineConfig> {
@@ -87,10 +83,6 @@ pub async fn run(o: DaemonOptions) -> Result<()> {
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
     }
     run_with(cfg, sock, adapter(o.read_only)).await
-}
-
-pub fn default_adapter() -> Arc<dyn MountAdapter> {
-    adapter(false)
 }
 
 /// SMB (with the `smb` feature) or the NFS fallback. The SMB backend has no read-only mode, so
