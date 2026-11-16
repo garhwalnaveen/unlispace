@@ -6,8 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use uls_smb::{RunningServer, SmbBackend};
-use uls_vfs_backend::VfsBackend;
+use uls_smb::{RunningServer, SmbBackend, VfsBackend};
 
 use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAccess, check_drive};
 use crate::protocol::ErrorBody;

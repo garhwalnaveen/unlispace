@@ -6,7 +6,7 @@ publish.workspace = true
 
 [features]
 default = []
-smb = ["dep:uls-smb", "dep:uls-vfs-backend"]
+smb = ["dep:uls-smb"]
 
 [lints]
 workspace = true
@@ -16,8 +16,7 @@ uls-client.workspace = true
 uls-proto.workspace = true
 uls-auth.workspace = true
 uls-vfs.workspace = true
-uls-smb = { workspace = true, optional = true }
-uls-vfs-backend = { workspace = true, optional = true }
+uls-smb = { workspace = true, optional = true, features = ["backend"] }
 anyhow.workspace = true
 clap.workspace = true
 tokio = { workspace = true, features = ["io-std"] }

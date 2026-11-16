@@ -7,6 +7,20 @@ license = "UNLICENSED"
 publish = false
 build = "build.rs"
 
+[features]
+backend = ["dep:uls-vfs"]
+demo = ["backend", "dep:uls-client", "dep:uls-mock", "dep:futures-util", "dep:tempfile"]
+
+[[bin]]
+name = "smb-vfs-demo"
+path = "src/bin/smb-vfs-demo.rs"
+required-features = ["demo"]
+
+[[test]]
+name = "vfs_backend"
+path = "tests/vfs_backend.rs"
+required-features = ["backend"]
+
 [dependencies]
 smb-server.workspace = true
 tokio = { workspace = true, features = ["full"] }
@@ -15,8 +29,16 @@ async-trait.workspace = true
 thiserror.workspace = true
 getrandom.workspace = true
 tracing-subscriber.workspace = true
+uls-vfs = { workspace = true, optional = true }
+uls-client = { workspace = true, optional = true }
+uls-mock = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
+uls-client.workspace = true
+uls-mock.workspace = true
+futures-util.workspace = true
 socket2.workspace = true
 hmac.workspace = true
 sha2 = "=0.10.9"

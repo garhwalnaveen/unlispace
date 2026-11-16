@@ -8,10 +8,14 @@ mod backend;
 mod mem;
 mod mount;
 mod server;
+#[cfg(feature = "backend")]
+mod vfs_backend;
 pub use backend::*;
 pub use mem::MemBackend;
 pub use mount::{mount, unmount};
 pub use server::{RunningServer, serve};
+#[cfg(feature = "backend")]
+pub use vfs_backend::VfsBackend;
 
 #[cfg(test)]
 mod mount_tests {

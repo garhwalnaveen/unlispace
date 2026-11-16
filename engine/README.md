@@ -15,7 +15,7 @@ Deviations and open questions: `CONTRACT-NOTES.md`.
 | `uls-mock` | in-memory server implementing the contract, for tests and offline runs (not a product) |
 
 `smb/` holds workspace members for SMB: the SMB server library (`uls-smb`), its vendored protocol core
-(`smb/vendor`), and the `uls-vfs-backend` bridge. `ulsd --features smb` depends on them.
+(`smb/vendor`), with the `VfsBackend` bridge behind `uls-smb`'s `backend` feature. `ulsd --features smb` depends on it.
 
 ## Build and test
 

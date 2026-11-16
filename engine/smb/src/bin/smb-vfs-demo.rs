@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use uls_client::Client;
 use uls_mock::MockServer;
 use uls_vfs::{Vfs, VfsOptions};
-use uls_vfs_backend::VfsBackend;
+use uls_smb::VfsBackend;
 
 type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 

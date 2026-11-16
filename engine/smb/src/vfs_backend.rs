@@ -1,9 +1,8 @@
-#![allow(clippy::double_must_use, reason = "async_trait generated futures")]
 //! SMB's path contract backed by the durable VFS journal.
 use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::sync::broadcast;
-use uls_smb::{Attr, ChangeEvent, ChangeKind, DirEntry, FsError, Kind, SmbBackend};
+use crate::{Attr, ChangeEvent, ChangeKind, DirEntry, FsError, Kind, SmbBackend};
 use uls_vfs::{Vfs, VfsEvent};
 
 const EVENT_CAPACITY: usize = 256;

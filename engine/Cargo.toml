@@ -10,7 +10,6 @@ members = [
     "uls-auth",
     "smb",
     "smb/vendor",
-    "smb/uls-vfs-backend",
 ]
 
 [workspace.package]
@@ -30,7 +29,6 @@ uls-mock = { path = "uls-mock" }
 uls-vfs = { path = "uls-vfs" }
 uls-auth = { path = "uls-auth" }
 uls-smb = { path = "smb" }
-uls-vfs-backend = { path = "smb/uls-vfs-backend" }
 smb-server = { path = "smb/vendor", default-features = false }
 
 fastcdc = "=3.2.1"

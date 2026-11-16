@@ -2753,6 +2753,7 @@ dependencies = [
  "cc",
  "ccm",
  "cmac",
+ "futures-util",
  "getrandom 0.4.2",
  "hmac",
  "md-5",
@@ -2765,6 +2766,9 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing-subscriber",
+ "uls-client",
+ "uls-mock",
+ "uls-vfs",
 ]
 
 [[package]]
@@ -2785,22 +2789,6 @@ dependencies = [
  "uls-client",
  "uls-mock",
  "uls-proto",
-]
-
-[[package]]
-name = "uls-vfs-backend"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "futures-util",
- "smb-server",
- "tempfile",
- "tokio",
- "uls-client",
- "uls-mock",
- "uls-smb",
- "uls-vfs",
 ]
 
 [[package]]
@@ -2826,7 +2814,6 @@ dependencies = [
  "uls-proto",
  "uls-smb",
  "uls-vfs",
- "uls-vfs-backend",
  "wiremock",
 ]
 

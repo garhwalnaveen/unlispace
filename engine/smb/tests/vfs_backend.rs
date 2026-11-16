@@ -3,9 +3,8 @@ use futures_util::StreamExt;
 use tempfile::TempDir;
 use uls_client::{Client, RetryPolicy};
 use uls_mock::MockServer;
-use uls_smb::{FsError, Kind, SmbBackend};
+use uls_smb::{FsError, Kind, SmbBackend, VfsBackend};
 use uls_vfs::{Vfs, VfsOptions};
-use uls_vfs_backend::VfsBackend;
 
 struct Fixture {
     _mock: MockServer,
