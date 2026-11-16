@@ -171,8 +171,7 @@ access and an Open app action. Settings uses General, Account, Workspace, Ask AI
 Permissions and Advanced sidebar pages with persisted System/Light/Dark appearance. Setup retains the authenticated
 three-stage flow with a visible step indicator.
 
-See `../docs/design/space-desktop-comparison.md` for the observed comparison, scope and remaining
-acceptance work. `WorkspaceRenderTests` renders signed-out, fixture drives, settings and
+`WorkspaceRenderTests` renders signed-out, fixture drives, settings and
 transfers in both appearances to the system temporary directory under `orbit-ui-review/`.
 These fixtures do not authenticate or mount drives.
 
@@ -203,8 +202,7 @@ inodes in place; macOS can retain invalid code-signing state for an overwritten 
 
 The installed app's LaunchAgent was confirmed running with the hosted account restored,
 the Space drive remounted, and zero pending writes. The hosted browser and native kernel SMB
-mount exchanged a generated test file. See `../docs/design/desktop-acceptance.md` for exact
-checks, the approved production CORS repair, and remaining evidence limits.
+mount exchanged a generated test file.
 
 ## Access & permissions dashboard
 
