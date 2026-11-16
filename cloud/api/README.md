@@ -1,17 +1,15 @@
-# Orbit control-plane API (M1 + M2 + M3)
+# Orbit control-plane API
 
 Worker `orbit-api`: auth (email OTP, Google OIDC, desktop PKCE), sessions, orgs, drives, and drive-token minting.
-Implements `docs/design/m1-contract.md`. Storage is D1 (`DB`); drive lifecycle goes to the data plane through the
+Implements `docs/design/control-plane-contract.md`. Storage is D1 (`DB`); drive lifecycle goes to the data plane through the
 `DATA_PLANE` service binding (`DataPlaneAdmin` entrypoint).
 
-M2 adds versioned HMAC-derived S3 access keys with parent scopes/transitive revocation and Dodo
-Payments billing (public catalog, checkout, billing state, invoices, portal and signed webhooks).
-The complete request/response and configuration contracts are in [M2-API.md](M2-API.md);
-cross-owner integration needs and verification limits are in [NEEDS.md](NEEDS.md).
-M3 adds aliases, forks, hard deletion, the `ControlPlane` RPC entrypoint and hourly own-byte
-metering. See [M3-API.md](M3-API.md), which supersedes M2 quota semantics: write-token requests
-without entitlement or over quota return `403 over_quota`; explicit reads remain available.
-Existing tokens retain the M1 lifetime.
+Also includes versioned HMAC-derived S3 access keys with parent scopes/transitive revocation,
+Dodo Payments billing (public catalog, checkout, billing state, invoices, portal and signed
+webhooks), teams, managed Ask AI, aliases, forks, hard deletion, the `ControlPlane` RPC
+entrypoint and hourly own-byte metering. The route table and configuration contract are in
+[API.md](API.md). Write-token requests without entitlement or over quota return
+`403 over_quota`; explicit reads remain available. Existing tokens retain the M1 lifetime.
 
 ## Run locally
 

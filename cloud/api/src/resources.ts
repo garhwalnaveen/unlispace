@@ -5,9 +5,9 @@ import { mintDriveToken, type Authed } from "./session";
 import { newDriveId, provisionDrive } from "./users";
 import { accessSummaries, computeEntitlements, entitledDriveAccess, storageUsage, type BillingRow } from "./entitlements";
 
-export type Role = "owner" | "admin" | "member" | "viewer";
-type Access = "read" | "write" | "admin";
-export const DRIVE_RECOVERY_MS = 30 * 24 * 60 * 60 * 1000;
+import { canManage, roleAccess, type Role } from "./roles";
+
+export type { Role };
 
 export interface DriveRow {
 	alias: string | null;
@@ -26,8 +26,6 @@ export interface DriveRow {
 	tier: string;
 }
 
-const roleAccess = (role: Role): Access => (role === "owner" || role === "admin" ? "admin" : role === "member" ? "write" : "read");
-const canManage = (role: Role) => role === "owner" || role === "admin";
 
 export async function driveJson(ctx: Ctx, d: DriveRow) {
 	const forks = (await ctx.env.DB.prepare("SELECT id FROM drives WHERE forked_from = ? AND status != 'deleted' ORDER BY created_at,id").bind(d.id).all<{ id: string }>()).results.map(r => r.id);
@@ -197,44 +195,6 @@ export async function deleteDrive(ctx: Ctx, a: Authed, driveId: string): Promise
 	}
 	await ctx.env.DB.prepare("UPDATE drives SET status='deleted',deleted_at=?,purged_at=? WHERE id=? AND status='deleting'").bind(ctx.now, hard ? ctx.now : null, driveId).run();
 	return json({ ok: true });
-}
-
-export async function deletedDrives(ctx: Ctx, a: Authed, orgId: string): Promise<Response> {
-	const membership = await ctx.env.DB.prepare("SELECT role FROM memberships WHERE org_id=? AND user_id=?").bind(orgId, a.userId).first<{ role: Role }>();
-	if (!membership) throw new HttpError(404, "no_such_org");
-	if (!canManage(membership.role)) throw new HttpError(403, "forbidden");
-	const rows = (await ctx.env.DB.prepare("SELECT id,name,alias,deleted_at,status FROM drives WHERE org_id=? AND status IN ('deleted','restoring') AND purged_at IS NULL AND deleted_at>? ORDER BY deleted_at DESC,id").bind(orgId, ctx.now - DRIVE_RECOVERY_MS).all<{ id: string; name: string; alias: string | null; deleted_at: number; status: string }>()).results;
-	return json({ drives: rows.map(d => ({ id: d.id, name: d.name, alias: d.alias, deletedAt: d.deleted_at, recoverableUntil: d.deleted_at + DRIVE_RECOVERY_MS, status: d.status })) });
-}
-
-export async function restoreDrive(ctx: Ctx, a: Authed, driveId: string): Promise<Response> {
-	const d = await ctx.env.DB.prepare(`SELECT d.*,m.role,o.tier FROM drives d JOIN memberships m ON m.org_id=d.org_id AND m.user_id=? JOIN orgs o ON o.id=d.org_id WHERE d.id=?`).bind(a.userId, driveId).first<DriveRow>();
-	if (!d) throw new HttpError(404, "no_such_drive");
-	if (!canManage(d.role)) throw new HttpError(403, "forbidden");
-	if (d.purged_at !== null || d.deleted_at === null || d.deleted_at + DRIVE_RECOVERY_MS <= ctx.now) throw new HttpError(410, "recovery_expired");
-	if (d.status !== "deleted" && d.status !== "restoring") throw new HttpError(409, "drive_not_deleted");
-	const body = await readJson(ctx.req);
-	const alias = body.alias === undefined ? d.alias : validateAlias(body.alias);
-	if (d.status === "restoring" && alias !== d.alias) throw new HttpError(409, "drive_not_ready");
-	await aliasWrite(async () => {
-		const claimed = await ctx.env.DB.prepare(`UPDATE drives SET status='restoring',alias=? WHERE id=? AND (status='deleted' OR (status='restoring' AND alias IS ?)) AND purged_at IS NULL AND deleted_at>?
- AND (? != 'individual' OR forked_from IS NOT NULL OR NOT EXISTS(SELECT 1 FROM drives other WHERE other.org_id=drives.org_id AND other.id!=drives.id AND other.status!='deleted' AND other.forked_from IS NULL))
- AND (forked_from IS NULL OR (SELECT COUNT(*) FROM drives other WHERE other.org_id=drives.org_id AND other.id!=drives.id AND other.status!='deleted' AND other.forked_from IS NOT NULL)<50)`)
-			.bind(alias, driveId, alias, ctx.now - DRIVE_RECOVERY_MS, d.tier).run();
-		if (claimed.meta.changes !== 1) throw new HttpError(403, "plan_limit");
-	});
-	try { await ctx.env.DATA_PLANE.restoreDrive(driveId); }
-	catch (error) {
-		const code = (error as { code?: string; message?: string }).code ?? (error as Error).message;
-		if (code === "no_such_drive" || code === "recovery_expired") {
-			await ctx.env.DB.prepare("UPDATE drives SET status='deleted',purged_at=? WHERE id=? AND status='restoring'").bind(ctx.now, driveId).run();
-			throw new HttpError(410, "recovery_expired");
-		}
-		// Keep the alias reserved after an ambiguous RPC outcome; retrying finishes this same restore.
-		throw new HttpError(503, "data_plane_unavailable");
-	}
-	await ctx.env.DB.prepare("UPDATE drives SET status='ready',deleted_at=NULL WHERE id=? AND status='restoring'").bind(driveId).run();
-	return json(await driveJson(ctx, await loadDrive(ctx, a, driveId)));
 }
 
 export async function forkDrive(ctx: Ctx, a: Authed, driveId: string): Promise<Response> {

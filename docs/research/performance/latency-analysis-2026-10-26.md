@@ -101,5 +101,5 @@ The strongest current target is native serial publication, followed by durable p
 - [50 MB report](space-vs-orbit-50mb-2026-10-26.md) and [machine-readable results](space-vs-orbit-50mb-2026-10-26.json).
 - [Original 1 GB comparison](space-vs-orbit-1gb-2026-10-26.md).
 - [Implementation and native follow-up](follow-up-2026-10-26.md).
-- [Retained successful local release run](../../../tests/e2e/last-run.txt).
+- [Retained successful local release run](e2e-acceptance-2026-10-26.txt).
 - Local sanitized traces: `/tmp/orbit-smb-diagnostic-1793035605365.log`, `/tmp/orbit-smb-diagnostic-1793036459672.log`, `/tmp/orbit-smb-diagnostic-1793038642902.log`; process sample `/tmp/orbit-large-close-flush-sample.txt`. Temporary artifacts may not survive cleanup/reboot.

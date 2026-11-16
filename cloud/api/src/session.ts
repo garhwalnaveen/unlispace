@@ -2,7 +2,8 @@ import type { Ctx } from "./ctx";
 import { DAY, ulid } from "./ctx";
 import { HttpError } from "./http";
 import { signJwt, verifyJwt, type Jwk } from "./jwt";
-import { randomB64url, sha256Hex } from "./util";
+import { randomB64url, sha256Hex, TOKEN43_RE } from "./util";
+import type { Access } from "../../shared/access";
 
 export const ACCESS_TTL_S = 900;
 export const REFRESH_TTL_MS = 30 * DAY;
@@ -33,7 +34,7 @@ export async function mintAccess(ctx: Ctx, user: { id: string; email: string }, 
 
 export async function mintDriveToken(
 	ctx: Ctx,
-	p: { sub: string; sid: string; org: string; drives: { id: string; access: "read" | "write" | "admin" }[] },
+	p: { sub: string; sid: string; org: string; drives: { id: string; access: Access }[] },
 ): Promise<{ token: string; expiresAt: number }> {
 	const iat = Math.floor(ctx.now / 1000);
 	const exp = iat + ACCESS_TTL_S;
@@ -91,6 +92,14 @@ export async function revokeFamily(ctx: Ctx, family: string): Promise<void> {
  */
 export const REFRESH_RETRY_GRACE_MS = 60_000;
 
+/** Successor session in `row`'s family, chained to the rotated token's hash; null if the user is gone. */
+async function issueRotated(ctx: Ctx, row: SessionRow, hash: string): Promise<Session | null> {
+	const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.user_id).first<{ id: string; email: string }>();
+	if (!user) return null;
+	const next = await insertRefreshRow(ctx, user.id, row.family, hash);
+	return { accessToken: await mintAccess(ctx, user, row.family), refreshToken: next, expiresIn: ACCESS_TTL_S, user, accountCreated: false };
+}
+
 /**
  * Replay of a just-rotated token: hand out a fresh successor if the client plausibly never got
  * the first response. Only an unused successor qualifies, and it is claimed atomically, so
@@ -104,16 +113,13 @@ async function retryAfterLostResponse(ctx: Ctx, row: SessionRow, hash: string): 
 	if (!succ) return null;
 	const claimed = await ctx.env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(ctx.now, succ.id).run();
 	if (claimed.meta.changes !== 1) return null;
-	const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.user_id).first<{ id: string; email: string }>();
-	if (!user) return null;
-	const next = await insertRefreshRow(ctx, user.id, row.family, hash);
-	return { accessToken: await mintAccess(ctx, user, row.family), refreshToken: next, expiresIn: ACCESS_TTL_S, user, accountCreated: false };
+	return issueRotated(ctx, row, hash);
 }
 
 /** Rotate a refresh token. A token that was already rotated away revokes the whole family. */
 export async function refreshSession(ctx: Ctx, refreshToken: string): Promise<Session> {
 	const invalid = new HttpError(401, "invalid_refresh");
-	if (!/^rt_[A-Za-z0-9_-]{43}$/.test(refreshToken)) throw invalid;
+	if (!refreshToken.startsWith("rt_") || !TOKEN43_RE.test(refreshToken.slice(3))) throw invalid;
 	const hash = await sha256Hex(refreshToken);
 	const row = await ctx.env.DB.prepare("SELECT id, user_id, family, expires_at, revoked_at FROM sessions WHERE refresh_hash = ?").bind(hash).first<SessionRow>();
 	if (!row) throw invalid;
@@ -132,10 +138,9 @@ export async function refreshSession(ctx: Ctx, refreshToken: string): Promise<Se
 		await revokeFamily(ctx, row.family);
 		throw invalid;
 	}
-	const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.user_id).first<{ id: string; email: string }>();
-	if (!user) throw invalid;
-	const next = await insertRefreshRow(ctx, user.id, row.family, hash);
-	return { accessToken: await mintAccess(ctx, user, row.family), refreshToken: next, expiresIn: ACCESS_TTL_S, user, accountCreated: false };
+	const session = await issueRotated(ctx, row, hash);
+	if (!session) throw invalid;
+	return session;
 }
 
 export async function logout(ctx: Ctx, refreshToken: string): Promise<void> {

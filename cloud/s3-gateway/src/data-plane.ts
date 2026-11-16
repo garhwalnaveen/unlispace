@@ -1,6 +1,7 @@
 import type { Access, KeyRecord } from "./auth";
 import type { Shard } from "./chunker";
-import { base64url, digest, utf8 } from "./crypto";
+import { digest, utf8 } from "./crypto";
+import { signJwt, type Jwk } from "../../shared/jwt";
 import { S3Error } from "./errors";
 
 export interface InternalTokenMinter {
@@ -18,17 +19,10 @@ export class Ed25519TokenMinter implements InternalTokenMinter {
   private async sign(principal: KeyRecord, drive: string, access: Access, upload?: {hash: string; length: number}): Promise<string> {
     if (!this.jwk.kid) throw new S3Error(503, "ServiceUnavailable", "Signing key has no kid");
     const iat = Math.floor(this.now() / 1000);
-    const header = base64url(utf8.encode(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: this.jwk.kid })));
-    const payload = base64url(utf8.encode(JSON.stringify({ iss: this.issuer, sub: principal.subject, typ: "drive", sid: `s3:${principal.keyId}`, org: principal.orgId, drives: [{ id: drive, access }], iat, exp: iat + 300, jti: crypto.randomUUID(), ...(upload ? {upload} : {}) })));
-    const key = await crypto.subtle.importKey("jwk", this.jwk, { name: "Ed25519" }, false, ["sign"]);
-    return `${header}.${payload}.${base64url(new Uint8Array(await crypto.subtle.sign("Ed25519", key, utf8.encode(`${header}.${payload}`))))}`;
+    return signJwt(this.jwk as Jwk, { iss: this.issuer, sub: principal.subject, typ: "drive", sid: `s3:${principal.keyId}`, org: principal.orgId, drives: [{ id: drive, access }], iat, exp: iat + 300, jti: crypto.randomUUID(), ...(upload ? {upload} : {}) });
   }
 }
 export interface FetchBinding { fetch(request: Request): Promise<Response> }
-export interface DriveAdmin {
-  createDrive(drive: string, placement?: string): Promise<{ driveId: string; placement: string; createdAt: number }>;
-  deleteDrive(drive: string): Promise<{ ok: true }>;
-}
 export interface Manifest {
   path: string; versionId: string; size: number; contentType: string | null; mtimeMs: number | null; shards: Shard[];
   xattrs?: Record<string, Shard[]>;

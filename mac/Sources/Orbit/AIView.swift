@@ -46,7 +46,7 @@ struct AIView: View {
             let result = try await model.workspaceRequest("/auth/web-handoff", method: "POST",
                                                           body: .object(["webChallenge": .string(PKCE.challenge(forVerifier: v))]))
             struct Handoff: Decodable { let handoff: String }
-            guard let url = config.embedPage("ai", handoff: try result.decode(Handoff.self).handoff) else { throw AIError.invalidEndpoint }
+            guard let url = config.embedPage("ai", handoff: try result.decode(Handoff.self).handoff) else { throw URLError(.badURL) }
             verifier = v; page = url
         } catch {
             self.error = "Could not open Ask AI. Check your connection and update the app and API server, then try again."

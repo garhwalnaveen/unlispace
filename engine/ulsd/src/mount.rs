@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uls_client::Client;
 
-use crate::protocol::ErrorBody;
+use crate::protocol::{ErrorBody, code};
 
 /// Which access level the adapter needs when it asks for a drive token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +34,16 @@ impl std::fmt::Display for MountError {
 }
 
 impl std::error::Error for MountError {}
+
+/// Fail early, and without leaking anything, if the drive or token is wrong.
+pub async fn check_drive(client: &Client, drive_id: &str) -> Result<(), MountError> {
+    client.drive_info(drive_id).await.map(drop).map_err(|e| match e {
+        uls_client::Error::NotFound { .. } => MountError(ErrorBody::new(code::NO_SUCH_DRIVE, "no such drive")),
+        uls_client::Error::Unauthorized | uls_client::Error::Auth(_) => MountError(ErrorBody::new(code::UNAUTHORIZED, "the data plane rejected the drive token")),
+        e if matches!(e, uls_client::Error::Transport(_)) || e.is_retryable() => MountError(ErrorBody::new(code::OFFLINE, "cannot reach the data plane")),
+        _ => MountError(ErrorBody::internal("cannot open drive")),
+    })
+}
 
 #[async_trait]
 pub trait MountAdapter: Send + Sync {

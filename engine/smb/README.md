@@ -1,9 +1,10 @@
 # uls-smb
 
-Isolated Rust workspace containing the Orbit SMB library, `smb-demo`, and an
-MIT-licensed protocol-server fork. **The native macOS mount acceptance gate is
-blocked on this machine; this is not a verified production mount adapter.** The
-server and backend have been exercised over real loopback TCP.
+Isolated Rust workspace containing the Orbit SMB library, `smb-demo`, the
+`uls-vfs-backend` bridge, and an MIT-licensed protocol-server fork. `ulsd` uses
+it as its writable mount adapter when built with `--features smb`. Native macOS
+mounting passes the smoke script (see [VERIFICATION.md](VERIFICATION.md));
+Finder behavior is not verified.
 
 ## Architecture
 
@@ -15,7 +16,7 @@ macOS smbfs / test client
     -> src/adapter.rs: dispositions, paths, streams, per-open flush and watches
     -> SmbBackend
        -> MemBackend (demo/tests)
-       -> daemon VFS/journal/cloud implementation (integration seam)
+       -> VfsBackend (uls-vfs-backend): the drive's uls-vfs journal/cloud view, used by ulsd
 ```
 
 `serve(Arc<dyn SmbBackend>, encrypt)` binds **127.0.0.1:0**, generates one random
@@ -164,21 +165,20 @@ xattr, a 50 MiB dd/shasum round trip, flock/lockf conflicts through Python's fcn
 backend appearance within two seconds, and unmount. It records a blocked result
 when mounting fails. It does not substitute local-directory success for SMB.
 
-## Verification on this Mac
+## Verification
 
-Tested 2026-10-25 on macOS 26.5.1 (25F80), arm64, rustc 1.99.1.
-Build/lint/test results and native failure excerpts are recorded in
-[VERIFICATION.md](VERIFICATION.md). No sudo, settings or /etc edits, or git commits
-were performed. The requested `/tmp/uls-smb-test` path was replaced by a path under
-this directory to honor the user's stricter write boundary. Test data never
-exceeded 50 MiB per file. Target size remained below 3 GiB.
+Last run 2026-10-25 on macOS 26.5.1, arm64: build, `cargo test --workspace`,
+clippy with `-D warnings`, and the native smoke script (16/16, mounted without
+sudo or a prompt) all passed. Details and findings are in
+[VERIFICATION.md](VERIFICATION.md). The script writes its server log to the
+git-ignored `verification/` directory.
 
 ## Known gaps and daemon integration
 
-- **Native mount/Finder acceptance is unverified.** Both Apple's direct CLI and
-  library reject SMB initialization on this host before negotiation; a successful
-  macOS mount, password-free CLI session reuse, shell operations and real unmount
-  are required before shipping.
+- **Finder behavior and cache invalidation are unverified.** POSIX `lockf` is
+  rejected by Apple's smbfs client before any SMB LOCK is sent (a client
+  limitation, asserted as an expected failure by the smoke script); `flock` and
+  SMB byte-range locks work across processes.
 - No AAPL create-context extensions, macOS POSIX extensions, ACLs, hard links,
   symlinks, named-stream renames, persistent/resilient handles, multichannel,
   compression, DFS hosting or discovery. Unsupported operations return errors.

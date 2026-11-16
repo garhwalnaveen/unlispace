@@ -1,3 +1,5 @@
+import { base64, constantTimeEq, fromBase64, utf8 } from "../../shared/bytes";
+import { errorResponse as err, jsonResponse as json } from "../../shared/route-utils";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { getShard, signBlocks, serveBlock } from "./blocks";
 import { readStreamCommit } from "./stream-commit";
@@ -21,21 +23,16 @@ import { quotaFor } from "./quota";
 export { StorageQuota } from "./quota";
 export { DriveAuthority };
 
-const json = (body: unknown, status = 200, headers?: HeadersInit): Response => Response.json(body, { status, headers });
 // RPC stubs wrap results in a mapped type that loses `ok` discriminant narrowing in the else branch,
 // so the failure branch is cast here. Callers only invoke this after checking `!r.ok`.
 const failResponse = (f: unknown): Response => {
 	const x = f as Fail;
 	return json(x.body, x.status);
 };
-const err = (status: number, error: string, message?: string): Response => json(message ? { error, message } : { error }, status);
 
-/** Compares SHA-256 digests (equal length, so no length leak) with the runtime's native constant-time compare. */
-async function tokensEqual(a: string, b: string): Promise<boolean> {
-	const enc = new TextEncoder();
-	const [da, db] = await Promise.all([crypto.subtle.digest("SHA-256", enc.encode(a)), crypto.subtle.digest("SHA-256", enc.encode(b))]);
-	return crypto.subtle.timingSafeEqual(da, db);
-}
+/** Opaque list cursors: base64url (padded) of the UTF-8 row key. */
+const encodeCursor = (cursor: string): string => base64(utf8.encode(cursor)).replace(/\+/g, "-").replace(/\//g, "_");
+const decodeCursor = (raw: string): string => new TextDecoder().decode(fromBase64(raw.replace(/-/g, "+").replace(/_/g, "/")));
 
 interface Principal {
 	org: string | null;
@@ -57,7 +54,7 @@ function bearer(request: Request, url: URL, allowQuery: boolean): string | null 
 /** Returns the principal for a valid token, or null (-> 401). */
 async function authenticate(token: string | null, env: Env): Promise<Principal | null> {
 	if (!token) return null;
-	if (env.ULS_ALLOW_DEV_TOKEN === "1" && env.ULS_DEV_TOKEN && (await tokensEqual(token, env.ULS_DEV_TOKEN))) {
+	if (env.ULS_ALLOW_DEV_TOKEN === "1" && env.ULS_DEV_TOKEN && (await constantTimeEq(token, env.ULS_DEV_TOKEN))) {
 		return { actor: "dev", org: null, drives: null, exp: null };
 	}
 	const claims = await verifyDriveToken(token, { jwks: env.ULS_JWT_PUBLIC_JWKS, issuer: env.ULS_ISSUER });
@@ -358,7 +355,7 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 		let after: string | null = null;
 		if (rawCursor) {
 			try {
-				after = new TextDecoder().decode(Uint8Array.from(atob(rawCursor.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)));
+				after = decodeCursor(rawCursor);
 			} catch {
 				return err(400, "bad_request", "invalid cursor");
 			}
@@ -367,18 +364,18 @@ async function handle(request: Request, env: Env, ctx: ExecutionContext): Promis
 			// cursor is an opaque base64url of the last returned version row id
 			const r = await stub.versions(p.key, after, limit, url.searchParams.get("includeRenames") === "1");
 			if (!r.ok) return failResponse(r);
-			return json({ versions: r.data.versions, cursor: r.data.cursor === null ? null : btoa(r.data.cursor).replace(/\+/g, "-").replace(/\//g, "_") });
+			return json({ versions: r.data.versions, cursor: r.data.cursor === null ? null : encodeCursor(r.data.cursor) });
 		}
 		if (rest === "tree-at") {
 			const ts = intParam(url,"ts",-1,0,Number.MAX_SAFE_INTEGER);
 			if (ts === null || ts < 0 || (p.key !== "" && !p.isFolder)) return err(400,"bad_request","folder path and ts in milliseconds required");
 			const r = await stub.treeAt(p.key,ts,after,limit);
 			if (!r.ok) return failResponse(r);
-			return json({...r.data,cursor:r.data.cursor === null ? null : btoa(String.fromCharCode(...new TextEncoder().encode(r.data.cursor))).replace(/\+/g,"-").replace(/\//g,"_")});
+			return json({...r.data,cursor:r.data.cursor === null ? null : encodeCursor(r.data.cursor)});
 		}
 		const r = await stub.list(p.key, after, limit);
 		if (!r.ok) return failResponse(r);
-		const next = r.data.next === null ? null : btoa(String.fromCharCode(...new TextEncoder().encode(r.data.next))).replace(/\+/g, "-").replace(/\//g, "_");
+		const next = r.data.next === null ? null : encodeCursor(r.data.next);
 		return json({ entries: r.data.entries, cursor: next });
 	}
 	// changes
@@ -416,10 +413,6 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
     async quotaUsage(org: string, lineages: string[]): Promise<{usedBytes: number}> {
         if (typeof org !== "string" || !org || org.length > 128 || !Array.isArray(lineages) || !lineages.every(id => DRIVE_ID_RE.test(id))) throw new TypeError("invalid quota");
         return quotaFor(this.env, org).usage(lineages);
-    }
-    async reconcileQuota(org: string, lineages: string[]) {
-        if (typeof org !== "string" || !org || org.length > 128 || !Array.isArray(lineages) || !lineages.every(id => DRIVE_ID_RE.test(id))) throw new TypeError("invalid quota");
-        return quotaFor(this.env, org).reconcile(lineages);
     }
 	async createDrive(driveId: string, placement?: Placement): Promise<{ driveId: string; placement: string; createdAt: number }> {
 		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
@@ -521,13 +514,6 @@ export class DataPlaneAdmin extends WorkerEntrypoint<Env> {
 		if (!r.ok) return null;
 		const {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf} = r.data;
 		return {headSeq, fileCount, bytes, ownBytes, lineage, depth, forkOf};
-	}
-
-	async restoreDrive(driveId: string): Promise<{ ok: true }> {
-		if (typeof driveId !== "string" || !DRIVE_ID_RE.test(driveId)) throw new TypeError("invalid driveId");
-		const restored = await stubFor(this.env, driveId).restoreDrive();
-		if (!restored.ok) throw adminError(String((restored as unknown as Fail).body.error), (restored as unknown as Fail).status);
-		return { ok: true };
 	}
 }
 

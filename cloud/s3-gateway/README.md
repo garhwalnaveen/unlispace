@@ -90,12 +90,12 @@ For `wrangler dev`, run cloud/data-plane alongside, put the secrets above in `.d
 - Multipart upload metadata and history annotations use workspace-scoped `S3State` Durable Objects with legacy global-state migration; unreferenced part shards are left to data-plane GC. No lifecycle expiry of abandoned uploads.
 - Single PUT limit is 95 MB, patch/write bodies 64 MiB, per the Workers body cap.
 - Not verified: behaviour against the real data plane through a live service binding (the fake follows its CONTRACT-NOTES), and real Workers memory/CPU limits on 95 MB uploads.
-- Cross-client rename/history uses data-plane node identity. Operation annotations still use separate state writes after data-plane commits; cross-service atomicity remains unverified. See [NEEDS.md](NEEDS.md).
+- Cross-client rename/history uses data-plane node identity. Operation annotations still use separate state writes after data-plane commits; cross-service atomicity remains unverified.
 - Optional direct-upload extensions return `501 NotImplemented`. Standard ListObjectVersions retains the existing immutable-history/delete-marker behavior; the JSON content-history extension omits rename/delete rows.
 - Test-only vitest shims (`vitest.config.ts`): the AWS SDK's browser build is selected under workerd, so the XML parser and aws-chunked encoder are swapped for byte-correct equivalents. Production code is unaffected.
 
 `test/conformance.test.ts` ports all 16 Space conformance names to describes using the real AWS S3 SDK against an in-memory
-ControlPlane + data-plane fake (including in-memory forks). `test/m3.test.ts` covers key cache expiry, post-authorization use
+ControlPlane + data-plane fake (including in-memory forks). `test/trust-boundaries.test.ts` covers key cache expiry, post-authorization use
 recording, quota deletes, cross-drive copy, fork guard errors, extension limits and session/SigV4 key trust boundaries.
 
 The [31 October API comparison](../../docs/research/spacefs-api-gap-2026-10-31.md) records implemented fixes, remaining protocol differences and verification limits.

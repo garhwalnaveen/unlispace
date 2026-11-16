@@ -1,3 +1,7 @@
+import type { BillingSummary, Checkout, Invoice } from "./billing";
+import type { AccessKey, KeySecret, NewKey } from "./keys";
+import type { Invitation, Role, Team } from "./teams";
+
 export const API_URL = (
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8788"
 ).replace(/\/$/, "");
@@ -123,21 +127,35 @@ export async function readResponse<T>(response: Response): Promise<T> {
   }
   return response.json() as Promise<T>;
 }
+export function jsonInit(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+/** Sends once, and again after `refresh` if the first response is 401. */
+export async function retryOn401(
+  send: () => Promise<Response>,
+  refresh: () => Promise<void>,
+): Promise<Response> {
+  const response = await send();
+  if (response.status !== 401) return response;
+  await refresh();
+  return send();
+}
+export async function publicGet<T>(path: string): Promise<T> {
+  return readResponse<T>(await fetch(`${API_URL}${path}`));
+}
 export async function publicPost<T>(path: string, body: unknown): Promise<T> {
-  return readResponse<T>(
-    await fetch(`${API_URL}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
+  return readResponse<T>(await fetch(`${API_URL}${path}`, jsonInit("POST", body)));
 }
 export type AuthRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 export class Api {
   constructor(readonly request: AuthRequest) {}
   me = () => this.request<Profile>("/me");
   updateMe = (displayName: string) =>
-    this.request<Profile>("/me", this.json("PATCH", { displayName }));
+    this.request<Profile>("/me", jsonInit("PATCH", { displayName }));
   access = () => this.request<Access>("/me/access");
   orgs = () => this.request<{ orgs: Org[] }>("/orgs");
   drive = (id: string) =>
@@ -145,15 +163,15 @@ export class Api {
   createDrive = (orgId: string, name: string) =>
     this.request<Drive>(
       `/orgs/${encodeURIComponent(orgId)}/drives`,
-      this.json("POST", { name }),
+      jsonInit("POST", { name }),
     );
   renameDrive = (id: string, name: string, alias?: string) =>
     this.request<Drive>(
       `/drives/${encodeURIComponent(id)}`,
-      this.json("PATCH", { name, ...(alias === undefined ? {} : { alias }) }),
+      jsonInit("PATCH", { name, ...(alias === undefined ? {} : { alias }) }),
     );
   forkDrive = (id: string, name: string, alias: string) =>
-    this.request<Drive>(`/drives/${encodeURIComponent(id)}/fork`, this.json("POST", { name, alias }));
+    this.request<Drive>(`/drives/${encodeURIComponent(id)}/fork`, jsonInit("POST", { name, alias }));
   deleteDrive = (id: string, hard = false) =>
     this.request<{ ok: true }>(`/drives/${encodeURIComponent(id)}${hard ? "?hard=1" : ""}`, {
       method: "DELETE",
@@ -161,21 +179,34 @@ export class Api {
   driveToken = (id: string, access: "read" | "write" = "read") =>
     this.request<DriveToken>(
       `/drives/${encodeURIComponent(id)}/token`,
-      this.json("POST", { access }),
+      jsonInit("POST", { access }),
     );
   desktopCode = (state: string, codeChallenge: string) =>
     this.request<{ code: string }>(
       "/auth/desktop/code",
-      this.json("POST", { state, codeChallenge }),
+      jsonInit("POST", { state, codeChallenge }),
     );
-  private json(method: string, body: unknown): RequestInit {
-    return {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    };
-  }
+  readonly keys = {
+    list: () => this.request<{ keys: AccessKey[] }>("/keys"),
+    create: (body: NewKey) => this.request<KeySecret>("/keys", jsonInit("POST", body)),
+    revoke: (id: string) => this.request<{ ok: true }>(`/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  };
+  readonly billing = {
+    summary: (orgId: string) => this.request<BillingSummary>(`${orgPath(orgId)}/billing`),
+    invoices: (orgId: string, page = 0) => this.request<{ invoices: Invoice[]; nextPage: number | null }>(`${orgPath(orgId)}/billing/invoices?page=${page}`),
+    checkout: (orgId: string, body: Checkout) => this.request<{ url: string }>(`${orgPath(orgId)}/billing/checkout`, jsonInit("POST", body)),
+    portal: (orgId: string) => this.request<{ url: string }>(`${orgPath(orgId)}/billing/portal`, jsonInit("POST", {})),
+  };
+  readonly teams = {
+    members: (orgId: string) => this.request<Team>(`${orgPath(orgId)}/members`),
+    invite: (orgId: string, email: string, role: Role) => this.request<Invitation>(`${orgPath(orgId)}/invites`, jsonInit("POST", { email, role })),
+    revoke: (orgId: string, inviteId: string) => this.request(`${orgPath(orgId)}/invites/${encodeURIComponent(inviteId)}`, { method: "DELETE" }),
+    change: (orgId: string, userId: string, role: Role) => this.request(`${orgPath(orgId)}/members/${encodeURIComponent(userId)}`, jsonInit("PATCH", { role })),
+    remove: (orgId: string, userId: string) => this.request(`${orgPath(orgId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+    accept: (token: string) => this.request<{ orgId: string }>(`/invites/${encodeURIComponent(token)}/accept`, jsonInit("POST", {})),
+  };
 }
+const orgPath = (id: string) => `/orgs/${encodeURIComponent(id)}`;
 
 export interface PutOperation {
   op: "put"; path: string; ifVersion?: string; ifAbsent?: boolean;
@@ -207,13 +238,11 @@ export class DriveApi {
         `${grant.endpoint.replace(/\/$/, "")}/v0/drives/${encodeURIComponent(this.id)}/${path}`,
         { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), Authorization: `Bearer ${grant.token}` } },
       );
-    const grant = await this.token();
-    let response = await send(grant);
-    if (response.status === 401) {
+    let grant = await this.token();
+    return retryOn401(() => send(grant), async () => {
       if (this.grant === grant) this.grant = null;
-      response = await send(await this.token());
-    }
-    return response;
+      grant = await this.token();
+    });
   }
   list = (path: string, cursor: string | null = null) =>
     this.json<ListPage>(
@@ -236,18 +265,12 @@ export class DriveApi {
     if (!response.ok) await readResponse(response);
     return response.arrayBuffer();
   }
-  missing = (hashes: string[]) => this.send<{ missing: string[] }>("shards/missing", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hashes }),
-  });
+  missing = (hashes: string[]) => this.send<{ missing: string[] }>("shards/missing", jsonInit("POST", { hashes }));
   putShard = (hash: string, body: Uint8Array<ArrayBuffer>) => this.send(`shards/${hash}`, {
     method: "PUT", body, headers: { "Content-Type": "application/octet-stream" },
   });
-  restore = (path: string, versionId: string, ifVersion: string) => this.send<{ seq: number }>("restore", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, versionId, ifVersion }),
-  });
-  commit = (op: PutOperation) => this.send<{ seq: number }>("commit", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ops: [op] }),
-  });
+  restore = (path: string, versionId: string, ifVersion: string) => this.send<{ seq: number }>("restore", jsonInit("POST", { path, versionId, ifVersion }));
+  commit = (op: PutOperation) => this.send<{ seq: number }>("commit", jsonInit("POST", { ops: [op] }));
   private async send<T>(path: string, init: RequestInit): Promise<T> {
     return readResponse<T>(await this.fetch(path, init));
   }

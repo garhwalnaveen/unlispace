@@ -262,6 +262,11 @@ final class AppModel {
         return try await client.apiRequest(method: method, path: path, body: body)
     }
 
+    /// `GET /orgs`: the workspaces this account belongs to.
+    func workspaces() async throws -> [WorkspaceInfo] {
+        try await workspaceRequest("/orgs").decode(WorkspacesResult.self).orgs
+    }
+
     func searchFiles(driveId: String, query: String, cursor: String?) async throws -> FileSearchPage {
         guard !usingMock, isSignedIn || hasDevToken else { throw DaemonClientError.notConnected }
         return try await client.searchFiles(driveId: driveId, query: query, cursor: cursor)
@@ -300,7 +305,7 @@ final class AppModel {
                     account = user
                     notice = nil
                 case .deferred:
-                    account = AuthUser(id: session.user.id, email: session.user.email)
+                    account = session.user
                     notice = "Signed in. Waiting for the engine to start; the session is kept in your Keychain until then."
                 }
                 lastError = nil

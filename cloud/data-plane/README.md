@@ -1,7 +1,7 @@
 # Orbit data plane (M1 auth)
 
 One Cloudflare Worker plus a SQLite-backed Durable Object (`DriveAuthority`, one per drive) and an R2 bucket (`SHARDS`).
-Implements `docs/design/m0-contract.md` with the M1 auth and drive lifecycle of `docs/design/m1-contract.md` §2-§4. The Worker does auth, routing and shard I/O (SHA-256 verified while streaming into R2).
+Implements `docs/design/wire-contract.md` with the M1 auth and drive lifecycle of `docs/design/control-plane-contract.md` §2-§4. The Worker does auth, routing and shard I/O (SHA-256 verified while streaming into R2).
 The DO does all metadata: commits, preconditions, versions, listing, change log and the WebSocket watch (hibernation API).
 
 ## Run locally
@@ -51,7 +51,7 @@ Deviations and interpretations of the contract are in `CONTRACT-NOTES.md`.
 - `src/jwt.ts` drive-token verification (WebCrypto Ed25519)
 - `src/index.ts` Worker: auth, routing, `DataPlaneAdmin`, shard PUT/GET, missing-shard HEAD checks
 - `src/drive.ts` `DriveAuthority` Durable Object
-- `src/validate.ts`, `src/types.ts`, `src/ulid.ts` helpers
+- `src/validate.ts`, `src/types.ts` helpers (`createUlid` lives in `cloud/shared/ulid.ts`)
 - `test/` vitest suite, `scripts/smoke.sh` curl smoke test
 
 ## Rename-safe history

@@ -17,7 +17,7 @@ Open **http://127.0.0.1:5173**. Use the same origin throughout sign-in and redir
 `localhost` and `127.0.0.1`).
 
 Run the control plane on **8788** and data plane on **8787**, following
-[`m1-contract.md`](../docs/design/m1-contract.md). In another terminal, from the repository root:
+[`control-plane-contract.md`](../docs/design/control-plane-contract.md). In another terminal, from the repository root:
 
 ```sh
 node cloud/scripts/dev-keys.mjs
@@ -139,7 +139,7 @@ M1/M0's path-based `/v0/drives/{id}` routes remain normative for uploads and dow
 write grants are cached separately; only upload operations request write access. Browsers set
 `Content-Length` for typed-array PUT bodies; application code must not set this forbidden header.
 Data-plane CORS must allow the web origin, OPTIONS, GET/POST/PUT, Authorization and Content-Type,
-including error responses. See `NEEDS.md` for the current integration gap.
+including error responses (implemented in `cloud/data-plane/src/index.ts`).
 
 M2 requests follow task 06 plus the API agent's implementation (`access-keys.ts`, `billing.ts`,
 `billing-catalog.ts`, `dodo.ts`): key creation uses `workspaceId`; checkout uses `plan`; billing returns

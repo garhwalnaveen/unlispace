@@ -35,16 +35,13 @@
 .marketing > main { width: 100%; max-width: none; margin: 0; padding: 0; }
 .marketing-nav a, .marketing-signin { text-decoration: none; }
 .landing { overflow: clip; }
-.landing-section, .landing-connections, .landing-footer { width: min(var(--landing-width), calc(100% - 80px)); margin-inline: auto; }
+.landing-section, .landing-footer { width: min(var(--landing-width), calc(100% - 80px)); margin-inline: auto; }
 .landing-section { padding-block: 100px; scroll-margin-top: 100px; }
 .landing h1, .landing h2, .landing h3 { text-wrap: balance; overflow-wrap: normal; }
 .landing h2 { margin: 0; font-size: clamp(34px, 4.1vw, 52px); font-weight: 500; line-height: 1.1; letter-spacing: -.02em; }
 .landing h3 { font-size: 18px; line-height: 1.35; font-weight: 500; letter-spacing: -.02em; }
 .landing p { color: var(--muted-foreground); }
 .landing-hero { position: relative; isolation: isolate; min-height: 655px; padding: 48px 24px 170px; text-align: center; }
-.hero-note { display: inline-flex; align-items: center; gap: 9px; padding: 5px 6px; border: 1px solid #2c2c2c; border-radius: 40px; font-size: 13px; color: #e6e6e6; text-decoration: none; }
-.hero-note > span { background: #262626; border: 1px solid #353535; padding: 2px 7px; border-radius: 20px; color: #bbb; font-size: 11px; }
-.hero-note > svg { width: 25px; height: 25px; padding: 5px; background: #242424; border-radius: 50%; }
 .landing h1 { scroll-margin-top: 150px; margin: 25px 0 21px; font: 500 clamp(46px, 5vw, 64px)/1.08 Arial, Helvetica, sans-serif; letter-spacing: -.035em; }
 .landing-hero > p:not(.hero-fine) { max-width: 620px; margin: 0 auto 28px; color: #aaa; font-size: 20px; line-height: 1.45; }
 .hero-actions { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; }
@@ -57,11 +54,6 @@
 .hero-file-field > div:nth-child(2) { top: 190px; left: 19%; transform: rotate(8deg); }
 .hero-file-field > div:nth-child(3) { top: 40px; right: -45px; transform: rotate(15deg); }
 .hero-file-field > div:nth-child(4) { top: 200px; right: 17%; transform: rotate(-8deg); }
-.landing-connections { text-align: center; padding: 22px 0 74px; }
-.landing-connections p { margin-bottom: 34px; font-size: 14px; }
-.landing-connections > div { display: flex; justify-content: center; flex-wrap: wrap; gap: 40px 90px; }
-.landing-connections > div > span { display: flex; align-items: center; gap: 10px; font-size: 23px; font-weight: 600; letter-spacing: -.7px; color: #747474; }
-.landing-connections svg { width: 25px; height: 25px; stroke-width: 1.6; }
 .section-heading-copy { text-align: center; margin: 0 auto 54px; max-width: 720px; }
 .section-heading-copy p { margin: 22px 0 0; font-size: 18px; line-height: 1.5; }
 .product-section { padding-top: 65px; }
@@ -119,7 +111,7 @@
 .feature-copy { padding: 28px; }
 .feature-copy h3 { margin: 0 0 12px; }
 .feature-copy p { margin: 0; font-size: 14px; line-height: 1.6; }
-.mini-finder, .sharing-demo, .ai-demo { width: 100%; max-width: 300px; border: 1px solid #3a3a3a; border-radius: 7px; background: #141414; box-shadow: 0 15px 25px #0004; font-size: 10px; }
+.mini-finder, .sharing-demo { width: 100%; max-width: 300px; border: 1px solid #3a3a3a; border-radius: 7px; background: #141414; box-shadow: 0 15px 25px #0004; font-size: 10px; }
 .mini-window-bar { height: 28px; display: flex; align-items: center; border-bottom: 1px solid #303030; padding: 8px 10px; color: #aaa; }
 .mini-window-bar .window-dots { width: 40%; gap: 3px; }
 .mini-window-bar .window-dots i { width: 5px; height: 5px; }
@@ -138,15 +130,6 @@
 .sharing-member:nth-child(3) .member-avatar { background: #666; }
 .sharing-member > span:last-child { display: flex; align-items: center; gap: 4px; margin-left: auto; color: #bbb; font-size: 8px; }
 .sharing-invite { display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #333; padding: 7px; margin-top: 15px; border-radius: 4px; color: #bbb; font-size: 8px; }
-.ai-demo { padding: 14px; }
-.mini-question { display: flex; align-items: center; gap: 5px; padding: 5px 7px; width: fit-content; margin-left: auto; border: 1px solid #3c3c3c; border-radius: 4px; color: #bbb; font-size: 9px; }
-.mini-prompt { margin: 9px 0 19px; text-align: right; font-size: 9px; }
-.mini-answer { display: flex; gap: 8px; font-size: 9px; }
-.mini-answer > span { flex: none; }
-.mini-answer > div { flex: 1; }
-.mini-answer i { display: block; height: 3px; margin-top: 8px; border-radius: 2px; background: #363636; }
-.mini-answer i:last-child { width: 65%; }
-.mini-ai-input { display: flex; align-items: center; justify-content: space-between; border: 1px solid #383838; border-radius: 5px; padding: 8px; margin-top: 15px; color: #999; font-size: 8px; }
 .infrastructure-section { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 100px; }
 .infrastructure-intro > p { font-size: 18px; line-height: 1.5; max-width: 400px; margin: 24px 0 0; }
 .capability-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px 30px; }
@@ -175,13 +158,6 @@
 .plan-status { color: #aaa; font-size: 12px; }
 .plans-note { max-width: 720px; margin: 28px auto 0; text-align: center; font-size: 13px; line-height: 1.6; }
 .landing .faq-question { margin: 0; padding: 21px 0; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 400; letter-spacing: normal; text-wrap: initial; }
-.landing-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 100px; border-block: 1px solid var(--border); }
-.landing-steps > div > p { margin: 22px 0 25px; font-size: 16px; }
-.landing-steps ol { display: flex; flex-direction: column; gap: 32px; margin: 0; padding: 0; list-style: none; }
-.landing-steps li { display: flex; gap: 18px; }
-.landing-steps li > span { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #333; border-radius: 50%; font-size: 12px; color: #ccc; }
-.landing-steps li h3 { font-size: 16px; margin: 3px 0 9px; }
-.landing-steps li p { max-width: 390px; margin: 0; font-size: 14px; line-height: 1.6; }
 .landing-faq { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; padding-block: 120px; }
 .landing-faq h2 { font-size: clamp(30px, 3vw, 40px); }
 .landing-faq > div > p { margin-top: 20px; font-size: 16px; }
@@ -208,15 +184,14 @@
 @media (max-width: 1000px) {
   .marketing .topbar { gap: 24px; padding-inline: 24px; }
   .marketing .marketing-nav { gap: 20px; }
-  .landing-section, .landing-connections, .landing-footer { width: calc(100% - 48px); }
-  .landing-connections > div { gap: 45px; }
+  .landing-section, .landing-footer { width: calc(100% - 48px); }
   .product-stage { padding: 24px 24px 18px; }
   .preview-layout { grid-template-columns: 170px minmax(0, 1fr); }
   .preview-content { padding-inline: 20px; }
   .feature-visual { height: 215px; padding: 14px; }
   .feature-copy { padding: 20px; }
   .feature-copy h3 { font-size: 16px; }
-  .infrastructure-section, .landing-steps, .landing-faq { gap: 50px; }
+  .infrastructure-section, .landing-faq { gap: 50px; }
 }
 @media (max-width: 760px) {
   .marketing .topbar { height: 72px; gap: 18px; }
@@ -229,8 +204,6 @@
   .landing-hero { min-height: 610px; padding-top: 50px; padding-bottom: 125px; }
   .landing h1 { font-size: 56px; }
   .landing-hero > p:not(.hero-fine) { font-size: 18px; }
-  .landing-connections > div { gap: 28px 45px; }
-  .landing-connections > div > span { font-size: 19px; }
   .landing-section { padding-block: 70px; }
   .section-heading-copy { margin-bottom: 36px; }
   .section-heading-copy p { font-size: 16px; }
@@ -246,7 +219,7 @@
   .infrastructure-section { grid-template-columns: 1fr; gap: 40px; }
   .infrastructure-intro > p { max-width: 520px; font-size: 16px; }
   .capability-grid { gap: 30px; }
-  .landing-steps, .landing-faq { grid-template-columns: 1fr; gap: 40px; }
+  .landing-faq { grid-template-columns: 1fr; gap: 40px; }
   .landing-faq h2 { font-size: 34px; }
 }
 @media (max-width: 480px) {
@@ -254,11 +227,8 @@
   .marketing .brand { font-size: 23px; gap: 6px; }
   .marketing .topbar-right { gap: 12px; font-size: 12px; }
   .marketing .topbar-right [data-slot="button"] { padding-inline: 12px; font-size: 12px; }
-  .landing-section, .landing-connections, .landing-footer { width: calc(100% - 40px); }
+  .landing-section, .landing-footer { width: calc(100% - 40px); }
   .landing-hero { min-height: 565px; padding: 44px 20px 110px; }
-  .hero-note { gap: 6px; font-size: 10px; }
-  .hero-note > span { font-size: 9px; }
-  .hero-note > svg { width: 22px; height: 22px; }
   .landing h1 { margin-top: 28px; font-size: clamp(44px, 12vw, 56px); }
   .landing-hero > p:not(.hero-fine) { font-size: 16px; line-height: 1.55; }
   .desktop-break { display: none; }
@@ -267,10 +237,6 @@
   .hero-file-field > div { width: 180px; font-size: 10px; }
   .hero-file-field > div:nth-child(2) { left: -10px; top: 210px; }
   .hero-file-field > div:nth-child(4) { right: -10px; top: 190px; }
-  .landing-connections { padding-bottom: 30px; }
-  .landing-connections p { font-size: 12px; }
-  .landing-connections > div { display: grid; grid-template-columns: auto auto; gap: 25px 48px; }
-  .landing-connections > div > span { font-size: 21px; }
   .landing h2 { font-size: 34px; }
   .section-heading-copy p { font-size: 15px; }
   .product-stage { padding: 10px 10px 15px; }
@@ -300,7 +266,7 @@
   .capability-grid { gap: 30px 20px; }
   .capability-grid h3 { font-size: 14px; }
   .capability-grid p { font-size: 13px; }
-  .landing-steps li p, .faq-list p { font-size: 13px; }
+  .faq-list p { font-size: 13px; }
   .faq-list summary { font-size: 14px; }
   .landing-cta { padding-block: 75px; }
   .landing-cta h2 { font-size: 40px; }

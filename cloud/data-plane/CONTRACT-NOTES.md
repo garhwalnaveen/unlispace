@@ -1,6 +1,6 @@
 # Contract interpretation notes (M0 + M1 auth)
 
-Where `docs/design/m0-contract.md` was ambiguous, this is what the data plane does.
+Where `docs/design/wire-contract.md` was ambiguous, this is what the data plane does.
 
 1. **Rename version/log shape.** A rename creates a new version (`op: "rename"`, same manifest) at the destination
    path and a `delete` version at the source. For folders, every descendant gets the same pair. The change log has
@@ -56,7 +56,7 @@ Where `docs/design/m0-contract.md` was ambiguous, this is what the data plane do
 22. **`createDrive` error**: a thrown `DriveExistsError` (`name`, `message` = `drive_exists: <id>`; `code`/`status` properties
     may not survive every RPC boundary, so match on `name` or the `drive_exists` message prefix). Invalid ids or placements throw `TypeError`.
 23. **Existence**: shard and commit calls on a never-created drive are `404 no_such_drive` for every principal (M0 behaviour kept).
-24. **Review fixes** (see `m0-contract.md` §3.5/§3.6): shard PUT passes `sha256` to R2 (checksum failure -> `400 hash_mismatch`, no
+24. **Review fixes** (see `wire-contract.md` §3.5/§3.6): shard PUT passes `sha256` to R2 (checksum failure -> `400 hash_mismatch`, no
     delete path); log entries carry `ev` (rowid), `/changes` and `/watch` take `after=<ev>` and `since=<seq>`, watch replays in bounded
     alarm-driven batches with live events withheld until caught up, backlog > 100k events -> `resync` + close; JSON bodies are
     stream-capped (413); `/versions` is paginated (opaque cursor = last version rowid); folder delete/rename page through the

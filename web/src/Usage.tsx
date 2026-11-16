@@ -1,7 +1,6 @@
 import { Button } from "./components/ui/button";
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { useAuth } from "./context";
-import { m2 } from "./m2";
 import { formatBytes, useLoad } from "./ui";
 
 export function UsageMeter({ usedBytes, quotaBytes }: { usedBytes: number; quotaBytes: number }) {
@@ -14,8 +13,7 @@ export function UsageMeter({ usedBytes, quotaBytes }: { usedBytes: number; quota
 }
 export function OrgUsage({ orgId }: { orgId: string }) {
   const { auth } = useAuth();
-  const api = useMemo(() => m2(auth.api), [auth]);
-  const load = useCallback(() => api.billing(orgId), [api, orgId]);
+  const load = useCallback(() => auth.api.billing.summary(orgId), [auth, orgId]);
   const usage = useLoad(load);
   return usage.data ? <UsageMeter {...usage.data} /> : <p className="muted small">{usage.error ? <>Storage usage unavailable. <Button onClick={usage.reload}>Retry usage</Button></> : "Loading storage usage…"}</p>;
 }

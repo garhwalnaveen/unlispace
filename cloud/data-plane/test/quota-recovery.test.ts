@@ -78,14 +78,6 @@ it("verified deletion refuses active uploads and releases exactly once",async()=
  expect(await q.usage([])).toEqual({usedBytes:0});expect(await q.reserve(key,4)).toBe(true);
 });
 
-it("bounded reconciliation removes absent idle rows but retains ambiguous active reservations",async()=>{
- const q=quota("reconcile-test");await q.configure(20,[]);
- await q.reserve(objectKey(1),4);await q.finish(objectKey(1),true);
- await q.reserve(objectKey(2),5);
- expect(await q.reconcile([])).toEqual({usedBytes:5,checked:2,unresolved:1,more:false});
- expect(await q.usage([])).toEqual({usedBytes:5});
-});
-
 it("GC retries lost deletion acknowledgments and releases enforced quota",async()=>{
  const id=await newDrive(),org="gc-release-test",key=await genKey(org);installJwks(key);
  const token=await signToken(key,{org,drives:[{id,access:"write"}]});await admin.configureQuota(org,4,[id]);

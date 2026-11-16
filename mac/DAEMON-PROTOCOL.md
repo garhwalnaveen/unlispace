@@ -54,7 +54,7 @@ Events have no `id`. Clients must ignore unknown event names. Unknown fields are
 dev-token path and are kept only for local testing. Omitted fields are unchanged. The daemon
 must not log `token`.
 
-**M1 sign-in (see `docs/design/m1-contract.md` §5.1).** The app runs the desktop PKCE flow, then
+**M1 sign-in (see `docs/design/control-plane-contract.md` §5.1).** The app runs the desktop PKCE flow, then
 hands the resulting session to the daemon with `auth.set` and keeps no copy. From then on the
 daemon is the only holder of the refresh token. It stores it in the macOS Keychain (service
 `com.orbit.ulsd`, account = user id), rotates it on refresh, and mints drive tokens with

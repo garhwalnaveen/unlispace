@@ -1,6 +1,7 @@
+import { sha256Hex } from "../../shared/bytes";
 import { HISTORY_SCHEMA, migrateHistory } from "./history";
 import { DurableObject } from "cloudflare:workers";
-import { createUlid } from "./ulid";
+import { createUlid } from "../../shared/ulid";
 import { LIVE_TREE, migrateNodes, migrateSearch, NodeTree, type NodeRow } from "./nodes";
 import {
 	fail,
@@ -44,7 +45,6 @@ export const EXP_HEADER = "x-uls-token-exp";
 export const WS_CLOSE_EXPIRED = 4401;
 /** WebSocket close code: drive deleted. */
 export const WS_CLOSE_DELETED = 4404;
-export const DRIVE_RECOVERY_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Per-socket state kept across hibernation via serializeAttachment. */
 interface WsAttachment {
@@ -279,17 +279,6 @@ class DriveStore {
 			}
 		}
 		return ok(null);
-	}
-
-	restoreDrive(): Promise<Result<DriveInfo>> {
-		return this.withIO(async () => {
-			if (this.getMeta("created_at") === null) return this.noDrive();
-			const deletedAt = this.getMeta("deleted_at");
-			if (this.getMeta("deleted") === "1" && deletedAt !== null && Number(deletedAt) + DRIVE_RECOVERY_MS <= Date.now()) return fail(410, "recovery_expired");
-			this.setMeta("deleted", "0");
-			this.sql.exec("DELETE FROM meta WHERE k='deleted_at'");
-			return ok(this.info()!);
-		});
 	}
 
 	/** Existence + lineage only. Shard routes call this per request; `describe` walks the whole tree. */
@@ -578,7 +567,7 @@ class DriveStore {
             catch { return fail(400, "bad_manifest"); }
             const data = new TextEncoder().encode(JSON.stringify(parsed));
             if (data.length > INLINE_MANIFEST_BYTES) return fail(413, "too_large");
-            const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", data))].map(n=>n.toString(16).padStart(2,"0")).join("");
+            const hash = await sha256Hex(data);
             const key = `manifests/${this.lineage()}/${hash}`;
             const quota = org ? quotaFor(this.env, org) : null;
             if (quota && !await quota.reserve(key,data.length)) return fail(403, "over_quota");
@@ -601,7 +590,7 @@ class DriveStore {
 	private async commitExclusive(ops: NormOp[], confirmed: [string, number][], actor: string, requestId?: string, org?: string): Promise<Result<CommitResponse>> {
 		if (!this.info()) return this.noDrive();
         if (!await this.ensureReferences()) return fail(503, "references_initializing");
-		const fingerprint = requestId ? [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(ops.map(op => (op.op === "put" && op.generatedMtime) ? {...op, mtimeMs: null} : op)))))].map(n => n.toString(16).padStart(2,"0")).join("") : "";
+		const fingerprint = requestId ? await sha256Hex(JSON.stringify(ops.map(op => (op.op === "put" && op.generatedMtime) ? {...op, mtimeMs: null} : op))) : "";
 		if (requestId) {
 			const previous = this.sql.exec<{fingerprint: string; response: string | null}>("SELECT fingerprint,response FROM commit_receipts WHERE actor=? AND id=?", "drive", requestId).toArray()[0];
 			if (previous) return previous.fingerprint === fingerprint && previous.response ? ok(JSON.parse(previous.response) as CommitResponse) : fail(409, "idempotency_conflict");
@@ -647,7 +636,7 @@ class DriveStore {
                 if (!org || data.byteLength <= INLINE_MANIFEST_BYTES) {
                     op[field] = await storeManifest(this.env.SHARDS, lineage, text); continue;
                 }
-                const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", data))].map(n => n.toString(16).padStart(2,"0")).join("");
+                const hash = await sha256Hex(data);
                 const key = `manifests/${lineage}/${hash}`, quota = quotaFor(this.env, org);
                 if (!await quota.reserve(key, data.byteLength)) return fail(403, "over_quota");
                 let stored = false;
@@ -1184,7 +1173,7 @@ export class DriveAuthority extends DurableObject<Env> {
 	}
 	async branchCall(branch: string, method: string, args: unknown[]): Promise<string> {
 		if (this.route) throw new Error("invalid_branch_authority");
-		const allowed=new Set(["bindQuotaOrg","lineageInfo","delete","restoreDrive","locate","forkInfo","describe","stats","member","beginExport","exportPage","endExport","reserveImport","importPage","finishImport","cancelImport","snapshot","filterUnknown","authorizeShard","markShards","storeManifestPage","commit","cancelCommit","restore","stat","search","list","manifest","versions","treeAt","changes","forkMetadata","gcStep"]);
+		const allowed=new Set(["bindQuotaOrg","lineageInfo","delete","locate","forkInfo","describe","stats","member","beginExport","exportPage","endExport","reserveImport","importPage","finishImport","cancelImport","snapshot","filterUnknown","authorizeShard","markShards","storeManifestPage","commit","cancelCommit","restore","stat","search","list","manifest","versions","treeAt","changes","forkMetadata","gcStep"]);
 		if (!allowed.has(method) || !Array.isArray(args)) throw new Error("invalid_branch_method");
 		const store=this.local(branch);
 		return JSON.stringify(await (store[method as keyof DriveStore] as (...args:unknown[])=>unknown).apply(store,args)) ?? "null";
@@ -1216,8 +1205,6 @@ export class DriveAuthority extends DurableObject<Env> {
 	async bindQuotaOrg(...args: Parameters<DriveStore["bindQuotaOrg"]>): Promise<Awaited<ReturnType<DriveStore["bindQuotaOrg"]>>> { return await this.invoke("bindQuotaOrg",args) as Awaited<ReturnType<DriveStore["bindQuotaOrg"]>>; }
 
 	async lineageInfo(...args: Parameters<DriveStore["lineageInfo"]>): Promise<Awaited<ReturnType<DriveStore["lineageInfo"]>>> { return await this.invoke("lineageInfo",args) as Awaited<ReturnType<DriveStore["lineageInfo"]>>; }
-
-	async restoreDrive(...args: Parameters<DriveStore["restoreDrive"]>): Promise<Awaited<ReturnType<DriveStore["restoreDrive"]>>> { return await this.invoke("restoreDrive",args) as Awaited<ReturnType<DriveStore["restoreDrive"]>>; }
 
 	async locate(...args: Parameters<DriveStore["locate"]>): Promise<Awaited<ReturnType<DriveStore["locate"]>>> { return await this.invoke("locate",args) as Awaited<ReturnType<DriveStore["locate"]>>; }
 

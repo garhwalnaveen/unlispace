@@ -87,9 +87,9 @@ struct WorkspaceAccountView: View {
         loading = true
         defer { if key == loadKey { loading = false } }
         do {
-            let result = try await model.workspaceRequest("/orgs").decode(WorkspacesResult.self)
+            let orgs = try await model.workspaces()
             guard !Task.isCancelled, key == loadKey else { return }
-            workspaces = result.orgs
+            workspaces = orgs
             do {
                 let value = try await model.workspaceRequest("/client-config").decode(ClientConfiguration.self)
                 guard !Task.isCancelled, key == loadKey else { return }

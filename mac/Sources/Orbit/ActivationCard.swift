@@ -91,9 +91,9 @@ struct ActivationCard: View {
         }
         guard !Task.isCancelled, key == loadKey else { return }
         do {
-            let result = try await model.workspaceRequest("/orgs").decode(WorkspacesResult.self)
+            let orgs = try await model.workspaces()
             guard !Task.isCancelled, key == loadKey else { return }
-            workspaces = result.orgs
+            workspaces = orgs
         } catch {
             guard !Task.isCancelled, key == loadKey else { return }
             self.error = "Account status is unavailable. Retry or check Settings → Workspace."

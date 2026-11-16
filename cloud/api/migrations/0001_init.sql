@@ -1,4 +1,4 @@
--- Control-plane schema (docs/design/m1-contract.md section 6) plus lookup indexes.
+-- Control-plane schema (docs/design/control-plane-contract.md section 6) plus lookup indexes.
 CREATE TABLE users(id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, display_name TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE orgs(id TEXT PRIMARY KEY, name TEXT NOT NULL, tier TEXT NOT NULL, trial_ends_at INTEGER, created_at INTEGER NOT NULL);
 CREATE TABLE memberships(org_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(org_id, user_id));

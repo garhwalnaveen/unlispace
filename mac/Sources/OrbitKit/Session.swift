@@ -1,12 +1,6 @@
 import Foundation
 
-public struct SessionUser: Decodable, Sendable, Equatable {
-    public let id: String
-    public let email: String
-    public init(id: String, email: String) { self.id = id; self.email = email }
-}
-
-/// `Session` from docs/design/m1-contract.md §5.1:
+/// `Session` from docs/design/control-plane-contract.md §5.1:
 /// `{"accessToken","refreshToken","expiresIn":900,"user":{"id","email"},"accountCreated":bool}`.
 /// Every field is required; a missing one fails decoding. Deliberately not `Encodable`, and its
 /// `description` redacts the tokens.
@@ -14,10 +8,10 @@ public struct Session: Decodable, Sendable, Equatable, CustomStringConvertible, 
     public let accessToken: String
     public let refreshToken: String
     public let expiresIn: Int
-    public let user: SessionUser
+    public let user: AuthUser
     public let accountCreated: Bool
 
-    public init(accessToken: String, refreshToken: String, expiresIn: Int, user: SessionUser, accountCreated: Bool) {
+    public init(accessToken: String, refreshToken: String, expiresIn: Int, user: AuthUser, accountCreated: Bool) {
         self.accessToken = accessToken; self.refreshToken = refreshToken; self.expiresIn = expiresIn
         self.user = user; self.accountCreated = accountCreated
     }

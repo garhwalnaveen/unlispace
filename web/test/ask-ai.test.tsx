@@ -1,14 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
-import { App } from "../src/App";
-import { AuthStore } from "../src/auth";
-import { AuthContext } from "../src/context";
-import { json, session } from "./fixtures";
-
-const stores: AuthStore[] = [];
-afterEach(() => stores.splice(0).forEach((store) => store.dispose()));
+import { expect, it, vi } from "vitest";
+import { json, renderApp, session, signedOutStore } from "./fixtures";
 
 const models = {
   configured: true,
@@ -34,19 +27,6 @@ function uiStream(text: string) {
   });
 }
 
-function renderAt(path: string) {
-  const auth = new AuthStore(localStorage, null);
-  stores.push(auth);
-  auth.accept(session);
-  render(
-    <MemoryRouter initialEntries={[path]}>
-      <AuthContext value={auth}>
-        <App />
-      </AuthContext>
-    </MemoryRouter>,
-  );
-}
-
 it("streams a managed Kimi answer with the selected model and the session token", async () => {
   const bodies: Record<string, unknown>[] = [];
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
@@ -59,7 +39,7 @@ it("streams a managed Kimi answer with the selected model and the session token"
     throw new Error(`Unexpected call: ${url}`);
   });
   vi.stubGlobal("fetch", fetcher);
-  renderAt("/ai");
+  renderApp("/ai");
   expect(await screen.findByRole("heading", { name: "Ask AI" })).toBeInTheDocument();
   expect(screen.getByText(/49 of 50 free requests left today/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Ask AI" })).toHaveAttribute("href", "/ai");
@@ -80,7 +60,7 @@ it("explains when the free daily allowance is used up", async () => {
     if (url.endsWith("/ai/chat")) return json({ error: "ai_quota_exceeded" }, 429);
     throw new Error(`Unexpected call: ${url}`);
   }));
-  renderAt("/ai");
+  renderApp("/ai");
   await userEvent.type(await screen.findByLabelText("Message for Ask AI"), "Hello");
   await userEvent.click(screen.getByRole("button", { name: "Send" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("You have used today's free AI allowance");
@@ -88,7 +68,7 @@ it("explains when the free daily allowance is used up", async () => {
 
 it("shows an unavailable state when the server has no managed AI", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => json({ ...models, configured: false })));
-  renderAt("/ai");
+  renderApp("/ai");
   expect(await screen.findByRole("heading", { name: "Ask AI is not available" })).toBeInTheDocument();
 });
 
@@ -104,16 +84,7 @@ it("signs the desktop app's embedded Ask AI page in with a one-time handoff and 
   }));
   sessionStorage.setItem("orbit.embedVerifier", "v".repeat(43));
   window.history.replaceState(null, "", "/embed/ai#handoff=h123");
-  const auth = new AuthStore(localStorage, null);
-  stores.push(auth);
-  await auth.start();
-  render(
-    <MemoryRouter initialEntries={["/embed/ai"]}>
-      <AuthContext value={auth}>
-        <App />
-      </AuthContext>
-    </MemoryRouter>,
-  );
+  renderApp("/embed/ai", await signedOutStore());
   expect(await screen.findByRole("heading", { name: "Ask AI" })).toBeInTheDocument();
   expect(exchanged).toEqual([{ handoff: "h123", webCodeVerifier: "v".repeat(43) }]);
   expect(sessionStorage.getItem("orbit.embedVerifier")).toBeNull();
