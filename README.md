@@ -58,7 +58,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request:
 cd web && npm run typecheck && npm test
 cd cloud/<worker> && npm run types && npm run typecheck && npm test   # api, data-plane, s3-gateway
 cd engine && cargo check --workspace --all-features && cargo test --workspace
-node --test tests/e2e/*.test.mjs
+node --test tests/e2e/*.test.mjs   # needs cloud/s3-gateway installed
 ```
 
 ## License

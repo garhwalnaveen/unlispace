@@ -71,4 +71,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: cloud/s3-gateway/package-lock.json
+      # The helpers load the AWS SDK from the gateway's dependencies.
+      - run: npm ci
+        working-directory: cloud/s3-gateway
       - run: node --test tests/e2e/*.test.mjs
