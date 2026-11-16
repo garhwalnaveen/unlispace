@@ -64,7 +64,7 @@ remain historical evidence; a reset installation is not assumed to retain their 
   Publication plus independent length/SHA-256 verification took **140 s** after native
   acceptance. Cold remount retrieval from an empty isolated disk shard cache matched in
   **20.19 s**. This validates the reproduced failure locally; it is not a matched hosted
-  comparison against Space. The retained table is `tests/e2e/last-run.txt`.
+  comparison against Space. The retained table is `docs/research/performance/e2e-acceptance-2026-10-26.txt`.
 
 Membership removal stops new grants immediately; existing drive JWTs can remain valid for
 up to 15 minutes and warmed gateway caches may lag by 30 seconds.

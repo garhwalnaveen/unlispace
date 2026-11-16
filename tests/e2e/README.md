@@ -41,8 +41,7 @@ the CLI cache to the temp directory; the native macOS NFS check fails explicitly
 
 ## Assertions
 
-The 16 numbered cloud checks retain the coverage of
-`docs/agents/m1-cloud-e2e.sh`: OTP start/log/wrong-code/session; personal org and
+The 16 numbered cloud checks cover: OTP start/log/wrong-code/session; personal org and
 drive provisioning; token minting/verification; shard PUT/commit/actor attribution;
 drive isolation/read-only scope/wrong token type; and refresh rotation/reuse/family
 revocation. The wrong OTP is chosen to differ from the actual code, including when
@@ -134,14 +133,10 @@ No build step or additional dependency is needed. Syntax checks are the lint gat
 
 ```sh
 bash -n tests/e2e/run.sh
-node --check tests/e2e/harness.mjs
-node --check tests/e2e/helpers.mjs
-node --check tests/e2e/helpers.test.mjs
-node --check tests/e2e/daemon-socket.mjs
-node --check tests/e2e/daemon-socket.test.mjs
-node --check tests/e2e/m3.mjs
-node --check tests/e2e/m3.test.mjs
-node --test tests/e2e/helpers.test.mjs tests/e2e/daemon-socket.test.mjs tests/e2e/m3.test.mjs
+node --check tests/e2e/harness.mjs tests/e2e/helpers.mjs tests/e2e/daemon-socket.mjs \
+  tests/e2e/m3.mjs tests/e2e/desktop.mjs tests/e2e/stress.mjs tests/e2e/parity.mjs \
+  tests/e2e/s3-benchmark.mjs
+node --test tests/e2e/*.test.mjs
 bash tests/e2e/run.sh
 ```
 
@@ -178,10 +173,15 @@ The native M3 row invokes `uls fork` against an explicitly nonexistent isolated
 socket, then downloads through `uls get` using a freshly minted fork read token.
 It fails if fork requires daemon RPC; it never starts the per-user daemon.
 
-The full gate has 45 rows with SMB (35 without SMB). `last-run.txt` records the
-actual gate result, including setup failures. A missing engine binary, native
+The full gate has 53 rows with SMB (35 without SMB). `../docs/research/performance/e2e-acceptance-2026-10-26.txt`
+records the last retained gate result, including setup failures. A missing engine binary, native
 mount denial or unavailable CLI parity remains a failure, never a skipped PASS.
 
+
+## Optional gates
+
+`E2E_PARITY=1` adds the S3 gateway parity checks (parity.mjs) against the same
+isolated Workers. `E2E_STRESS_BYTES` sizes the native stress upload.
 
 ## Desktop handoff and installation acceptance
 
