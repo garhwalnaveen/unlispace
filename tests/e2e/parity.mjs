@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { otpFromLog } from './helpers.mjs';
+import { s3Signer } from './s3-sign.mjs';
 
 /** Runs through real local Worker service bindings, D1, Durable Objects and R2 emulation. */
 export async function parityChecks({root,api,s3,apiWorker,check,request,json,until,secrets}) {
-  const require=createRequire(join(root,'cloud/s3-gateway/package.json'));
   const {S3SDKClient}=await import(pathToFileURL(join(root,'cloud/s3-gateway/node_modules/@spacefs/s3sdk/dist/index.js')));
   let session,org,drive,key,client,fork,child;
   const body=Buffer.from('parity direct bytes');
@@ -32,13 +31,11 @@ export async function parityChecks({root,api,s3,apiWorker,check,request,json,unt
   });
   await check('parity direct upload capability and verified commit across real services',async()=>{
     assert(client,'requires parity setup');
-    const {SignatureV4}=require('@smithy/signature-v4');
-    const {Sha256}=require('@aws-crypto/sha256-js');
-    const signer=new SignatureV4({service:'s3',region:'auto',sha256:Sha256,credentials:key,uriEscapePath:false});
+    const sign=s3Signer(root);
     async function signed(method,operation,value) {
       const bytes=Buffer.from(JSON.stringify(value)),url=new URL(`/${drive}/direct?x-s3sdk-direct-${operation}`,s3);
-      const signed=await signer.sign({protocol:url.protocol,hostname:url.hostname,port:Number(url.port),method,path:url.pathname,query:Object.fromEntries(url.searchParams),headers:{host:url.host,'content-type':'application/json','content-length':String(bytes.length),'x-amz-content-sha256':createHash('sha256').update(bytes).digest('hex')},body:bytes});
-      return fetch(url,{method,headers:signed.headers,body:bytes,signal:AbortSignal.timeout(20000)});
+      const headers=await sign(url,{method,key,body:bytes,headers:{'content-type':'application/json','content-length':String(bytes.length),'x-amz-content-sha256':createHash('sha256').update(bytes).digest('hex')}});
+      return fetch(url,{method,headers,body:bytes,signal:AbortSignal.timeout(20000)});
     }
     const shards=[{hash,length:body.length}];
     const response=await signed('POST','plan',{shards});

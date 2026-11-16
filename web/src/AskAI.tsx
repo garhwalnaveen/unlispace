@@ -31,19 +31,19 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "./components/ai-elements/reasoning";
 import { Suggestion, Suggestions } from "./components/ai-elements/suggestion";
 
-export interface AIModel {
+interface AIModel {
   id: string;
   name: string;
   description: string;
 }
-export interface AIQuota {
+interface AIQuota {
   requestsUsed: number;
   requestsLimit: number;
   tokensUsed: number;
   tokensLimit: number;
   resetsAt: number;
 }
-export interface AIModels {
+interface AIModels {
   configured: boolean;
   models: AIModel[];
   quota: AIQuota;

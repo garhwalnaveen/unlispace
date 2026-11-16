@@ -1,19 +1,12 @@
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { expect, it } from "vitest";
 import { Landing, LandingNavigation } from "../src/Landing";
-import { AuthStore } from "../src/auth";
-import { AuthContext } from "../src/context";
-import { session } from "./fixtures";
+import { authStore, renderWithAuth, signedOutStore } from "./fixtures";
 
-const stores: AuthStore[] = [];
-afterEach(() => stores.splice(0).forEach(store => store.dispose()));
 async function showLanding(signedIn = false) {
-  const auth = new AuthStore(localStorage, null);
-  stores.push(auth);
-  if (signedIn) auth.accept(session); else await auth.start();
-  render(<MemoryRouter><AuthContext value={auth}><LandingNavigation /><Landing /></AuthContext></MemoryRouter>);
+  const auth = signedIn ? authStore() : await signedOutStore();
+  renderWithAuth(<><LandingNavigation /><Landing /></>, "/", auth);
 }
 
 it("switches example drives without requesting account data and links new visitors to sign-in", async () => {

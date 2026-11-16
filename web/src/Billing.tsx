@@ -2,10 +2,10 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { NativeSelect } from "./components/ui/native-select";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
-import { useCallback, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "./context";
-import { billingCatalog, externalUrl, m2, type Checkout } from "./m2";
+import { billingCatalog, externalUrl, type Checkout } from "./billing";
 import { ErrorNotice, formatBytes, formatDate, Loading, Modal, useLoad } from "./ui";
 
 import { UsageMeter } from "./Usage";
@@ -21,15 +21,14 @@ export function formatMoney(minor: number, currency: string): string {
 export function Billing() {
   const { id = "" } = useParams();
   const { auth } = useAuth();
-  const api = useMemo(() => m2(auth.api), [auth]);
-  const load = useCallback(() => api.billing(id), [api, id]);
+  const load = useCallback(() => auth.api.billing.summary(id), [auth, id]);
   const summary = useLoad(load);
   const catalog = useLoad(billingCatalog);
   const orgs = useLoad(auth.api.orgs);
   const org = orgs.data?.orgs.find((item) => item.id === id);
   const canManage = org?.role === "owner" || org?.role === "admin";
   const [invoicePage, setInvoicePage] = useState(0);
-  const loadInvoices = useCallback(() => canManage ? api.invoices(id, invoicePage) : Promise.resolve({ invoices: [], nextPage: null }), [api, id, invoicePage, canManage]);
+  const loadInvoices = useCallback(() => canManage ? auth.api.billing.invoices(id, invoicePage) : Promise.resolve({ invoices: [], nextPage: null }), [auth, id, invoicePage, canManage]);
   const invoices = useLoad(loadInvoices);
   const [tier, setTier] = useState<Checkout["plan"]>("individual");
   const [cadence, setCadence] = useState<Checkout["cadence"]>("monthly");
@@ -41,7 +40,7 @@ export function Billing() {
   async function redirect(checkout: boolean) {
     setBusy(true); setError(undefined);
     try {
-      const result = checkout ? await api.checkout(id, { plan: tier, cadence, seats: tier === "individual" ? 1 : seats, storageAddons }) : await api.portal(id);
+      const result = checkout ? await auth.api.billing.checkout(id, { plan: tier, cadence, seats: tier === "individual" ? 1 : seats, storageAddons }) : await auth.api.billing.portal(id);
       window.location.assign(externalUrl(result.url));
     } catch (reason) { setError(reason); setBusy(false); }
   }

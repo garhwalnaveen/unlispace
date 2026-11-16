@@ -1,27 +1,13 @@
-import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
+import { fireEvent, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
-import { App } from "../src/App";
-import { AuthStore } from "../src/auth";
-import { AuthContext } from "../src/context";
+import { expect, it, vi } from "vitest";
 import { formatMoney } from "../src/Billing";
-import { drive, json, session } from "./fixtures";
-
-const stores: AuthStore[] = [];
-afterEach(() => stores.splice(0).forEach((store) => store.dispose()));
-async function renderApp(path: string, signedIn = true) {
-  const auth = new AuthStore(localStorage, null); stores.push(auth);
-  if (signedIn) auth.accept(session); else await auth.start();
-  render(<MemoryRouter initialEntries={[path]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
-  return auth;
-}
+import { catalog as baseCatalog, drive, json, renderApp, session, signedOutStore } from "./fixtures";
 const org = (extra = {}) => ({ id: drive.orgId, name: "My Space", role: "owner", tier: "individual", trialPending: false, trialEndsAt: Date.now() + 3 * 86_400_000, quotaBytes: 500e9, usedBytes: 0, drives: [drive], ...extra });
 const ws = (extra = {}) => ({ id: drive.orgId, name: "My Space", role: "owner", tier: "individual", state: "trial_active", trialPending: false, trialEndsAt: Date.now() + 3 * 86_400_000, writable: true, storageReady: true, quotaBytes: 500e9, usedBytes: 0, ...extra });
 const access = (...workspaces: unknown[]) => ({ user: session.user, workspaces });
 const price = (amount: number) => ({ amount, currency: "USD" });
 const prices = { individual: { monthly: price(1500), annual: price(15000) }, teams: { monthly: price(1500), annual: price(15000) }, storage: { monthly: price(500), annual: price(5000) } };
-const baseCatalog = { plans: [{ id: "individual", name: "Individual", bytesPerSeat: 500e9, minSeats: 1, maxSeats: 1 }, { id: "teams", name: "Teams", bytesPerSeat: 1e12, minSeats: 2, maxSeats: 1000 }], storageAddon: { bytes: 500e9, maxQuantity: 1000 }, checkoutAvailable: true, trialDays: 7, checkoutStartsImmediately: true, checkoutEndsTrial: true };
 const summary = { orgId: drive.orgId, plan: "individual", state: "trial_active", writable: true, status: "trialing", trialEndsAt: Date.now() + 86_400_000, seats: 1, storageAddons: 0, quotaBytes: 500e9, usedBytes: 0 };
 function billingFetch(catalog: unknown) {
   return vi.fn(async (url: string) => {
@@ -42,7 +28,7 @@ it("formats minor units, with US$ for dollars", () => {
 it("shows the exact amount, tax, renewal and trial consequence before checkout, and labels the button", async () => {
   vi.stubGlobal("fetch", billingFetch({ ...baseCatalog, prices }));
   const user = userEvent.setup();
-  await renderApp(`/orgs/${drive.orgId}/billing`);
+  renderApp(`/orgs/${drive.orgId}/billing`);
   await userEvent.click(await screen.findByRole("button", { name: "Choose a plan" }));
   const box = await screen.findByLabelText("Checkout summary");
   expect(box).toHaveTextContent("Due today: US$15.00, plus applicable tax.");
@@ -61,7 +47,7 @@ it("shows the exact amount, tax, renewal and trial consequence before checkout, 
 
 it("does not invent prices or the trial claim when none are configured", async () => {
   vi.stubGlobal("fetch", billingFetch({ ...baseCatalog, prices: null }));
-  await renderApp(`/orgs/${drive.orgId}/billing`);
+  renderApp(`/orgs/${drive.orgId}/billing`);
   await userEvent.click(await screen.findByRole("button", { name: "Choose a plan" }));
   const box = await screen.findByLabelText("Checkout summary");
   expect(box).toHaveTextContent("amount due today, currency and applicable tax are shown in Dodo Payments");
@@ -71,7 +57,7 @@ it("does not invent prices or the trial claim when none are configured", async (
 
 it("omits the trial sentence when checkout does not end the trial", async () => {
   vi.stubGlobal("fetch", billingFetch({ ...baseCatalog, checkoutEndsTrial: false, prices }));
-  await renderApp(`/orgs/${drive.orgId}/billing`);
+  renderApp(`/orgs/${drive.orgId}/billing`);
   await userEvent.click(await screen.findByRole("button", { name: "Choose a plan" }));
   const box = await screen.findByLabelText("Checkout summary");
   expect(box).not.toHaveTextContent("trial ends now");
@@ -80,7 +66,7 @@ it("omits the trial sentence when checkout does not end the trial", async () => 
 it("every billing link and return target resolves to a rendered route", async () => {
   vi.stubGlobal("fetch", billingFetch({ ...baseCatalog, prices: null }));
   // return_url and portal return in the API: `${ULS_WEB_ORIGIN}/orgs/${id}/billing`
-  await renderApp(`/orgs/${drive.orgId}/billing`);
+  renderApp(`/orgs/${drive.orgId}/billing`);
   await screen.findByRole("heading", { name: "Billing" });
   expect(screen.queryByText("That page could not be found.")).not.toBeInTheDocument();
   const link = within(screen.getByRole("main")).getByRole("link", { name: "Your drives" });
@@ -101,7 +87,7 @@ it("switch=1 signs the web session out once and keeps the desktop parameters for
     throw new Error(`Unexpected ${url}`);
   });
   vi.stubGlobal("fetch", fetcher);
-  await renderApp(`/desktop?${desktopQuery({ switch: "1" })}`);
+  renderApp(`/desktop?${desktopQuery({ switch: "1" })}`);
   expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/auth/logout"))).toHaveLength(1);
   // The Google button records the return target without `switch`, so the user cannot loop.
@@ -111,7 +97,7 @@ it("switch=1 signs the web session out once and keeps the desktop parameters for
 
 it("switch=1 without a web session goes straight to sign-in", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("no network expected"); }));
-  await renderApp(`/desktop?${desktopQuery({ switch: "1" })}`, false);
+  renderApp(`/desktop?${desktopQuery({ switch: "1" })}`, await signedOutStore());
   expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
 });
 
@@ -125,7 +111,7 @@ it("offers Use a different account on the confirmation screen and keeps the targ
   });
   vi.stubGlobal("fetch", fetcher);
   const user = userEvent.setup();
-  await renderApp(`/desktop?${desktopQuery()}`);
+  renderApp(`/desktop?${desktopQuery()}`);
   await screen.findByRole("heading", { name: "Your Orbit is ready" });
   await user.click(screen.getByRole("button", { name: "Use a different account" }));
   await user.type(await screen.findByLabelText("Email address"), "other@example.com");
@@ -139,7 +125,7 @@ it("offers Use a different account on the confirmation screen and keeps the targ
 it("switching from email to Google mid-flow keeps the desktop return target", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => { if (url.endsWith("/otp/start")) return json({ ok: true }); throw new Error(url); }));
   const user = userEvent.setup();
-  await renderApp(`/desktop?${desktopQuery()}`, false);
+  renderApp(`/desktop?${desktopQuery()}`, await signedOutStore());
   await user.type(await screen.findByLabelText("Email address"), "x@example.com");
   await user.click(screen.getByRole("button", { name: "Continue with email" }));
   await screen.findByLabelText("Verification code");
@@ -157,7 +143,7 @@ function homeFetch(accessBody: unknown, orgBody = org()) {
 
 it("home shows trial days from /me/access", async () => {
   vi.stubGlobal("fetch", homeFetch(access(ws({ trialEndsAt: Date.now() + 2 * 86_400_000 })), org({ trialEndsAt: null })));
-  await renderApp("/");
+  renderApp("/");
   expect(await screen.findByText(/2 trial days remaining/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Retry drive setup" })).not.toBeInTheDocument();
 });
@@ -170,7 +156,7 @@ it("home explains storage that is not ready yet and retries both endpoints", asy
     return json({ usedBytes: 0, quotaBytes: 500e9, state: "trial_active", writable: true });
   });
   vi.stubGlobal("fetch", fetcher);
-  await renderApp("/");
+  renderApp("/");
   expect(await screen.findByText(/seven-day trial has not started/)).toBeInTheDocument();
   ready = true;
   await userEvent.click(screen.getByRole("button", { name: "Retry drive setup" }));
@@ -181,13 +167,13 @@ it("home explains storage that is not ready yet and retries both endpoints", asy
 
 it("home says storage is being prepared when verified but not storage-ready, and explains expiry", async () => {
   vi.stubGlobal("fetch", homeFetch(access(ws({ storageReady: false, state: "expired", trialEndsAt: Date.now() - 1000, writable: false }))));
-  await renderApp("/");
+  renderApp("/");
   expect(await screen.findByText(/storage is still being prepared/)).toBeInTheDocument();
   expect(screen.getByText(/Your trial has ended\. Your files remain readable/)).toBeInTheDocument();
 });
 
 it("home still lists drives when /me/access fails", async () => {
   vi.stubGlobal("fetch", homeFetch(new Error("x")));
-  await renderApp("/");
+  renderApp("/");
   expect(await screen.findByRole("link", { name: "Space" })).toBeInTheDocument();
 });

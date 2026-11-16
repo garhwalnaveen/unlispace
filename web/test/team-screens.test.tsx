@@ -1,17 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
-import { App } from "../src/App";
-import { AuthStore } from "../src/auth";
-import { AuthContext } from "../src/context";
-import { json, session } from "./fixtures";
-const stores: AuthStore[] = [];
-afterEach(() => stores.splice(0).forEach(store => store.dispose()));
-function renderApp(path: string) {
-  const auth = new AuthStore(localStorage, null); stores.push(auth); auth.accept(session);
-  render(<MemoryRouter initialEntries={[path]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
-}
+import { expect, it, vi } from "vitest";
+import { json, renderApp } from "./fixtures";
 const member = { userId: "u_peer", email: "peer@example.com", displayName: null, role: "member", createdAt: 1 };
 const team = { name: "Studio", role: "owner", canManage: true, members: [member], invitations: [], seats: 3, teamAvailable: true };
 it("sends a recipient invitation, then displays pending invitations", async () => {

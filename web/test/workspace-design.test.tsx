@@ -1,19 +1,10 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
-import { App } from "../src/App";
-import { AuthStore } from "../src/auth";
-import { AuthContext } from "../src/context";
-import { drive, json, session } from "./fixtures";
+import { expect, it, vi } from "vitest";
+import { drive, json, renderApp } from "./fixtures";
 
-const stores: AuthStore[] = [];
-afterEach(() => stores.splice(0).forEach((store) => store.dispose()));
 const org = { id: "o_test", name: "Design studio", role: "owner", tier: "individual", trialEndsAt: null, drives: [drive] };
 function renderWorkspace(path = "/") {
-  const auth = new AuthStore(localStorage, null);
-  stores.push(auth);
-  auth.accept(session);
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     const parsed = new URL(url);
     if (parsed.pathname === "/orgs") return json({ orgs: [org] });
@@ -28,7 +19,7 @@ function renderWorkspace(path = "/") {
     if (parsed.pathname === `/drives/${drive.id}`) return json({ ...drive, access: "read" });
     return json({ usedBytes: 0, quotaBytes: 500e9 });
   }));
-  return render(<MemoryRouter initialEntries={[path]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
+  return renderApp(path);
 }
 
 it("groups persistent navigation and keeps the drive section current inside a drive", async () => {

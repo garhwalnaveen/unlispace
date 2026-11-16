@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { otpFromLog, uploadResult, watchHas, fixture } from './helpers.mjs';
 import { DaemonSocket, smbEnabled } from './daemon-socket.mjs';
-import { m3Checks } from './m3.mjs';
+import { s3GatewayChecks } from './s3-gateway.mjs';
 import { desktopChecks } from './desktop.mjs';
 import { nativeStressChecks } from './stress.mjs';
 import { parityChecks } from './parity.mjs';
@@ -763,7 +763,7 @@ try {
       await engineChecks();
       await smbChecks();
     } else console.log('Native checks skipped (E2E_API_ONLY=1)');
-    if (m3Enabled) await m3Checks({ root, work, api, endpoint, s3, drive, session, apiWorker, binary, cacheSandbox, wrangler, check, command, request, json, until, secrets });
+    if (m3Enabled) await s3GatewayChecks({ root, work, api, endpoint, s3, drive, session, apiWorker, binary, cacheSandbox, wrangler, check, command, request, json, until, secrets });
     else console.log('M3 phase disabled (E2E_M3=0)');
     if (m3Enabled && process.env.E2E_PARITY === '1') await parityChecks({root,api,endpoint,s3,apiWorker,check,request,json,until,secrets});
   }
