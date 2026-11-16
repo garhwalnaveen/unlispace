@@ -46,7 +46,6 @@ tokio.workspace = true
 bytes.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 getrandom = "=0.4.2"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 
@@ -61,9 +60,6 @@ cmac.workspace = true
 rc4.workspace = true
 aes-gcm.workspace = true
 ccm.workspace = true
-uuid.workspace = true
-binrw.workspace = true
-hex = "=0.4.3"
 tempfile = "=3.27.0"
 smb-server = { workspace = true, features = ["localfs"] }
 

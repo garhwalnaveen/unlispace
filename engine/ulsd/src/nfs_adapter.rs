@@ -6,11 +6,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use nfsserve::tcp::{NFSTcp, NFSTcpListener};
 use tokio::task::JoinHandle;
 
-use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAccess};
-use crate::nfs::{UlsFs, mount_args};
+use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAccess, check_drive};
+use crate::nfs::{UlsFs, mount_args, serve};
 use crate::protocol::ErrorBody;
 
 #[derive(Default)]
@@ -21,7 +20,7 @@ pub struct NfsAdapter {
 
 struct NfsHandle {
     mountpoint: PathBuf,
-    server: Mutex<Option<JoinHandle<()>>>,
+    server: Mutex<Option<JoinHandle<std::io::Result<()>>>>,
 }
 
 fn err(msg: impl Into<String>) -> MountError {
@@ -41,20 +40,10 @@ impl MountAdapter for NfsAdapter {
         if !md.is_dir() {
             return Err(err("mountpoint is not a directory"));
         }
-        // Fail early, and without leaking anything, if the drive or token is wrong.
-        req.client.drive_info(&req.drive_id).await.map_err(|e| match e {
-            uls_client::Error::NotFound { .. } => MountError(ErrorBody::new(crate::protocol::code::NO_SUCH_DRIVE, "no such drive")),
-            uls_client::Error::Unauthorized | uls_client::Error::Auth(_) => MountError(ErrorBody::new(crate::protocol::code::UNAUTHORIZED, "the data plane rejected the drive token")),
-            uls_client::Error::Transport(_) => MountError(ErrorBody::new(crate::protocol::code::OFFLINE, "cannot reach the data plane")),
-            _ => err("cannot open drive"),
-        })?;
+        check_drive(&req.client, &req.drive_id).await?;
 
         let fs = UlsFs::new(req.vfs, md.uid(), md.gid(), self.read_only);
-        let listener = NFSTcpListener::bind("127.0.0.1:0", fs).await.map_err(|_| err("cannot bind NFS server"))?;
-        let port = listener.get_listen_port();
-        let server = tokio::spawn(async move {
-            let _ = listener.handle_forever().await;
-        });
+        let (port, server) = serve(fs, 0).await.map_err(|_| err("cannot bind NFS server"))?;
 
         let out = tokio::process::Command::new("/sbin/mount_nfs")
             .args(mount_args(port, &mountpoint, self.read_only))

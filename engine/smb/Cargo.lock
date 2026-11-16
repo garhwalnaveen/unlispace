@@ -2462,13 +2462,11 @@ dependencies = [
  "aes",
  "aes-gcm",
  "async-trait",
- "binrw",
  "bytes",
  "cc",
  "ccm",
  "cmac",
  "getrandom 0.4.2",
- "hex",
  "hmac",
  "md-5",
  "md4",
@@ -2479,9 +2477,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

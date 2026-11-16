@@ -25,12 +25,11 @@ The current SMB error contract supports the requested NotFound, Exists,
 NotDirectory, IsDirectory, NotEmpty, NoSpace, Invalid, and I/O wire statuses.
 It cannot yet carry precise ReadOnly, Busy, or Stale statuses. Those currently
 return AccessDenied / I/O, respectively. `set_metadata` returns NotSupported
-because VFS has no corresponding setter. These are integration gaps, tracked in
-[NEEDS.md](NEEDS.md); this crate is not a completed acceptance gate yet.
+because VFS has no corresponding setter. These are known integration gaps.
 
 ## Build and run
 
-From `engine/smb`, after the shared dependency pins are aligned:
+From `engine/smb`:
 
 ```sh
 export CARGO_TARGET_DIR="$(cd ../target && pwd)"

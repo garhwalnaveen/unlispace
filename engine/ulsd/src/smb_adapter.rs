@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use uls_smb::{RunningServer, SmbBackend};
 use uls_vfs_backend::VfsBackend;
 
-use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAccess};
-use crate::protocol::{ErrorBody, code};
+use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAccess, check_drive};
+use crate::protocol::ErrorBody;
 
 pub struct SmbAdapter;
 
@@ -104,11 +104,7 @@ impl MountAdapter for SmbAdapter {
     }
 
     async fn mount(&self, req: MountRequest) -> Result<Arc<dyn MountHandle>, MountError> {
-        req.client.drive_info(&req.drive_id).await.map_err(|error| match error {
-            uls_client::Error::NotFound { .. } => MountError(ErrorBody::new(code::NO_SUCH_DRIVE, "no such drive")),
-            uls_client::Error::Unauthorized | uls_client::Error::Auth(_) => MountError(ErrorBody::new(code::UNAUTHORIZED, "cannot authorize drive")),
-            _ => MountError(ErrorBody::new(code::OFFLINE, "cannot reach the data plane")),
-        })?;
+        check_drive(&req.client, &req.drive_id).await?;
         let mountpoint = std::fs::canonicalize(req.mountpoint).map_err(|_| err("cannot open SMB mountpoint"))?;
         let backend: Arc<dyn SmbBackend> = Arc::new(VfsBackend::new(req.vfs));
         let server = uls_smb::serve(backend, false).await.map_err(|_| err("cannot start SMB server"))?;

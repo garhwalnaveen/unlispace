@@ -9,8 +9,7 @@ mod session;
 mod store;
 
 pub use error::AuthError;
-pub use jwt::{Claims, claims_unverified};
-pub use pkce::{DesktopFlow, challenge, random_token};
+pub use pkce::DesktopFlow;
 pub use session::{
     Access, AuthEvent, DriveSummary, DriveToken, DriveTokenSource, Org, Session, SessionTokens, TokenProvider, User,
 };

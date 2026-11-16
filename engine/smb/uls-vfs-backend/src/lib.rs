@@ -101,7 +101,7 @@ fn error(e: uls_vfs::FsError) -> FsError {
         uls_vfs::FsError::NoSpace => FsError::NoSpace,
         uls_vfs::FsError::Invalid => FsError::Invalid,
         uls_vfs::FsError::Io(message) => FsError::Io(message),
-        // shortcut: the SMB error contract cannot carry these statuses; see NEEDS.md.
+        // shortcut: the SMB error contract cannot carry these statuses; see README.md.
         uls_vfs::FsError::ReadOnly => FsError::AccessDenied,
         uls_vfs::FsError::Busy => FsError::Io("VFS busy".into()),
         uls_vfs::FsError::Stale => FsError::Io("VFS stale version".into()),

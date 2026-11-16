@@ -443,6 +443,13 @@ pub fn mount_args(port: u16, mountpoint: &Path, read_only: bool) -> Vec<String> 
     ]
 }
 
+/// Bind the loopback NFS server (`port` 0 picks a free one) and serve it in the background.
+pub async fn serve(fs: UlsFs, port: u16) -> std::io::Result<(u16, tokio::task::JoinHandle<std::io::Result<()>>)> {
+    let listener = NFSTcpListener::bind(&format!("127.0.0.1:{port}"), fs).await?;
+    let port = listener.get_listen_port();
+    Ok((port, tokio::spawn(async move { listener.handle_forever().await })))
+}
+
 pub async fn mount(
     client: Client,
     drive: String,
@@ -468,9 +475,7 @@ pub async fn mount(
         .map_err(|e| anyhow::anyhow!("cannot open the write journal in {}: {e}", state_dir.display()))?;
     let events = spawn_remote_watch(client, drive.clone(), vfs.clone());
     let fs = UlsFs::new(vfs.clone(), md.uid(), md.gid(), read_only);
-    let listener = NFSTcpListener::bind(&format!("127.0.0.1:{port}"), fs).await.context("bind NFS server")?;
-    let port = listener.get_listen_port();
-    let server = tokio::spawn(async move { listener.handle_forever().await });
+    let (port, server) = serve(fs, port).await.context("bind NFS server")?;
 
     let args = mount_args(port, &mountpoint, read_only);
     let printable = format!("mount_nfs {}", args.iter().map(|a| shell_word(a)).collect::<Vec<_>>().join(" "));
