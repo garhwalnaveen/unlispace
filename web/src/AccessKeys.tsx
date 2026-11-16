@@ -71,8 +71,8 @@ export function AccessKeys() {
     <div className="settings-layout">
       <section className="panel" aria-labelledby="new-key-title"><h2 id="new-key-title">New access key</h2>
         {orgs.loading ? <Loading /> : <form className="stack" onSubmit={create}>
-          <label htmlFor="key-org">Organization</label><NativeSelect id="key-org" value={orgId} required disabled={busy || Boolean(secret)} onChange={(event) => { setOrgId(event.target.value); setDrives([]); setAllDrives(false); setAccess("read"); }}>
-            <option value="">Choose an organization</option>{orgs.data?.orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          <label htmlFor="key-org">Workspace</label><NativeSelect id="key-org" value={orgId} required disabled={busy || Boolean(secret)} onChange={(event) => { setOrgId(event.target.value); setDrives([]); setAllDrives(false); setAccess("read"); }}>
+            <option value="">Choose a workspace</option>{orgs.data?.orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </NativeSelect>
           <label htmlFor="key-label">Label</label><Input id="key-label" required maxLength={100} value={label} onChange={(event) => setLabel(event.target.value)} disabled={busy || Boolean(secret)} placeholder="For example, laptop backup" />
           <label htmlFor="key-access">Access level</label><NativeSelect id="key-access" value={access} disabled={busy || Boolean(secret)} onChange={(event) => setAccess(event.target.value as AccessKey["access"])}>

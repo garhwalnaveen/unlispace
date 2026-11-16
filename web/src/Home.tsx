@@ -36,8 +36,8 @@ export function Home() {
   return (
     <>
       <header className="drive-summary">
-        <h1 className="sr-only">Your drives</h1>
-        <p><span>{driveCount ?? "—"}</span> {driveCount === 1 ? "drive" : "drives"}</p>
+        <h1>Your drives</h1>
+        {driveCount !== undefined && <p>{driveCount} {driveCount === 1 ? "drive" : "drives"}</p>}
       </header>
       {fork && <ForkNotice drive={fork} />}
       <ErrorNotice error={error} />
@@ -140,7 +140,6 @@ export function Home() {
                   <span className="empty-drive-icon"><Icon name="drive" /></span>
                   <h3>No drives yet</h3>
                   {canManage ? <Button variant="default" onClick={() => setAction({ kind: "create", org })}><Plus size={16} />New drive</Button> : <p className="muted">A workspace owner or admin can create a drive.</p>}
-                  <Button asChild><Link to="/overview">Explore Orbit</Link></Button>
                 </div>
               ) : !visibleDrives.length && (
                 <div className="drive-empty"><Search size={24} className="muted" aria-hidden="true" /><h3>No matching drives</h3><Button onClick={() => { setQuery(""); setFilter("All"); }}>Clear filters</Button></div>

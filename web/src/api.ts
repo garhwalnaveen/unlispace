@@ -287,7 +287,7 @@ export function errorMessage(error: unknown): string {
       drive_has_forks: "This drive has live forks. Delete its forks before permanently deleting this drive.",
       fork_depth_exceeded: "This drive has reached the maximum fork depth of 8.",
       slow_down: "The drive is busy. Please try forking again shortly.",
-      over_quota: "Your organization is over its storage quota. Writes are paused; existing files remain readable. Delete data or add storage in Billing.",
+      over_quota: "Your workspace is over its storage quota. Writes are paused; existing files remain readable. Delete data or add storage in Billing.",
       ai_quota_exceeded: "You have used today's free AI allowance. It resets at midnight UTC.",
       plan_limit:
         "Your Individual plan includes one drive. Additional drives require a Teams plan.",
@@ -299,7 +299,7 @@ export function errorMessage(error: unknown): string {
       not_configured:
         "Google sign-in is not configured on this server. Please use email.",
       precondition_failed: "This file changed while you were uploading or restoring. Your change was not committed. Refresh and try again.",
-      quota_exceeded: "This organization has reached its storage quota. Open Billing to add storage.",
+      quota_exceeded: "This workspace has reached its storage quota. Open Billing to add storage.",
       forbidden: "You do not have permission to perform this action.",
       keys_not_configured: "Access keys are not configured on this server yet.",
       checkout_pending: "A checkout is already in progress. Resume the same plan, or wait for its payment status to be confirmed.",
@@ -314,7 +314,7 @@ export function errorMessage(error: unknown): string {
       email_unavailable: "The email could not be sent. Please try again later.",
       no_billing_customer: "A billing portal will be available after your first checkout.",
       subscription_exists: "You already have a subscription. Use Manage subscription to change it.",
-      seats_below_members: "Choose enough seats for all current organization members.",
+      seats_below_members: "Choose enough seats for all current workspace members.",
       no_such_path: "This item could not be found. It may have moved.",
       no_such_drive: "This drive is no longer available.",
     };

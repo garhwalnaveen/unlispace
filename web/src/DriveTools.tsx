@@ -52,7 +52,7 @@ export function DriveDialog({
       }
       onDone();
     } catch (reason) {
-      setError(action.kind === "fork" && reason instanceof ApiError && reason.code === "plan_limit" ? "Your organization has reached its limit of 50 live forks. Delete a fork before creating another." : reason);
+      setError(action.kind === "fork" && reason instanceof ApiError && reason.code === "plan_limit" ? "Your workspace has reached its limit of 50 live forks. Delete a fork before creating another." : reason);
     } finally {
       setBusy(false);
     }

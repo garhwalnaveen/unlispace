@@ -18,7 +18,7 @@ it("creates a scoped key, reveals and copies its secret once, then confirms revo
   const user = userEvent.setup();
   renderApp("/settings/access-keys");
   await screen.findByText("No access keys yet.");
-  await user.selectOptions(screen.getByLabelText("Organization"), org.id);
+  await user.selectOptions(screen.getByLabelText("Workspace"), org.id);
   fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Backup" } });
   await user.selectOptions(screen.getByLabelText("Access level"), "write");
   expect(screen.getByRole("button", { name: "Create access key" })).toBeDisabled();
@@ -46,7 +46,7 @@ it("shows key errors and allows selecting all accessible drives", async () => {
   renderApp("/settings/access-keys");
   const user = userEvent.setup();
   await screen.findByText("No access keys yet.");
-  await user.selectOptions(screen.getByLabelText("Organization"), org.id);
+  await user.selectOptions(screen.getByLabelText("Workspace"), org.id);
   fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Tools" } });
   await user.click(screen.getByLabelText(/All accessible drives, including future drives/));
   await user.click(screen.getByRole("button", { name: "Create access key" }));

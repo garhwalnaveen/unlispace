@@ -47,7 +47,7 @@ it("forks with name and alias and shows lineage, fork point and drive usage on h
   });
   vi.stubGlobal("fetch", fetcher); renderApp(); const user = userEvent.setup();
   expect(await screen.findByText(/Last measured drive bytes: 1 KiB/)).toBeInTheDocument();
-  expect(screen.queryByRole("meter", { name: "Organization storage usage" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("meter", { name: "Workspace storage usage" })).not.toBeInTheDocument();
   await user.click(screen.getByText("Drive options"));
   await user.click(screen.getByRole("button", { name: "Fork Space" }));
   await user.type(screen.getByLabelText("Drive name"), "Branch");
