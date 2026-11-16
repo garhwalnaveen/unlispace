@@ -815,7 +815,7 @@ impl SmbServer {
         .await
     }
 
-    #[cfg(any(test, fuzzing))]
+    #[cfg(test)]
     pub(crate) fn state(&self) -> Arc<ServerState> {
         self.state.clone()
     }

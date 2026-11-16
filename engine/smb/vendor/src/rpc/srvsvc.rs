@@ -165,7 +165,7 @@ pub(crate) async fn find_share(
 }
 
 /// A fixed server and share list, for answering without a server.
-#[cfg(any(test, fuzzing))]
+#[cfg(test)]
 pub(crate) struct ShareView {
     pub server_name: String,
     pub shares: Vec<ListedShare>,
@@ -173,7 +173,7 @@ pub(crate) struct ShareView {
 
 /// [`serve`] against `view`: the caller sees its shares, and GetInfo finds
 /// them by name.
-#[cfg(any(test, fuzzing))]
+#[cfg(test)]
 pub(crate) fn call(opnum: u16, stub: &[u8], view: &ShareView) -> Result<Vec<u8>, Fault> {
     Ok(match decode(opnum, stub)? {
         Request::ShareEnum(request) => request.answer(&view.shares),
