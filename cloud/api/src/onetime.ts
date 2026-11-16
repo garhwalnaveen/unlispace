@@ -7,8 +7,6 @@ export async function putOneTime(ctx: Ctx, kind: OneTimeKind, ttlMs: number, use
 	await ctx.env.DB.prepare("INSERT INTO one_time_codes(code_hash, kind, user_id, payload, expires_at) VALUES(?,?,?,?,?)")
 		.bind(await sha256Hex(kind + ":" + token), kind, userId, JSON.stringify(payload ?? null), ctx.now + ttlMs)
 		.run();
-	// Opportunistic cleanup keeps the table small without a cron.
-	await ctx.env.DB.prepare("DELETE FROM one_time_codes WHERE expires_at < ?").bind(ctx.now - 3_600_000).run();
 	return token;
 }
 

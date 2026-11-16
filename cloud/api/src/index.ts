@@ -1,4 +1,5 @@
 import { meterUsage } from "./entitlements";
+import { pruneExpired } from "./maintenance";
 import { rpcContext } from "./control-plane";
 export { ControlPlane } from "./control-plane";
 import type { AppEnv } from "./env";
@@ -192,6 +193,11 @@ export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promis
 
 export default {
 	fetch: (req: Request, env: AppEnv): Promise<Response> => handle(req, env),
- scheduled: async (_event: ScheduledController, env: AppEnv) => meterUsage(rpcContext(env)),
+	scheduled: async (_event: ScheduledController, env: AppEnv) => {
+		const ctx = rpcContext(env);
+		const results = await Promise.allSettled([meterUsage(ctx), pruneExpired(ctx)]);
+		const failure = results.find(r => r.status === "rejected");
+		if (failure) throw failure.reason;
+	},
 } satisfies ExportedHandler<AppEnv>;
 

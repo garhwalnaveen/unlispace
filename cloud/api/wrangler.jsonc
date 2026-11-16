@@ -3,7 +3,7 @@
   "name": "orbit-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "triggers": { "crons": ["17 * * * *"] },
+  "triggers": { "crons": ["*/15 * * * *"] },
   "observability": { "enabled": true },
   "dev": { "ip": "127.0.0.1", "port": 8788 },
   // Local dev values. Production overrides these (see README). Secrets never go here.
@@ -33,7 +33,7 @@
       "name": "unlispace-api",
       "secrets": { "required": ["ULS_JWT_PRIVATE_JWK", "ULS_JWT_PUBLIC_JWKS"] },
       "workers_dev": true,
-      "triggers": { "crons": ["17 * * * *"] },
+      "triggers": { "crons": ["*/15 * * * *"] },
       "preview_urls": false,
       "d1_databases": [
         {
