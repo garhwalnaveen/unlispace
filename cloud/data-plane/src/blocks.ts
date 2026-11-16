@@ -1,3 +1,4 @@
+import { toHex } from "../../shared/bytes";
 import { DRIVE_ID_RE, HASH_RE } from "./validate";
 import type { Result } from "./types";
 const err = (status: number, error: string): Response => Response.json({ error }, { status });
@@ -54,7 +55,7 @@ export async function signBlocks(origin: string, drive: string, shards: { h: str
 	const blockUrls: Record<string, string> = {};
 	for (const { h } of shards) {
 		if (blockUrls[h]) continue;
-		const sig = [...new Uint8Array(await crypto.subtle.sign("HMAC", key, payload(lineage, h, drive, exp)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+		const sig = toHex(await crypto.subtle.sign("HMAC", key, payload(lineage, h, drive, exp)));
 		blockUrls[h] = `${origin}/_blocks/${lineage}/${h}?d=${drive}&exp=${exp}&sig=${sig}`;
 	}
 	return { blockUrls, blockUrlsExpireAt: exp };

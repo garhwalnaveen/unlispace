@@ -1,3 +1,4 @@
+import { sha256Hex } from "../../shared/bytes";
 export const INLINE_MANIFEST_BYTES = 256 * 1024;
 export const MAX_STREAM_COMMIT_BYTES = 8 * 1024 * 1024;
 const enc = new TextEncoder();
@@ -40,12 +41,17 @@ export function manifestShards(value: unknown): [string, number][] {
   return value as [string, number][];
 }
 
+/** Write `data` under its SHA-256 (R2 verifies the checksum; an existing object is left as is). Returns the hex hash. */
+async function putContentAddressed(bucket: Pick<R2Bucket, "put">, lineage: string, data: Uint8Array): Promise<string> {
+	const hash = await sha256Hex(data);
+	await bucket.put(`manifests/${lineage}/${hash}`, data, { sha256: hash, onlyIf: { etagDoesNotMatch: "*" } });
+	return hash;
+}
+
 export async function storeMetadata(bucket: Pick<R2Bucket, "put">, lineage: string, value: unknown): Promise<string> {
   const data = enc.encode(JSON.stringify(value));
   if (data.length > INLINE_MANIFEST_BYTES) throw new Error("metadata page exceeds size limit");
-  const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", data))].map(b => b.toString(16).padStart(2, "0")).join("");
-  await bucket.put(`manifests/${lineage}/${hash}`, data, {sha256: hash, onlyIf: {etagDoesNotMatch: "*"}});
-  return hash;
+  return putContentAddressed(bucket, lineage, data);
 }
 
 /** Each yielded page bounds metadata memory independently of total object size. */
@@ -94,10 +100,7 @@ export async function readManifestPage(bucket: Pick<R2Bucket, "get">, lineage: s
 export async function storeManifest(bucket: R2Bucket, lineage: string, manifest: string): Promise<string> {
 	const data = enc.encode(manifest);
 	if (data.byteLength <= INLINE_MANIFEST_BYTES) return manifest;
-	const digest = await crypto.subtle.digest("SHA-256", data);
-	const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-	await bucket.put(`manifests/${lineage}/${hash}`, data, { sha256: hash, onlyIf: { etagDoesNotMatch: "*" } });
-	return "r2:" + hash;
+	return "r2:" + await putContentAddressed(bucket, lineage, data);
 }
 
 export async function loadMetadata(bucket: Pick<R2Bucket, "get">, lineage: string, ref: string): Promise<unknown> {
@@ -106,7 +109,7 @@ export async function loadMetadata(bucket: Pick<R2Bucket, "get">, lineage: strin
 	if (!object) throw new Error("retained manifest missing");
 	if (object.size > MAX_STREAM_COMMIT_BYTES) throw new Error("manifest exceeds size limit");
 	const data = await object.arrayBuffer();
-	const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", data))].map((b) => b.toString(16).padStart(2, "0")).join("");
+	const hash = await sha256Hex(data);
 	if (hash !== ref.slice(3)) throw new Error("manifest checksum mismatch");
 	return JSON.parse(new TextDecoder().decode(data));
 }

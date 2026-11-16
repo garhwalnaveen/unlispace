@@ -7,6 +7,8 @@ import { createKey, recordAccessKeyUse, resolveAccessKey, type PublicKey } from 
 import * as R from "./resources";
 import { configureStorageQuota, entitlements, storageUsage } from "./entitlements";
 import { mintDriveToken } from "./session";
+import { ACCESS_RANK as rank, type Access } from "../../shared/access";
+import type { ControlPlane as ControlPlaneContract } from "../../shared/control-plane-contract";
 
 export function rpcContext(env: AppEnv): Ctx {
 	const req = new Request("https://internal/");
@@ -15,9 +17,8 @@ export function rpcContext(env: AppEnv): Ctx {
 }
 type Key = NonNullable<Awaited<ReturnType<ControlPlane["resolveKey"]>>>;
 type Options = Record<string, unknown>;
-const rank = { read: 0, write: 1, admin: 2 };
 
-export class ControlPlane extends WorkerEntrypoint<AppEnv> {
+export class ControlPlane extends WorkerEntrypoint<AppEnv> implements ControlPlaneContract {
 	#context() { return rpcContext(this.env); }
 	async resolveKey(id: string) {
 		try {
@@ -105,7 +106,7 @@ export class ControlPlane extends WorkerEntrypoint<AppEnv> {
 		const j = await R.driveJson(ctx, d);
 		return { driveId: d.id, alias: d.alias, displayName: d.name, createdAt: new Date(d.created_at).toISOString(), forkOf: j.forkOf ? { driveId: j.forkOf.driveId, forkPoint: new Date(j.forkOf.forkPoint!).toISOString() } : null, forks: j.forks, usageBytes: j.usageBytes };
 	}
-	async mintChildKey(id: string, opts: { drives: string[]; access?: "read" | "write" | "admin"; label?: string; workspaceId?: string; orgId?: string }) {
+	async mintChildKey(id: string, opts: { drives: string[]; access?: Access; label?: string; workspaceId?: string; orgId?: string }) {
 		const k = await this.#key(id), ctx = this.#context();
 		if ((opts.workspaceId !== undefined && opts.workspaceId !== k.orgId) || (opts.orgId !== undefined && opts.orgId !== k.orgId)) throw new HttpError(403, "access_denied");
 		const access = opts.access === undefined ? k.access : opts.access;

@@ -1,6 +1,7 @@
+import { sha256Hex } from "../../shared/bytes";
 import { HISTORY_SCHEMA, migrateHistory } from "./history";
 import { DurableObject } from "cloudflare:workers";
-import { createUlid } from "./ulid";
+import { createUlid } from "../../shared/ulid";
 import { LIVE_TREE, migrateNodes, migrateSearch, NodeTree, type NodeRow } from "./nodes";
 import {
 	fail,
@@ -578,7 +579,7 @@ class DriveStore {
             catch { return fail(400, "bad_manifest"); }
             const data = new TextEncoder().encode(JSON.stringify(parsed));
             if (data.length > INLINE_MANIFEST_BYTES) return fail(413, "too_large");
-            const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", data))].map(n=>n.toString(16).padStart(2,"0")).join("");
+            const hash = await sha256Hex(data);
             const key = `manifests/${this.lineage()}/${hash}`;
             const quota = org ? quotaFor(this.env, org) : null;
             if (quota && !await quota.reserve(key,data.length)) return fail(403, "over_quota");
@@ -601,7 +602,7 @@ class DriveStore {
 	private async commitExclusive(ops: NormOp[], confirmed: [string, number][], actor: string, requestId?: string, org?: string): Promise<Result<CommitResponse>> {
 		if (!this.info()) return this.noDrive();
         if (!await this.ensureReferences()) return fail(503, "references_initializing");
-		const fingerprint = requestId ? [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(ops.map(op => (op.op === "put" && op.generatedMtime) ? {...op, mtimeMs: null} : op)))))].map(n => n.toString(16).padStart(2,"0")).join("") : "";
+		const fingerprint = requestId ? await sha256Hex(JSON.stringify(ops.map(op => (op.op === "put" && op.generatedMtime) ? {...op, mtimeMs: null} : op))) : "";
 		if (requestId) {
 			const previous = this.sql.exec<{fingerprint: string; response: string | null}>("SELECT fingerprint,response FROM commit_receipts WHERE actor=? AND id=?", "drive", requestId).toArray()[0];
 			if (previous) return previous.fingerprint === fingerprint && previous.response ? ok(JSON.parse(previous.response) as CommitResponse) : fail(409, "idempotency_conflict");
@@ -647,7 +648,7 @@ class DriveStore {
                 if (!org || data.byteLength <= INLINE_MANIFEST_BYTES) {
                     op[field] = await storeManifest(this.env.SHARDS, lineage, text); continue;
                 }
-                const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", data))].map(n => n.toString(16).padStart(2,"0")).join("");
+                const hash = await sha256Hex(data);
                 const key = `manifests/${lineage}/${hash}`, quota = quotaFor(this.env, org);
                 if (!await quota.reserve(key, data.byteLength)) return fail(403, "over_quota");
                 let stored = false;

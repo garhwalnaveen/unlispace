@@ -14,10 +14,18 @@ import * as B from "./billing";
 import * as T from "./teams";
 import * as AI from "./ai";
 import { authenticate, createSession, logout, refreshSession } from "./session";
-import { sha256B64url, timingSafeEqual } from "./util";
+import { B64URL_RE as B64URL, PKCE_VERIFIER_RE, sha256B64url, timingSafeEqual, TOKEN43_RE } from "./util";
 import { findOrCreateUser } from "./users";
 
-const B64URL = /^[A-Za-z0-9_-]{16,256}$/;
+/** Consume a one-time PKCE code and return its user, or throw `error` (400). */
+async function exchangePkceCode<P>(ctx: Ctx, kind: "handoff" | "desktop", code: string, verifier: string, challengeOf: (p: P) => string | undefined, error: string) {
+	const row = await takeOneTime<P>(ctx, kind, code);
+	const challenge = row ? challengeOf(row.payload) : undefined;
+	if (!row?.userId || !challenge || !timingSafeEqual(await sha256B64url(verifier), challenge)) throw new HttpError(400, error);
+	const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.userId).first<{ id: string; email: string }>();
+	if (!user) throw new HttpError(400, error);
+	return { user, payload: row.payload };
+}
 
 async function route(ctx: Ctx): Promise<Response> {
 	const { req, url } = ctx;
@@ -64,19 +72,16 @@ async function route(ctx: Ctx): Promise<Response> {
 				const body = await readJson(req);
 				const h = str(body.handoff, 256);
 				const verifier = str(body.webCodeVerifier, 128);
-				if (!verifier || !/^[A-Za-z0-9_-]{43,128}$/.test(verifier)) throw new HttpError(400, "invalid_handoff");
-				const row = h ? await takeOneTime<{ created: boolean; webChallenge: string }>(ctx, "handoff", h) : null;
-				if (!row?.userId || !row.payload.webChallenge || !timingSafeEqual(await sha256B64url(verifier), row.payload.webChallenge)) throw new HttpError(400, "invalid_handoff");
-				const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.userId).first<{ id: string; email: string }>();
-				if (!user) throw new HttpError(400, "invalid_handoff");
-				return json(await createSession(ctx, user, !!row.payload?.created));
+				if (!verifier || !PKCE_VERIFIER_RE.test(verifier) || !h) throw new HttpError(400, "invalid_handoff");
+				const { user, payload } = await exchangePkceCode<{ created: boolean; webChallenge: string }>(ctx, "handoff", h, verifier, (p) => p.webChallenge, "invalid_handoff");
+				return json(await createSession(ctx, user, !!payload?.created));
 			}
 			case "POST /auth/web-handoff": {
 				// A signed-in client (the desktop app) opens the web app as the same user. The web side
 				// proves possession of the verifier when it exchanges the handoff at /auth/handoff/exchange.
 				const a = await authenticate(ctx);
 				const ch = str((await readJson(req)).webChallenge, 128);
-				if (!ch || !/^[A-Za-z0-9_-]{43}$/.test(ch)) throw new HttpError(400, "bad_request", "webChallenge must be a base64url SHA-256 PKCE challenge");
+				if (!ch || !TOKEN43_RE.test(ch)) throw new HttpError(400, "bad_request", "webChallenge must be a base64url SHA-256 PKCE challenge");
 				return json({ handoff: await putOneTime(ctx, "handoff", 60_000, a.userId, { created: false, webChallenge: ch }) });
 			}
 			case "POST /auth/refresh": {
@@ -110,10 +115,7 @@ async function route(ctx: Ctx): Promise<Response> {
 				const verifier = str(body.codeVerifier, 256);
 				if (!code || !verifier) throw new HttpError(400, "invalid_grant");
 				// The code is consumed before the PKCE check, so a wrong verifier burns it.
-				const row = await takeOneTime<{ codeChallenge: string }>(ctx, "desktop", code);
-				if (!row || !row.userId || !timingSafeEqual(await sha256B64url(verifier), row.payload.codeChallenge)) throw new HttpError(400, "invalid_grant");
-				const user = await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(row.userId).first<{ id: string; email: string }>();
-				if (!user) throw new HttpError(400, "invalid_grant");
+				const { user } = await exchangePkceCode<{ codeChallenge: string }>(ctx, "desktop", code, verifier, (p) => p.codeChallenge, "invalid_grant");
 				return json(await createSession(ctx, user, false));
 			}
 		}
@@ -184,7 +186,7 @@ export async function handle(req: Request, env: AppEnv, deps: Deps = {}): Promis
 			res = json(errBody("internal"), 500);
 		}
 	}
-	if (res.status !== 101 && Object.keys(cors).length) {
+	if (Object.keys(cors).length) {
 		res = new Response(res.body, res);
 		for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
 	}

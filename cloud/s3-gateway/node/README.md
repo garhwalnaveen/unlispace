@@ -32,7 +32,7 @@ Backend origins require HTTPS except loopback HTTP. Redirects are refused. Use a
 a customer's S3 key. The bridge can resolve derived key secrets and update multipart state, so restrict access to the ingress
 host and keep its secret outside images, source control and logs.
 
-For a container, build with `docker build -f node/Dockerfile .` from `cloud/s3-gateway`. The container runs as an unprivileged
+For a container, build with `docker build -f s3-gateway/node/Dockerfile .` from `cloud/` (the image needs `cloud/shared`). The container runs as an unprivileged
 user and contains only the bundled server. Supply secrets at runtime. A TLS reverse proxy must preserve the original `Host`,
 disable request buffering and permit the intended body size. For nginx, the relevant location settings are:
 
