@@ -1,19 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { act, fireEvent, screen } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
 import { Desktop } from "../src/AuthPages";
-import { AuthStore } from "../src/auth";
-import { AuthContext } from "../src/context";
-import { deferred, drive, json, session } from "./fixtures";
+import { deferred, drive, json, renderWithAuth } from "./fixtures";
 
-const stores: AuthStore[] = [];
-afterEach(() => stores.splice(0).forEach(store => store.dispose()));
 function renderDesktop() {
-  const auth = new AuthStore(localStorage, null);
-  stores.push(auth); auth.accept(session);
-  return render(<MemoryRouter initialEntries={[`/desktop?state=original&code_challenge=${"a".repeat(43)}`]}>
-    <AuthContext value={auth}><Desktop /></AuthContext>
-  </MemoryRouter>);
+  return renderWithAuth(<Desktop />, `/desktop?state=original&code_challenge=${"a".repeat(43)}`);
 }
 const orgs = (ready: boolean) => ({ orgs: [{ drives: [{ ...drive, status: ready ? "ready" : "provisioning_failed" }] }] });
 

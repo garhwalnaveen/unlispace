@@ -2,16 +2,16 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { NativeSelect } from "./components/ui/native-select";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "./context";
 import { ErrorNotice, Loading, Modal, formatDate, useLoad } from "./ui";
-import { teams, type Member, type Role } from "./teams";
+import type { Member, Role } from "./teams";
 
 export function TeamPage() {
   const { id = "" } = useParams();
   const { auth, user } = useAuth();
-  const api = useMemo(() => teams(auth.api), [auth.api]);
+  const api = auth.api.teams;
   const load = useCallback(() => api.members(id), [api, id]);
   const { data, loading, error, reload } = useLoad(load);
   const [email, setEmail] = useState("");
@@ -64,5 +64,5 @@ export function AcceptInvitation() {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
-  return <section className="panel"><h1>Join a workspace</h1><p>You are signed in as <strong>{user?.email}</strong>. Accept only if this is the email address that received the invitation.</p><p>Joining gives the workspace access to your email address. Files you add to its drives belong to that workspace.</p><ErrorNotice error={error} /><div className="actions"><Button variant="default" disabled={busy} onClick={() => { setBusy(true); setError(undefined); void teams(auth.api).accept(token).then(result => navigate(`/orgs/${encodeURIComponent(result.orgId)}/team`)).catch(setError).finally(() => setBusy(false)); }}>{busy ? "Joining…" : "Accept invitation"}</Button><Link to="/">Back to drives</Link></div><p className="muted small">If this is the wrong account, <Link to="/settings">sign out in Account</Link> and reopen the invitation.</p></section>;
+  return <section className="panel"><h1>Join a workspace</h1><p>You are signed in as <strong>{user?.email}</strong>. Accept only if this is the email address that received the invitation.</p><p>Joining gives the workspace access to your email address. Files you add to its drives belong to that workspace.</p><ErrorNotice error={error} /><div className="actions"><Button variant="default" disabled={busy} onClick={() => { setBusy(true); setError(undefined); void auth.api.teams.accept(token).then(result => navigate(`/orgs/${encodeURIComponent(result.orgId)}/team`)).catch(setError).finally(() => setBusy(false)); }}>{busy ? "Joining…" : "Accept invitation"}</Button><Link to="/">Back to drives</Link></div><p className="muted small">If this is the wrong account, <Link to="/settings">sign out in Account</Link> and reopen the invitation.</p></section>;
 }

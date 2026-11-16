@@ -384,7 +384,7 @@ export function Desktop() {
   );
 }
 /** Session storage key the desktop app's WebView sets before load; never put in a URL. */
-export const EMBED_VERIFIER_KEY = "orbit.embedVerifier";
+const EMBED_VERIFIER_KEY = "orbit.embedVerifier";
 /**
  * Entry point for the desktop app's embedded pages. The app passes a one-time handoff in the
  * fragment and injects its PKCE verifier into session storage, then this signs in as that user.

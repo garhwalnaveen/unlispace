@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { constants } from 'node:fs';
 import { access, readFile, writeFile, readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { otpFromLog } from './helpers.mjs';
+import { s3Signer } from './s3-sign.mjs';
 
 export function patch(offset, bytes) {
   const header = Buffer.alloc(28);
@@ -22,17 +23,10 @@ async function objectFiles(path) {
   return files.sort();
 }
 
-export async function m3Checks(h) {
+export async function s3GatewayChecks(h) {
   const { root, work, api, endpoint, s3, drive, apiWorker, binary, cacheSandbox, wrangler, check, command, request, json, until, secrets } = h;
   const require = createRequire(join(root, 'cloud/s3-gateway/package.json'));
-  const { SignatureV4 } = require('@smithy/signature-v4');
-  const signerRequire = createRequire(require.resolve('@smithy/signature-v4'));
-  const { HttpRequest } = signerRequire('@smithy/core/protocols');
-  class sha256 {
-    constructor(secret) { this.hash = secret ? createHmac('sha256', secret) : createHash('sha256'); }
-    update(bytes) { this.hash.update(bytes); return this; }
-    async digest() { return this.hash.digest(); }
-  }
+  const sign = s3Signer(root);
   const sdk = require('@aws-sdk/client-s3');
   let session, parent, child, org, forkId, nestedId, initialVersion;
   const bucket = 'e2e-m3-parent', fork = 'e2e-m3-fork', nested = 'e2e-m3-nested';
@@ -49,11 +43,9 @@ export async function m3Checks(h) {
     assert(key, 'requires M3 key');
     const url = new URL(s3 + path);
     assert.equal(url.origin, s3);
-    const signer = new SignatureV4({ credentials: credentials(key), region: 'auto', service: 's3', sha256, uriEscapePath: false });
-    const query = Object.fromEntries(url.searchParams);
-    const req = await signer.sign(new HttpRequest({ protocol: url.protocol, hostname: url.hostname, port: Number(url.port), path: url.pathname, query, method,
-      headers: { host: url.host, 'x-amz-content-sha256': hash ?? createHash('sha256').update(body).digest('hex'), ...(!['GET', 'HEAD'].includes(method) ? { 'content-length': String(body.length) } : {}), ...headers }, body }));
-    const response = await fetch(url, { method, headers: req.headers, body: ['GET', 'HEAD'].includes(method) ? undefined : body, signal: AbortSignal.timeout(20000), redirect: 'error' });
+    const signedHeaders = await sign(url, { method, key, body,
+      headers: { 'x-amz-content-sha256': hash ?? createHash('sha256').update(body).digest('hex'), ...(!['GET', 'HEAD'].includes(method) ? { 'content-length': String(body.length) } : {}), ...headers } });
+    const response = await fetch(url, { method, headers: signedHeaders, body: ['GET', 'HEAD'].includes(method) ? undefined : body, signal: AbortSignal.timeout(20000), redirect: 'error' });
     const bytes = Buffer.from(await response.arrayBuffer());
     assert.equal(response.headers.get('x-uls-protocol'), '1');
     return { status: response.status, bytes, headers: response.headers, text: bytes.toString() };

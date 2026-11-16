@@ -1,16 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthStore, REFRESH_KEY } from "../src/auth";
-import { deferred, json, rotated, session } from "./fixtures";
+import { describe, expect, it, vi } from "vitest";
+import { REFRESH_KEY } from "../src/auth";
+import { authStore, deferred, json, rotated, session } from "./fixtures";
 
-const stores: AuthStore[] = [];
-function store(channel: BroadcastChannel | null = null) {
-  const auth = new AuthStore(localStorage, channel);
-  stores.push(auth);
-  return auth;
-}
-afterEach(() => {
-  stores.splice(0).forEach((auth) => auth.dispose());
-});
+const store = (channel: BroadcastChannel | null = null) => authStore({ signedIn: false, channel });
 
 class TestChannel extends EventTarget implements BroadcastChannel {
   static peers = new Set<TestChannel>();

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { patch } from './m3.mjs';
+import { patch } from './s3-gateway.mjs';
 
 test('S3SP fixture encodes one big-endian edit without changing its bytes', () => {
   const bytes = Buffer.from([0, 255, 17]);

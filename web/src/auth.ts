@@ -4,6 +4,7 @@ import {
   ApiError,
   publicPost,
   readResponse,
+  retryOn401,
   errorMessage,
   type Session,
   type User,
@@ -177,12 +178,7 @@ export class AuthStore {
           Authorization: `Bearer ${this.memory?.accessToken || ""}`,
         },
       });
-    let response = await send();
-    if (response.status === 401) {
-      await this.refresh(rejectedToken);
-      response = await send();
-    }
-    return response;
+    return retryOn401(send, () => this.refresh(rejectedToken));
   }
   async logout() {
     // Logout and rotation share a lock so logout always revokes the latest refresh token.

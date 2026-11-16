@@ -133,9 +133,7 @@ No build step or additional dependency is needed. Syntax checks are the lint gat
 
 ```sh
 bash -n tests/e2e/run.sh
-node --check tests/e2e/harness.mjs tests/e2e/helpers.mjs tests/e2e/daemon-socket.mjs \
-  tests/e2e/m3.mjs tests/e2e/desktop.mjs tests/e2e/stress.mjs tests/e2e/parity.mjs \
-  tests/e2e/s3-benchmark.mjs
+for f in tests/e2e/*.mjs; do node --check "$f"; done
 node --test tests/e2e/*.test.mjs
 bash tests/e2e/run.sh
 ```

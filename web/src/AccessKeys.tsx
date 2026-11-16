@@ -1,16 +1,15 @@
 import { NativeSelect } from "./components/ui/native-select";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "./context";
-import { m2, type AccessKey, type KeySecret } from "./m2";
+import type { AccessKey, KeySecret } from "./keys";
 import { ErrorNotice, formatDate, Loading, useLoad } from "./ui";
 
 export function AccessKeys() {
   const { auth } = useAuth();
-  const api = useMemo(() => m2(auth.api), [auth]);
-  const keys = useLoad(api.keys);
+  const keys = useLoad(auth.api.keys.list);
   const orgs = useLoad(auth.api.orgs);
   const [orgId, setOrgId] = useState("");
   const [label, setLabel] = useState("");
@@ -28,14 +27,14 @@ export function AccessKeys() {
     if (!org || (!allDrives && !drives.length) || secret) return;
     setBusy(true); setError(undefined);
     try {
-      setSecret(await api.createKey({ workspaceId: orgId, label: label.trim(), access, drives: allDrives ? null : drives }));
+      setSecret(await auth.api.keys.create({ workspaceId: orgId, label: label.trim(), access, drives: allDrives ? null : drives }));
       setCopied(false); setLabel(""); keys.reload();
     } catch (reason) { setError(reason); }
     finally { setBusy(false); }
   }
   async function remove(id: string) {
     setBusy(true); setError(undefined);
-    try { await api.revokeKey(id); setRevoke(null); keys.reload(); }
+    try { await auth.api.keys.revoke(id); setRevoke(null); keys.reload(); }
     catch (reason) { setError(reason); }
     finally { setBusy(false); }
   }
