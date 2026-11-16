@@ -44,7 +44,6 @@ export class FakeDataPlane implements DataPlaneAdmin {
 		this.deleted.push(driveId);
 		return { ok: true as const };
 	}
-	async restoreDrive(_driveId: string) { return { ok: true as const }; }
 	async driveStats(driveId: string) {
 		if (this.failStats) throw new Error("data plane down");
 		return { headSeq: 0, fileCount: 0, bytes: this.stats.get(driveId) ?? 0, ownBytes: this.stats.get(driveId) ?? 0, lineage: driveId, depth: this.depths.get(driveId) ?? 0, forkOf: null };

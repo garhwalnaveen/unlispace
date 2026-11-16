@@ -20,7 +20,7 @@ families; drive tokens are scoped grants minted per drive. Migrations live in
 
 - `GET /me`, `PATCH /me`, `GET /me/access`.
 - `GET /orgs`.
-- `POST /orgs/{org}/drives`; `GET|PATCH|DELETE /drives/{id}`; `POST /drives/{id}/token` (mint read/write/admin drive token); `POST /drives/{id}/fork`; `POST /drives/{id}/restore`; `GET /orgs/{org}/deleted-drives`.
+- `POST /orgs/{org}/drives`; `GET|PATCH|DELETE /drives/{id}`; `POST /drives/{id}/token` (mint read/write/admin drive token); `POST /drives/{id}/fork`.
 - `GET|POST /keys`; `DELETE /keys/{id}` — S3 access keys (HMAC-derived secrets, parent scopes, transitive revocation). Listing never returns secrets.
 - `GET /orgs/{org}/billing`; `POST /orgs/{org}/billing/checkout`; `GET /orgs/{org}/billing/invoices`; `POST /orgs/{org}/billing/portal` — Dodo Payments.
 - `GET /orgs/{org}/members`; `PATCH|DELETE /orgs/{org}/members/{user}`; `POST /orgs/{org}/invites`; `DELETE /orgs/{org}/invites/{id}`; `POST /invites/{id}/accept` — teams.

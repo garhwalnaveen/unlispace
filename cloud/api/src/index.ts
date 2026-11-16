@@ -125,7 +125,7 @@ async function route(ctx: Ctx): Promise<Response> {
 	// ---- authenticated resources ----
 	const teamRoute = /^\/orgs\/[^/]+\/(members(\/[^/]+)?|invites(\/[^/]+)?)$/.test(p);
 	const acceptRoute = /^\/invites\/[^/]+\/accept$/.test(p);
-	const known = teamRoute || acceptRoute || p === "/me" || p === "/me/access" || p === "/orgs" || p === "/ai/models" || p === "/ai/chat" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|deleted-drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork|restore))?)$/.test(p);
+	const known = teamRoute || acceptRoute || p === "/me" || p === "/me/access" || p === "/orgs" || p === "/ai/models" || p === "/ai/chat" || /^\/(keys(\/[^/]+)?|orgs\/[^/]+\/(drives|billing(\/(checkout|invoices|portal))?)|drives\/[^/]+(\/(token|fork))?)$/.test(p);
 	if (!known) throw new HttpError(404, "not_found");
 	const a = await authenticate(ctx);
 	if (acceptRoute) {
@@ -155,10 +155,7 @@ async function route(ctx: Ctx): Promise<Response> {
 	} else if (p === "/orgs") {
 		if (m === "GET") return R.listOrgs(ctx, a);
 	} else if (seg[0] === "orgs") {
-		if (seg[2] === "deleted-drives" && m === "GET") return R.deletedDrives(ctx, a, seg[1]!);
 		if (seg[2] === "drives" && m === "POST") return R.createDrive(ctx, a, seg[1]!);
-	} else if (seg[2] === "restore") {
-		if (m === "POST") return R.restoreDrive(ctx, a, seg[1]!);
 	} else if (seg[2] === "fork") {
 		if (m === "POST") return R.forkDrive(ctx, a, seg[1]!);
 	} else if (seg[2] === "token") {

@@ -95,7 +95,7 @@ For `wrangler dev`, run cloud/data-plane alongside, put the secrets above in `.d
 - Test-only vitest shims (`vitest.config.ts`): the AWS SDK's browser build is selected under workerd, so the XML parser and aws-chunked encoder are swapped for byte-correct equivalents. Production code is unaffected.
 
 `test/conformance.test.ts` ports all 16 Space conformance names to describes using the real AWS S3 SDK against an in-memory
-ControlPlane + data-plane fake (including in-memory forks). `test/m3.test.ts` covers key cache expiry, post-authorization use
+ControlPlane + data-plane fake (including in-memory forks). `test/trust-boundaries.test.ts` covers key cache expiry, post-authorization use
 recording, quota deletes, cross-drive copy, fork guard errors, extension limits and session/SigV4 key trust boundaries.
 
 The [31 October API comparison](../../docs/research/spacefs-api-gap-2026-10-31.md) records implemented fixes, remaining protocol differences and verification limits.
