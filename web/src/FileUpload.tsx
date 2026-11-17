@@ -6,6 +6,7 @@ import { downloadFile, MAX_WEB_DOWNLOAD } from "./download";
 import { fileError, plural } from "./files/format";
 import { baseName } from "./files/paths";
 import { formatBytes } from "./ui";
+import { readOnboarding, writeOnboarding } from "./onboarding/state";
 import { existing, freePath, uploadFile, type UploadProgress } from "./upload";
 
 export interface Transfer {
@@ -129,6 +130,8 @@ export class Transfers {
         }
         await uploadFile(api, job.file!, job.path, (value) => progress(value.bytes, value.total, value.phase), { mode: job.mode, signal });
         this.uploaded.forEach((listener) => listener(job.path));
+        const onboarding = readOnboarding();
+        if (onboarding && !onboarding.uploaded) writeOnboarding({ uploaded: true });
       }
       job.status = "done";
     } catch (error) {

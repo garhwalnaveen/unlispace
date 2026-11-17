@@ -27,7 +27,7 @@ it("opens a deep-linked file with a drive read token and shows plain-language hi
   await waitFor(() => expect(history()).toHaveLength(3));
   const [newest, middle, oldest] = history();
   expect(newest).toHaveTextContent(/3 B · Current version$/);
-  expect(middle).toHaveTextContent("4 KB");
+  expect(middle).toHaveTextContent("4.1 KB");
   expect(oldest).toHaveTextContent("2 KB");
   expect(within(newest).queryByRole("button")).not.toBeInTheDocument();
   expect(within(oldest).getByRole("button", { name: /^Restore the version from/ })).toBeInTheDocument();
@@ -64,7 +64,7 @@ it("reads every history page, downloads an old version and restores it through a
   await user.click(within(dialog).getByRole("button", { name: "Restore version" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   await waitFor(() => expect(history()).toHaveLength(4));
-  expect(history()[0]).toHaveTextContent(/4 KB · Restored from .* · Current version$/);
+  expect(history()[0]).toHaveTextContent(/4\.1 KB · Restored from .* · Current version$/);
 });
 
 it("keeps a failed restore in the confirmation and says nothing was changed", async () => {

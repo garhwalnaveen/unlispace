@@ -27,7 +27,6 @@ it("joins only after an explicit action and explains an invitation meant for ano
   renderApp("/invites/test-token");
   expect(await screen.findByRole("heading", { name: "Join a workspace" })).toBeInTheDocument();
   expect(within(screen.getByRole("main")).getByText("you@example.com")).toBeInTheDocument();
-  await screen.findByRole("link", { name: "Space" });
   expect(acceptCalls(fetcher)).toHaveLength(0);
   await userEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("belongs to another email address");

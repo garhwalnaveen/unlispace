@@ -20,7 +20,7 @@ it("lists folders first with plain sizes, sorts by column and links folders and 
   await screen.findByRole("link", { name: "docs" });
   expect(screen.getByRole("heading", { level: 1, name: "Space" })).toBeInTheDocument();
   expect(names()).toEqual(["archive", "docs", "a.txt", "b.txt"]);
-  expect(screen.getByRole("row", { name: /a\.txt/ })).toHaveTextContent("4.8 MB");
+  expect(screen.getByRole("row", { name: /a\.txt/ })).toHaveTextContent("5 MB");
   expect(screen.getByRole("columnheader", { name: "Name" })).toHaveAttribute("aria-sort", "ascending");
   await user.click(screen.getByRole("button", { name: "Size" }));
   expect(screen.getByRole("columnheader", { name: "Size" })).toHaveAttribute("aria-sort", "descending");

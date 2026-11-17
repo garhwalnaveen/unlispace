@@ -3,12 +3,9 @@ import { Button } from "./components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
 import { Archive, EyeOff, Undo2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { ApiError, type Api, type Drive, type Org } from "./api";
-import { useAuth } from "./context";
-import { driveLink } from "./links";
 import "./settings/settings.css";
-import { ErrorNotice, formatBytes, formatDate } from "./ui";
+import { ErrorNotice } from "./ui";
 
 export type DriveAction =
   | { kind: "create"; org: Org }
@@ -146,29 +143,4 @@ export function DriveDialog({
       </DialogContent>
     </Dialog>
   );
-}
-export function DriveTools({ drive, canManage, onDone }: { drive: Drive; canManage: boolean; onDone: (created?: Drive) => void }) {
-  const { auth } = useAuth();
-  const [action, setAction] = useState<DriveAction | null>(null);
-  return <details className="drive-tools">
-    <summary>{canManage ? "Drive options" : "Drive details"}</summary>
-    <p className="muted small">Alias: <code>{drive.alias || "Not set"}</code> · Last measured drive bytes: {formatBytes(drive.usageBytes || 0)}. Billing shows total retained and pending storage for the workspace.</p>
-    <p className="muted small">Storage region: {drive.placement || "Automatic"}</p>
-    <details><summary>Lineage</summary>
-      {drive.forkOf ? <p>Forked from <Link to={driveLink(drive.forkOf.driveId)}>{drive.forkOf.driveId}</Link> at {formatDate(drive.forkOf.forkPoint)}</p> : <p>Root drive</p>}
-      <p>Forks: {drive.forks?.length || 0}</p>
-      <ul>{drive.forks?.map((id) => <li key={id}><Link to={driveLink(id)}>{id}</Link></li>)}</ul>
-    </details>
-    {canManage && <div className="actions">
-      <Button variant="ghost" aria-label={`Rename ${drive.name}`} onClick={() => setAction({ kind: "rename", drive })}>Rename</Button>
-      <Button variant="ghost" aria-label={`Fork ${drive.name}`} onClick={() => setAction({ kind: "fork", drive })}>Make a copy…</Button>
-      <Button variant="ghost" className="text-destructive" aria-label={`Delete ${drive.name}`} onClick={() => setAction({ kind: "delete", drive })}>Delete</Button>
-      <Button variant="ghost" className="text-destructive" aria-label={`Permanently delete ${drive.name}`} onClick={() => setAction({ kind: "hard-delete", drive })}>Permanently delete</Button>
-    </div>}
-    {action && <DriveDialog action={action} api={auth.api} onClose={() => setAction(null)} onDone={(created) => { setAction(null); onDone(created); }} />}
-  </details>;
-}
-
-export function ForkNotice({ drive }: { drive: Drive }) {
-  return <p className="notice" role="status">Created <Link to={driveLink(drive.id)}>{drive.name}</Link>{drive.forkOf && `, a copy as of ${formatDate(drive.forkOf.forkPoint)}`}</p>;
 }

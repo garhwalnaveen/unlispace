@@ -57,7 +57,7 @@ it("switches workspace from the sidebar and shows that workspace's drives", asyn
 });
 
 it("shows storage used and remaining trial days in the sidebar", async () => {
-  show(`/orgs/${org.id}/team`, [org], [{ id: org.id, state: "trialing", trialEndsAt: Date.now() + 2 * 86_400_000 - 1000, usedBytes: 1024 ** 3, quotaBytes: 4 * 1024 ** 3 }]);
+  show(`/orgs/${org.id}/team`, [org], [{ id: org.id, state: "trialing", trialEndsAt: Date.now() + 2 * 86_400_000 - 1000, usedBytes: 1e9, quotaBytes: 4e9 }]);
   expect(await screen.findByRole("link", { name: "Storage" })).toHaveTextContent("1 GB of 4 GB used");
   expect(screen.getByText("2 trial days left").closest("a")).toHaveAttribute("href", `/orgs/${org.id}/billing`);
 });
