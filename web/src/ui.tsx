@@ -14,7 +14,7 @@ export function ErrorNotice({ error }: { error: unknown }) {
 export function Loading({ children = "Loading…" }: { children?: ReactNode }) {
   return (
     <div className="loading-state muted" role="status">
-      <LoaderCircle className="loading-spinner" size={18} aria-hidden="true" />
+      <LoaderCircle className="animate-spin" size={18} aria-hidden="true" />
       <span>{children}</span>
     </div>
   );

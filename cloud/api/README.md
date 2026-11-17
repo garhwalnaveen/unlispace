@@ -7,7 +7,7 @@ Implements `docs/design/control-plane-contract.md`. Storage is D1 (`DB`); drive 
 Also includes versioned HMAC-derived S3 access keys with parent scopes/transitive revocation,
 Dodo Payments billing (public catalog, checkout, billing state, invoices, portal and signed
 webhooks), teams, managed Ask AI, aliases, forks, hard deletion, the `ControlPlane` RPC
-entrypoint and hourly own-byte metering. The route table and configuration contract are in
+entrypoint, and a 15-minute cron for own-byte metering and row pruning. The route table and configuration contract are in
 [API.md](API.md). Write-token requests without entitlement or over quota return
 `403 over_quota`; explicit reads remain available. Existing tokens retain the M1 lifetime.
 
@@ -46,7 +46,7 @@ The sending domain must be onboarded first (`npx wrangler email sending enable <
 
 ## Layout
 
-- `src/index.ts` routing, CORS, error mapping (`handle(req, env, deps)` is the test seam)
+- `src/index.ts` route table, CORS, error mapping (`handle(req, env, deps)` is the test seam); `src/router.ts` matching and 404/405 rules; `src/auth-routes.ts` sign-in handlers
 - `src/jwt.ts` EdDSA JWT sign/verify, WebCrypto only, no Worker imports (copy into the data plane)
 - `src/session.ts` access/drive token minting, refresh rotation + reuse detection, bearer auth
 - `src/otp.ts`, `src/google.ts`, `src/onetime.ts`, `src/ratelimit.ts`, `src/email.ts`
@@ -54,8 +54,8 @@ The sending domain must be onboarded first (`npx wrangler email sending enable <
 - `src/access-keys.ts` key scopes, derivation, revocation and internal verification/last-use helpers
 - `src/billing.ts`, `src/billing-catalog.ts`, `src/entitlements.ts` billing routes and token entitlements
 - `src/dodo.ts` injectable provider interface, REST adapter and Standard Webhooks verification
-- `src/control-plane.ts` gateway RPC methods; `src/entitlements.ts` hourly metering and quotas
-- `migrations/0001_init.sql`, `migrations/0002_keys_billing.sql`, `migrations/0003_m3.sql`; `test/` suite (all external I/O mocked)
+- `src/control-plane.ts` gateway RPC methods; `src/entitlements.ts` scheduled metering and quotas; `src/maintenance.ts` scheduled pruning of sessions and expired rows
+- `migrations/` D1 schema; `test/` suite (all external I/O mocked)
 
 Gate (from this directory): `npx tsc --noEmit && npm test`. For a sandbox that cannot write the
 user's global Wrangler log folder, set `WRANGLER_LOG_PATH=./.wrangler/logs` for the gate.

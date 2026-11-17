@@ -36,8 +36,8 @@ export function Home() {
   return (
     <>
       <header className="drive-summary">
-        <h1 className="sr-only">Your drives</h1>
-        {loading && !data ? <p aria-hidden="true"><span className="drive-skeleton drive-skeleton-count" /> drives</p> : data && <p><span>{driveCount}</span> {driveCount === 1 ? "drive" : "drives"}</p>}
+        <h1>Your drives</h1>
+        {loading && !data ? <p aria-hidden="true"><span className="drive-skeleton drive-skeleton-count" /> drives</p> : data && <p>{driveCount} {driveCount === 1 ? "drive" : "drives"}</p>}
       </header>
       {fork && <ForkNotice drive={fork} />}
       <ErrorNotice error={error} />

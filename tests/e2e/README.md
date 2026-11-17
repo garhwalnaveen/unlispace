@@ -171,8 +171,7 @@ The native M3 row invokes `uls fork` against an explicitly nonexistent isolated
 socket, then downloads through `uls get` using a freshly minted fork read token.
 It fails if fork requires daemon RPC; it never starts the per-user daemon.
 
-The full gate has 53 rows with SMB (35 without SMB). `../docs/research/performance/e2e-acceptance-2026-10-26.txt`
-records the last retained gate result, including setup failures. A missing engine binary, native
+The full gate has 53 rows with SMB (35 without SMB). A missing engine binary, native
 mount denial or unavailable CLI parity remains a failure, never a skipped PASS.
 
 

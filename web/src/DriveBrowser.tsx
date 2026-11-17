@@ -63,9 +63,9 @@ function Folder({ api, writeApi, path }: { api: DriveApi; writeApi: DriveApi | n
       <div className="folder-toolbar">
         <div className="search-field"><Icon name="search" /><Input aria-label="Filter loaded items" placeholder="Filter loaded items…" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
         <div className="folder-toolbar-actions"><NativeSelect aria-label="Sort loaded items" value={sort} onChange={(event) => setSort(event.target.value)}><option value="name">Name (A–Z)</option><option value="modified">Recently modified</option><option value="size">Largest first</option></NativeSelect>
-        <Button disabled={listing.loading} onClick={listing.reload}><Icon name="refresh" />Refresh folder</Button></div>
+        <Button disabled={listing.loading} onClick={listing.reload}><Icon name="refresh" />Refresh</Button></div>
       </div>
-      <div className="listing-caption"><p className="muted small" role="status">{query.trim() ? `${entries.length} matching · ` : ""}{listing.entries.length} item{listing.entries.length === 1 ? "" : "s"}{listing.cursor ? " loaded" : ""}</p><span className="muted small">Folders first</span></div>
+      <div className="listing-caption"><p className="muted small" role="status">{query.trim() ? `${entries.length} matching · ` : ""}{listing.entries.length} item{listing.entries.length === 1 ? "" : "s"}{listing.cursor ? " loaded" : ""}</p></div>
       <ErrorNotice error={listing.error} />
       {Boolean(listing.error) && !listing.entries.length && (
         <Button onClick={listing.reload}>Try again</Button>
@@ -388,7 +388,7 @@ function DriveContents({
         <div>
           <p className="eyebrow">{path ? drive.name : "Drive"}</p>
           <h1>{title}</h1>
-          <p className="muted small">{path && !path.endsWith("/") ? "File information and version history" : "All your files, organized and ready to work."}</p>
+          {file && <p className="muted small">File details and version history</p>}
         </div>
         <div className="actions"><span className="access-badge"><Icon name={writeApi ? "drive" : "key"} />{writeApi ? "Read & write" : "Read only"}</span><Button asChild><a href={finderLink(drive.id, path)}>
           Show in Finder <Icon name="external" />

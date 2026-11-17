@@ -77,20 +77,36 @@ export async function storageUsage(ctx: Ctx, orgId: string): Promise<number> {
 	return quotaUsage(ctx, orgId, await orgLineages(ctx, orgId));
 }
 
+const METER_DRIVES_PER_RUN = 500;
+const METER_CHUNK = 25;
+
+/**
+ * Refresh cached per-drive usage, least recently attempted first. Each chunk records its attempts
+ * before measuring so a drive that keeps failing rotates to the back instead of blocking the rest.
+ */
 export async function meterUsage(ctx: Ctx): Promise<void> {
-	const rows = (await ctx.env.DB.prepare("SELECT d.id FROM drives d LEFT JOIN drive_usage u ON u.drive_id = d.id LEFT JOIN drive_usage_attempts a ON a.drive_id=d.id WHERE d.status != 'deleted' ORDER BY COALESCE(a.attempted_at,u.measured_at,0), d.id LIMIT 500").all<{ id: string }>()).results;
+	const db = ctx.env.DB;
+	const rows = (await db.prepare("SELECT d.id FROM drives d LEFT JOIN drive_usage u ON u.drive_id = d.id LEFT JOIN drive_usage_attempts a ON a.drive_id=d.id WHERE d.status != 'deleted' ORDER BY COALESCE(a.attempted_at,u.measured_at,0), d.id LIMIT ?").bind(METER_DRIVES_PER_RUN).all<{ id: string }>()).results;
+	const attempt = db.prepare("INSERT INTO drive_usage_attempts VALUES(?,?) ON CONFLICT(drive_id) DO UPDATE SET attempted_at=excluded.attempted_at");
+	const record = db.prepare("INSERT INTO drive_usage VALUES(?,?,?,?) ON CONFLICT(drive_id) DO UPDATE SET logical_bytes=excluded.logical_bytes, own_bytes=excluded.own_bytes, measured_at=excluded.measured_at");
 	let failed = false;
-	for (const d of rows) {
-		await ctx.env.DB.prepare("INSERT INTO drive_usage_attempts VALUES(?,?) ON CONFLICT(drive_id) DO UPDATE SET attempted_at=excluded.attempted_at").bind(d.id, ctx.now).run();
-		try {
-			const stats = await ctx.env.DATA_PLANE.driveStats(d.id);
-			if (!stats) continue;
-			if (![stats.bytes, stats.ownBytes].every(n => Number.isSafeInteger(n) && n >= 0)) throw new HttpError(503, "usage_unavailable");
-			await ctx.env.DB.prepare("INSERT INTO drive_usage VALUES(?,?,?,?) ON CONFLICT(drive_id) DO UPDATE SET logical_bytes=excluded.logical_bytes, own_bytes=excluded.own_bytes, measured_at=excluded.measured_at").bind(d.id, stats.bytes, stats.ownBytes, ctx.now).run();
-		} catch {
-			failed = true;
-			console.error("usage measurement failed", d.id);
-		}
+	for (let i = 0; i < rows.length; i += METER_CHUNK) {
+		const chunk = rows.slice(i, i + METER_CHUNK);
+		await db.batch(chunk.map(d => attempt.bind(d.id, ctx.now)));
+		const measured = await Promise.all(chunk.map(async d => {
+			try {
+				const stats = await ctx.env.DATA_PLANE.driveStats(d.id);
+				if (!stats) return null;
+				if (![stats.bytes, stats.ownBytes].every(n => Number.isSafeInteger(n) && n >= 0)) throw new HttpError(503, "usage_unavailable");
+				return record.bind(d.id, stats.bytes, stats.ownBytes, ctx.now);
+			} catch {
+				failed = true;
+				console.error("usage measurement failed", d.id);
+				return null;
+			}
+		}));
+		const writes = measured.filter(w => w !== null);
+		if (writes.length) await db.batch(writes);
 	}
 	if (failed) throw new HttpError(503, "usage_unavailable");
 }

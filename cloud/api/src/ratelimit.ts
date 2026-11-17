@@ -1,4 +1,5 @@
 import type { Ctx } from "./ctx";
+import { HttpError } from "./http";
 
 /** Fixed-window counter in D1. Returns true when the call is allowed (and counts it). */
 export async function hit(ctx: Ctx, key: string, limit: number, windowMs: number): Promise<boolean> {
@@ -12,4 +13,11 @@ export async function hit(ctx: Ctx, key: string, limit: number, windowMs: number
 		.bind(key, ctx.now, windowMs)
 		.first<{ count: number }>();
 	return (row?.count ?? 1) <= limit;
+}
+
+export const clientIp = (ctx: Ctx): string => ctx.req.headers.get("cf-connecting-ip") ?? "unknown";
+
+/** Count the call against `key` and reject with 429 once the window's limit is exceeded. */
+export async function enforce(ctx: Ctx, key: string, limit: number, windowMs: number): Promise<void> {
+	if (!(await hit(ctx, key, limit, windowMs))) throw new HttpError(429, "rate_limited");
 }

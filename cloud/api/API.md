@@ -40,4 +40,4 @@ Secrets (`.dev.vars` locally, `wrangler secret put` in production):
 `ULS_JWT_PRIVATE_JWK`, `ULS_JWT_PUBLIC_JWKS`, `ULS_ACCESS_KEY_MASTERS` (JSON
 version → base64 master, ≥32 bytes each), `DODO_*` billing keys, optional
 `RESEND_API_KEY` (email falls back to the console sender), `ULS_DEV_TOKEN`
-(local dev only). Cron `17 * * * *` runs hourly own-byte metering.
+(local dev only). Cron `*/15 * * * *` meters own bytes for the 500 least recently measured drives and prunes rotated sessions, expired codes, rate-limit windows and old webhook receipts.

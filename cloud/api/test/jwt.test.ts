@@ -56,7 +56,7 @@ describe("jwt", () => {
 		const forged = b64urlEncode(new TextEncoder().encode(JSON.stringify(claims({ sub: "u_admin" }))));
 		const o = { issuer: ISS, typ: "access", now };
 		expect(await code(verifyJwt(`${h}.${forged}.${s}`, { keys: [k.pub] }, o))).toBe("bad_signature");
-		expect(await code(verifyJwt(`${h}.${p}.${s.slice(0, -2)}AA`, { keys: [k.pub] }, o))).toBe("bad_signature");
+		expect(await code(verifyJwt(`${h}.${p}.${s[0] === "A" ? "B" : "A"}${s.slice(1)}`, { keys: [k.pub] }, o))).toBe("bad_signature");
 		const none = b64urlEncode(new TextEncoder().encode(JSON.stringify({ alg: "none", kid: "k" })));
 		expect(await code(verifyJwt(`${none}.${p}.`, { keys: [k.pub] }, o))).toBe("bad_header");
 		expect(await code(verifyJwt("not.a.jwt!", { keys: [k.pub] }, o))).toBeTruthy();

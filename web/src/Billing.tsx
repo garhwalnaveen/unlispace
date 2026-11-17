@@ -67,7 +67,7 @@ export function Billing() {
       {canManage ? <div className="actions">
         {!hasSubscription && <Button variant="default" disabled={busy} onClick={() => setChoosing(true)}>Choose a plan</Button>}
         <Button disabled={busy} onClick={() => void redirect(false)}>Manage subscription</Button>
-      </div> : <p className="muted small">An organization owner or admin can manage your subscription.</p>}
+      </div> : <p className="muted small">A workspace owner or admin can manage your subscription.</p>}
     </section>}
     {choosing && canManage && <Modal title="Choose a plan" onClose={() => { if (!busy) setChoosing(false); }}>
         <ErrorNotice error={error} />
