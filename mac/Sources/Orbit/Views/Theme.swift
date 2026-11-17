@@ -19,12 +19,17 @@ enum Theme {
     /// Small monospaced text for labels, counts, and button titles. Pair with `orbitLabel()`.
     static var label: Font { .system(size: 11, weight: .medium, design: .monospaced) }
 
-    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+    /// `canvas` as a window background color.
+    static let windowBackground = nsColor(light: 0xFAFAFA, dark: 0x0E0B0A)
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color { Color(nsColor: nsColor(light: light, dark: dark)) }
+
+    private static func nsColor(light: UInt32, dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
             let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
             return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
                            blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-        })
+        }
     }
 }
 
@@ -57,4 +62,28 @@ extension View {
 
     /// Orbit's button style and tint for every control inside a window or sheet.
     func orbitControls() -> some View { buttonStyle(.orbit).tint(Theme.ink) }
+
+    /// Fills a view with the canvas color and styles the window SwiftUI made for it, as the Settings scene does.
+    func orbitWindow() -> some View { background(Theme.canvas).background(WindowChrome()) }
+}
+
+extension NSWindow {
+    /// Paints the title bar and toolbar with the canvas color instead of the system material.
+    /// Call it after setting the style mask: a title bar made transparent before `.fullSizeContentView` loses its buttons.
+    func applyOrbitChrome() {
+        backgroundColor = Theme.windowBackground
+        titlebarAppearsTransparent = true
+    }
+}
+
+private struct WindowChrome: NSViewRepresentable {
+    func makeNSView(context: Context) -> ChromeView { ChromeView() }
+    func updateNSView(_ view: ChromeView, context: Context) {}
+
+    final class ChromeView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.applyOrbitChrome()
+        }
+    }
 }

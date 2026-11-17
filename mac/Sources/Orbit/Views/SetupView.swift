@@ -117,7 +117,7 @@ struct SetupView: View {
             .disabled(mounting)
         }
         Form { PermissionsContent(model: model) }
-            .formStyle(.grouped).scrollDisabled(true).padding(.horizontal, -20)
+            .formStyle(.grouped).scrollContentBackground(.hidden).scrollDisabled(true).padding(.horizontal, -20)
             .disabled(mounting)
     }
 

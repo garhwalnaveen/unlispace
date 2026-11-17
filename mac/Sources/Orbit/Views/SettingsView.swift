@@ -17,12 +17,13 @@ struct SettingsView: View {
                     case .advanced: AdvancedSettings(model: model)
                     }
                 }
-                .formStyle(.grouped)
+                .formStyle(.grouped).scrollContentBackground(.hidden).background(Theme.canvas)
                 .tabItem { Label(item.rawValue, systemImage: item.symbol) }
                 .tag(item)
             }
         }
         .frame(width: 560, height: 460)
+        .orbitWindow()
         .orbitControls()
         .task { await model.permissions.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

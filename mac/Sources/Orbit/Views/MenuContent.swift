@@ -23,6 +23,7 @@ struct MenuContent: View {
         }
         .padding(10)
         .frame(width: 320)
+        .orbitControls()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Orbit menu")
     }

@@ -53,11 +53,14 @@ actor SnapshotClient: DaemonClient {
     var live: [TransferInfo] = []
     var queue: UploadsSnapshot? = UploadsSnapshot(pending: [], journalBytes: 0, journalCapBytes: 10_000_000_000)
     var pins: [OfflinePin]? = []
+    /// Replies to `apiRequest`, by path.
+    var api: [String: JSONValue] = [:]
     private let stream: AsyncStream<DaemonEvent>
     private let continuation: AsyncStream<DaemonEvent>.Continuation
 
     init(drives: [DriveInfo] = [], transfers: [TransferInfo] = [], queue: UploadsSnapshot? = nil, pins: [OfflinePin]? = [],
-         state: EngineState = .idle) {
+         state: EngineState = .idle, api: [String: JSONValue] = [:]) {
+        self.api = api
         self.drives = drives
         live = transfers
         if let queue { self.queue = queue }
@@ -79,6 +82,10 @@ actor SnapshotClient: DaemonClient {
     func setConfig(_ config: DaemonConfig) async throws {}
     func authSet(_ params: AuthSetParams) async throws -> AuthSetResult { AuthSetResult(user: Fixtures.account) }
     func authSignOut() async throws {}
+    func apiRequest(method: String, path: String, body: JSONValue?) async throws -> JSONValue {
+        guard let reply = api[path] else { throw DaemonClientError.remote(DaemonError(code: "unsupported", message: "No reply for \(path).")) }
+        return reply
+    }
     nonisolated func events() -> AsyncStream<DaemonEvent> { stream }
 }
 
