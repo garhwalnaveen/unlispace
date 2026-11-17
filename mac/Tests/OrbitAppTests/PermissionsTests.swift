@@ -28,7 +28,7 @@ import OrbitKit
         #expect(AccessStatus.engine(.requiresApproval) == .needsApproval)
         #expect(AccessStatus.engine(.failed("failed")) == .failed)
         #expect(AccessStatus.engine(.enabled) == .enabled)
-        #expect(AccessStatus.managed.label == "Managed by each app")
+        #expect(AccessStatus.managed.label == "Set per app")
     }
 
     @Test func unbundledStatusReadDoesNotInvokeNotificationCenter() async {
@@ -37,21 +37,22 @@ import OrbitKit
     }
 
     @Test func refreshClearsFeedbackThatNoLongerMatchesTheAuthorization() async {
-        let model = AppModel()
-        model.notificationAccess = .enabled
-        model.notificationMessage = "Previously enabled"
-        model.permissionMessage = "Previous login action"
-        await model.refreshPermissions()
-        #expect(model.notificationAccess == .unavailable)
-        #expect(model.notificationMessage == nil)
-        #expect(model.permissionMessage == nil)
-        #expect(model.loginAccess != .checking)
+        let permissions = PermissionsStore()
+        permissions.notificationAccess = .enabled
+        permissions.notificationMessage = "Previously enabled"
+        permissions.loginAccess = .checking
+        permissions.loginMessage = "Previous login action"
+        await permissions.refresh()
+        #expect(permissions.notificationAccess == .unavailable)
+        #expect(permissions.notificationMessage == nil)
+        #expect(permissions.loginMessage == nil)
+        #expect(permissions.loginAccess != .checking)
     }
 
-    @Test func modelStartsWithUnknownPermissionStates() {
-        let model = AppModel()
-        #expect(model.notificationAccess == .checking)
-        #expect(model.loginAccess == .checking)
-        #expect(!model.requestingNotifications)
+    @Test func permissionsStartUnknown() {
+        let permissions = PermissionsStore()
+        #expect(permissions.notificationAccess == .checking)
+        #expect(permissions.loginAccess == .checking)
+        #expect(!permissions.requestingNotifications)
     }
 }
