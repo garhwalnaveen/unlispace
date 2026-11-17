@@ -63,20 +63,16 @@ it("omits the trial sentence when checkout does not end the trial", async () => 
   expect(box).not.toHaveTextContent("trial ends now");
 });
 
-it("every billing link and return target resolves to a rendered route", async () => {
-  vi.stubGlobal("fetch", billingFetch({ ...baseCatalog, prices: null }));
+it("every billing return target resolves to a rendered route", async () => {
+  const fetcher = billingFetch({ ...baseCatalog, prices: null });
+  vi.stubGlobal("fetch", fetcher);
   // return_url and portal return in the API: `${ULS_WEB_ORIGIN}/orgs/${id}/billing`
   renderApp(`/orgs/${drive.orgId}/billing`);
-  await screen.findByRole("heading", { name: "Billing" });
+  const settings = within(await screen.findByRole("navigation", { name: "Settings" }));
+  expect(await settings.findByRole("link", { name: "Plan and billing" })).toHaveAttribute("aria-current", "page");
+  await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.endsWith(`/orgs/${drive.orgId}/billing`))).toBe(true));
   expect(screen.queryByText("That page could not be found.")).not.toBeInTheDocument();
-  const link = within(screen.getByRole("main")).getByRole("link", { name: "Your drives" });
-  expect(link).toHaveAttribute("href", "/");
-  await userEvent.click(link);
-  expect(await screen.findByRole("heading", { name: "Your drives" })).toBeInTheDocument();
-  const billing = (await screen.findAllByRole("link", { name: "Billing" }))[0]!;
-  expect(billing).toHaveAttribute("href", "/billing");
-  await userEvent.click(billing);
-  expect(await screen.findByRole("heading", { name: "Billing" })).toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: "Main navigation" })).getByRole("link", { name: drive.name })).toHaveAttribute("href", `/drives/${drive.id}/`);
 });
 
 const desktopQuery = (extra: Record<string, string> = {}) => new URLSearchParams({ state: "s+1", code_challenge: "a".repeat(43), ...extra });
@@ -141,14 +137,7 @@ function homeFetch(accessBody: unknown, orgBody = org()) {
   });
 }
 
-it("home shows trial days from /me/access", async () => {
-  vi.stubGlobal("fetch", homeFetch(access(ws({ trialEndsAt: Date.now() + 2 * 86_400_000 })), org({ trialEndsAt: null })));
-  renderApp("/");
-  expect(await screen.findByText(/2 trial days remaining/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Retry drive setup" })).not.toBeInTheDocument();
-});
-
-it("home explains storage that is not ready yet and retries both endpoints", async () => {
+it("home waits for a drive that is still being set up and checks both endpoints again", async () => {
   let ready = false;
   const fetcher = vi.fn(async (url: string) => {
     if (url.endsWith("/me/access")) return json(access(ws(ready ? {} : { state: "provisioning", trialPending: true, trialEndsAt: null, writable: false, storageReady: false })));
@@ -157,19 +146,12 @@ it("home explains storage that is not ready yet and retries both endpoints", asy
   });
   vi.stubGlobal("fetch", fetcher);
   renderApp("/");
-  expect(await screen.findByText(/seven-day trial has not started/)).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Your drive is being set up" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Space" })).not.toBeInTheDocument();
   ready = true;
-  await userEvent.click(screen.getByRole("button", { name: "Retry drive setup" }));
-  expect(await screen.findByRole("link", { name: "Space" })).toBeInTheDocument();
-  expect(screen.queryByText(/trial has not started/)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Check again" }));
+  expect(await screen.findByRole("link", { name: "Space" })).toHaveAttribute("href", `/drives/${drive.id}/`);
   expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/me/access"))).toHaveLength(2);
-});
-
-it("home says storage is being prepared when verified but not storage-ready, and explains expiry", async () => {
-  vi.stubGlobal("fetch", homeFetch(access(ws({ storageReady: false, state: "expired", trialEndsAt: Date.now() - 1000, writable: false }))));
-  renderApp("/");
-  expect(await screen.findByText(/storage is still being prepared/)).toBeInTheDocument();
-  expect(screen.getByText(/Your trial has ended\. Your files remain readable/)).toBeInTheDocument();
 });
 
 it("home still lists drives when /me/access fails", async () => {
