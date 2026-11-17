@@ -42,24 +42,24 @@ it("changes workspace appearance through the account menu", async () => {
   const view = render(<MemoryRouter><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Your workspace" }));
-  await user.click(screen.getByRole("menuitem", { name: "Light" }));
-  expect(document.documentElement.dataset.theme).toBe("light");
-  expect(localStorage.getItem("orbit.theme")).toBe("light");
+  await user.click(screen.getByRole("menuitem", { name: "Dark" }));
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(localStorage.getItem("orbit.theme")).toBe("dark");
   view.unmount();
   auth.dispose();
 });
 
 
-it("defaults to dark and retains a saved light choice", async () => {
+it("defaults to light and retains a saved dark choice", async () => {
   const auth = new AuthStore(localStorage, null);
   await auth.start();
   const view = render(<MemoryRouter initialEntries={["/login"]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
-  expect(screen.getByRole("button", { name: "Use dark theme" })).toHaveAttribute("aria-pressed", "true");
-  expect(document.documentElement.dataset.theme).toBe("dark");
-  await userEvent.click(screen.getByRole("button", { name: "Use light theme" }));
-  view.unmount();
-  render(<MemoryRouter initialEntries={["/login"]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
   expect(screen.getByRole("button", { name: "Use light theme" })).toHaveAttribute("aria-pressed", "true");
   expect(document.documentElement.dataset.theme).toBe("light");
+  await userEvent.click(screen.getByRole("button", { name: "Use dark theme" }));
+  view.unmount();
+  render(<MemoryRouter initialEntries={["/login"]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
+  expect(screen.getByRole("button", { name: "Use dark theme" })).toHaveAttribute("aria-pressed", "true");
+  expect(document.documentElement.dataset.theme).toBe("dark");
   auth.dispose();
 });

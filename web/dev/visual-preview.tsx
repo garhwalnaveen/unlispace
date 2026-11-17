@@ -1,5 +1,5 @@
 // Development-only visual fixture. This does not authenticate or contact a real backend.
-// Open /design-preview.html?view=files|empty|error|loading|account&theme=light|dark.
+// Open /design-preview.html?view=files|empty|error|loading|account&theme=light|dark, or ?route=/any/app/path.
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "../src/App";
@@ -51,7 +51,7 @@ window.fetch = async (input, init) => {
 };
 const auth = new AuthStore(localStorage, null);
 auth.accept({ accessToken: "local-preview-only", refreshToken: "local-preview-only", expiresIn: 86400, user, accountCreated: false });
-const route = ["files", "folder-empty"].includes(view) ? "/drives/design/" : view === "account" ? "/settings" : "/";
+const route = params.get("route") || (["files", "folder-empty"].includes(view) ? "/drives/design/" : view === "account" ? "/settings" : "/");
 createRoot(document.getElementById("root")!).render(
   <MemoryRouter initialEntries={[route]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>,
 );

@@ -31,7 +31,7 @@ export function TeamPage() {
   }
   const roles: Role[] = data?.role === "owner" ? ["owner", "admin", "member", "viewer"] : ["member", "viewer"];
   return <>
-    <header className="page-heading"><div><h1>Team</h1><p className="muted">{data?.name || "Manage who can use this workspace and its drives."}</p></div><Link to="/">Back to drives</Link></header>
+    <header className="page-heading"><div><Link to="/">Your drives</Link><h1>Team</h1><p className="muted">{data?.name || "Manage who can use this workspace and its drives."}</p></div></header>
     <ErrorNotice error={(!removing && actionError) || error} />
     {notice && <p className="notice" role="status">{notice}</p>}
     {loading && <Loading>Loading team…</Loading>}

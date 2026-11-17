@@ -7,7 +7,7 @@ S3-compatible API. Hosted at [orbitfs.io](https://orbitfs.io).
 
 | Path | What it is |
 | --- | --- |
-| [`web/`](web/README.md) | React/Vite single-page app: landing page, file browser, billing, team and access keys |
+| [`web/`](web/README.md) | React/Vite single-page app: sign-in, file browser, billing, team and access keys |
 | [`cloud/api/`](cloud/api/README.md) | Control-plane Worker on D1: accounts, sessions, workspaces, drives, billing, access keys |
 | [`cloud/data-plane/`](cloud/data-plane/README.md) | Storage Worker: one Durable Object per drive, content-addressed blocks in R2 |
 | [`cloud/s3-gateway/`](cloud/s3-gateway/README.md) | S3-compatible Worker in front of the data plane |

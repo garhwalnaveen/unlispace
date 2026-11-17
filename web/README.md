@@ -63,9 +63,8 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
 
 ## Screens and behavior
 
-- `/`: public Orbit landing page when signed out; your drives when signed in. `/overview` always shows
-  the landing page, including while session recovery is pending. Its interactive preview uses clearly labeled
-  example files; account and file actions still require sign-in.
+- `/`: your drives when signed in; signed-out visitors are sent to `/login`. The public landing page
+  lives in the separate `garhwalnaveen/orbit-landing` repository.
 - `/login`: email → six-digit OTP, or Google; `/auth/callback` consumes and immediately removes
   the single-use handoff fragment. New accounts get the backend's personal org, drive and trial.
 - `/desktop?state&code_challenge`: preserves the desktop return location through either login
@@ -159,17 +158,14 @@ Use the shadcn components in `src/components/ui` for buttons, text inputs, nativ
 dialogs and tables. `components.json` configures the registry and `@/` alias, so additional
 components can be added with `npx shadcn@latest add <component>`. Add only what a screen uses.
 The Button defaults to the outline variant; use `variant="default"` for the primary action.
-`src/styles.css` owns the shared neutral light/dark tokens and page layout. Avoid restyling controls
+`src/styles.css` owns the shared light/dark tokens and page layout. Avoid restyling controls
 there. Lucide provides the icons; the shared `Modal` connects existing screen state to Radix.
 
-The public landing page follows the visual patterns of [Liveblocks’ homepage](https://liveblocks.io/):
-black surfaces, a centered sans-serif hero, white primary buttons, compact navigation menus, and
-subtle bordered product panels. This is an independent implementation: the public Liveblocks
-repository contains SDKs, examples and starter-kit marketing components, not its production homepage.
-`src/landing.css` owns the public design tokens, responsive layout and component styling;
-`src/Landing.tsx` reuses the installed Button and DropdownMenu components. The signed-in app uses
-its own neutral light/dark canvas, top navigation, and existing shadcn controls. The homepage
-uses the bundled Satoshi font and Fontshare license in `public/fonts/`.
+The app follows the visual language of the Orbit landing page (`garhwalnaveen/orbit-landing`):
+warm near-black ink on an off-white canvas, thin pale borders, rounded cards, pill buttons and
+uppercase monospace labels. `src/styles.css` owns the tokens for the light theme (the default) and
+the dark theme, which mirrors the landing page's dark sections. Type is Inter with Geist Mono for
+labels, bundled through `@fontsource-variable`; headings prefer Helvetica Neue where installed.
 Legacy `orbit.*` storage keys, `uls://` links, deployed
 service names, and sender domains stay compatible with existing clients and infrastructure.
 

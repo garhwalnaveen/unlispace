@@ -1,5 +1,5 @@
 import { Button } from "./components/ui/button";
-import { ChevronsUpDown, CreditCard, Users } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import { Suspense, lazy, useEffect, useState } from "react";
 import {
@@ -15,7 +15,6 @@ import { Callback, Desktop, Embed, Login } from "./AuthPages";
 import { useAuth } from "./context";
 import { DriveBrowser } from "./DriveBrowser";
 import { Home } from "./Home";
-import { Landing, LandingNavigation } from "./Landing";
 import { OrbitMark } from "./OrbitMark";
 import { AccessKeys } from "./AccessKeys";
 import { Billing } from "./Billing";
@@ -54,10 +53,9 @@ export function App() {
   const { auth, ready, user, error } = useAuth();
   const location = useLocation();
   const authPage = ["/login", "/auth/callback", "/desktop"].includes(location.pathname);
-  const marketing = location.pathname === "/overview" || (location.pathname === "/" && ready && !user);
   // Pages embedded in the desktop app render without the web chrome; the app supplies its own.
   const embedded = location.pathname.startsWith("/embed/");
-  const workspace = Boolean(user && !authPage && !marketing);
+  const workspace = Boolean(user && !authPage);
   const orgPath = location.pathname.match(/^\/orgs\/[^/]+(?=\/(?:billing|team)$)/)?.[0];
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<unknown>();
@@ -70,7 +68,7 @@ export function App() {
   }
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem("orbit.theme");
-    return saved === "light" || saved === "dark" || saved === "system" ? saved : "dark";
+    return saved === "light" || saved === "dark" || saved === "system" ? saved : "light";
   });
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -98,15 +96,15 @@ export function App() {
       </main>
     );
   return (
-    <div className={`app ${marketing ? "marketing" : user && !authPage ? "workspace" : "welcome"}`}>
+    <div className={`app ${workspace ? "workspace" : "welcome"}`}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-        <Link className="brand" to={user ? "/" : "/overview"} aria-label={marketing ? "OrbitFS home" : "Orbit home"}>
+        <Link className="brand" to="/" aria-label="Orbit home">
           <OrbitMark className="brand-mark" />
-          {!workspace && <span>{marketing ? "OrbitFS" : "orbit"}</span>}
+          {!workspace && <span>Orbit</span>}
         </Link>
         {workspace && <>
           <DropdownMenu>
@@ -120,18 +118,14 @@ export function App() {
             </DropdownMenuContent>
           </DropdownMenu>
           <nav className="workspace-nav" aria-label="Main navigation">
-            {location.pathname.startsWith("/drives/") ? <Link to="/" className="active" aria-current="page"><Icon name="drive" /><span>Your drives</span></Link> : <NavLink to="/" end><Icon name="drive" /><span>Your drives</span></NavLink>}
-            <NavLink to="/ai"><Icon name="sparkles" /><span>Ask AI</span></NavLink>
-            <NavLink to={orgPath ? `${orgPath}/billing` : "/billing"}><CreditCard aria-hidden="true" /><span>Billing</span></NavLink>
-            <NavLink to={orgPath ? `${orgPath}/team` : "/team"}><Users aria-hidden="true" /><span>Team</span></NavLink>
+            {location.pathname.startsWith("/drives/") ? <Link to="/" className="active" aria-current="page">Your drives</Link> : <NavLink to="/" end>Your drives</NavLink>}
+            <NavLink to="/ai">Ask AI</NavLink>
+            <NavLink to={orgPath ? `${orgPath}/billing` : "/billing"}>Billing</NavLink>
+            <NavLink to={orgPath ? `${orgPath}/team` : "/team"}>Team</NavLink>
           </nav>
         </>}
-        {marketing && <LandingNavigation />}
         <div className="topbar-right">
-          {workspace ? <><Link className="session-email" to="/settings">{user!.email}</Link><Button variant="ghost" className="session-signout" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</Button></> : marketing ? (user ? <Link className="marketing-signin" to="/">Open workspace</Link> : <>
-            <Link className="marketing-signin" to="/login">Sign in</Link>
-            <Button asChild variant="default"><Link to="/login">Get Early Access</Link></Button>
-          </>) : <div className="theme-switch" role="group" aria-label="Appearance">
+          {workspace ? <><Link className="session-email" to="/settings">{user!.email}</Link><Button variant="ghost" className="session-signout" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</Button></> : <div className="theme-switch" role="group" aria-label="Appearance">
             {(["system", "light", "dark"] as const).map((value) => (
               <Button
                 key={value}
@@ -156,12 +150,11 @@ export function App() {
             Retry session
           </Button>
         )}
-        {!ready && location.pathname !== "/overview" ? (
+        {!ready ? (
           <Loading>Loading your account…</Loading>
         ) : (
           <Routes>
-            <Route path="/" element={user ? <Home /> : <Landing />} />
-            <Route path="/overview" element={<Landing />} />
+            <Route path="/" element={user ? <Home /> : <Navigate to="/login" replace />} />
             <Route path="/login" element={<Login />} />
             <Route path="/auth/callback" element={<Callback />} />
             <Route path="/desktop" element={<Desktop />} />

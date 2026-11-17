@@ -160,7 +160,6 @@ export function Home() {
                   <span className="empty-drive-icon"><Icon name="drive" /></span>
                   <h3>No drives yet</h3>
                   {canManage ? <Button variant="default" onClick={() => setAction({ kind: "create", org })}><Plus size={16} />New drive</Button> : <p className="muted">A workspace owner or admin can create a drive.</p>}
-                  <Button asChild><Link to="/overview">Explore Orbit</Link></Button>
                 </div>
               ) : !visibleDrives.length && (
                 <div className="drive-empty"><Search size={24} className="muted" aria-hidden="true" /><h3>No matching drives</h3><Button onClick={() => { setQuery(""); setFilter("All"); }}>Clear filters</Button></div>
