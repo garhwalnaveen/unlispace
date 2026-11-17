@@ -111,7 +111,7 @@ export class Transfers {
     try {
       if (job.kind === "download") {
         if (job.total > MAX_WEB_DOWNLOAD) throw new Error("This file is too large to download in the browser. Open it in Finder instead.");
-        await downloadFile(this.readApi, job.path, (bytes, total) => progress(bytes, total, "uploading"), job.versionId);
+        await downloadFile(this.readApi, job.path, (bytes, total) => progress(bytes, total, "uploading"), job.versionId, signal);
       } else {
         const api = this.writeApi!;
         if (job.keepBoth) {

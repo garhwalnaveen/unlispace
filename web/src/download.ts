@@ -4,6 +4,7 @@ export async function assembleFile(
   manifest: Manifest,
   fetchShard: (hash: string) => Promise<ArrayBuffer>,
   onProgress: (bytes: number) => void,
+  signal?: AbortSignal,
 ): Promise<Blob> {
   if (!Number.isSafeInteger(manifest.size) || manifest.size < 0)
     throw new Error("Invalid file size.");
@@ -22,6 +23,7 @@ export async function assembleFile(
   let received = 0;
   onProgress(0);
   for (const shard of manifest.shards) {
+    signal?.throwIfAborted();
     const bytes = await fetchShard(shard.h);
     if (bytes.byteLength !== shard.n)
       throw new Error("A downloaded shard is incomplete. Please try again.");
@@ -46,11 +48,15 @@ export async function downloadFile(
   path: string,
   onProgress: (bytes: number, total: number) => void,
   versionId?: string,
+  signal?: AbortSignal,
 ) {
   const manifest = await api.manifest(path, versionId);
   const blob = await assembleFile(manifest, api.shard.bind(api), (bytes) =>
     onProgress(bytes, manifest.size),
+    signal,
   );
+  // A cancelled download must not land in the downloads folder.
+  signal?.throwIfAborted();
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
