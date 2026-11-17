@@ -20,8 +20,8 @@ const drives: Drive[] = [
   { id: "archive", orgId: "studio", name: "Shared archive", placement: "weur", status: "ready", createdAt: now, access: "read" },
 ];
 const user = { id: "preview-user", email: "alex@example.com" };
-const quotaBytes = 1024 ** 4;
-const usedBytes = 128 * 1024 ** 3;
+const quotaBytes = 1e12;
+const usedBytes = 128e9;
 const org = { id: "studio", name: "Studio workspace", role: "owner", tier: "teams", trialEndsAt: null, drives: view === "empty" ? [] : drives };
 const entries = [
   { name: "Brand assets", type: "folder", size: 0 },
@@ -70,7 +70,7 @@ if (onboardingView) {
 }
 async function onboardingFetch(path: string, url: URL, init?: RequestInit): Promise<Response | null> {
   if (path === "/orgs") return response({ orgs: [onboardingOrg] });
-  if (path === "/me/access") return response({ user, workspaces: [{ ...onboardingOrg, state: settingUp ? "provisioning" : "trial_active", writable: !settingUp, storageReady: !settingUp, quotaBytes: 500 * 1024 ** 3, usedBytes: 0 }] });
+  if (path === "/me/access") return response({ user, workspaces: [{ ...onboardingOrg, state: settingUp ? "provisioning" : "trial_active", writable: !settingUp, storageReady: !settingUp, quotaBytes: 500e9, usedBytes: 0 }] });
   if (path === "/auth/otp/start") return response({ ok: true });
   if (path === "/auth/otp/verify") return response({ error: "invalid_code" }, 400);
   if (path === "/auth/desktop/code") return response({ code: "preview-code" });

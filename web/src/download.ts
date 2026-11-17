@@ -9,7 +9,7 @@ export async function assembleFile(
     throw new Error("Invalid file size.");
   if (manifest.size > MAX_WEB_DOWNLOAD)
     throw new Error(
-      "For files above 512 MiB, use the desktop app to download in Finder.",
+      "For files above 512 MB, use the desktop app to download in Finder.",
     );
   if (
     manifest.shards.some(
