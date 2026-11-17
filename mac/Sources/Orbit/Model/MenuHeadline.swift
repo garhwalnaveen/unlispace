@@ -153,7 +153,9 @@ struct MenuHeadline: Equatable {
     /// Plan and storage problems. Each one says the files are safe before it says what to do.
     private static func planHeadline(_ input: Input) -> MenuHeadline? {
         if let access = input.access {
-            if let paused = access.first(where: { $0.state == "expired" || ($0.storageReady && $0.writable == false) }) {
+            // The server also reports a workspace over its quota as not writable. That is a storage
+            // problem with an active plan, so it must not be read as the plan being inactive.
+            if let paused = access.first(where: { $0.state == "expired" || ($0.storageReady && $0.writable == false && !$0.isFull) }) {
                 return MenuHeadline(title: "Changes are paused — plan inactive",
                                     detail: "Your files are safe. Choose a plan for \(paused.name) to keep saving changes.",
                                     tone: .attention, action: .managePlan(workspaceID: paused.id))
@@ -161,12 +163,15 @@ struct MenuHeadline: Equatable {
             if access.contains(where: { !$0.storageReady }) && input.drives.isEmpty {
                 return MenuHeadline(title: "Setting up your drive", detail: "Storage is being prepared.", tone: .busy, action: nil)
             }
-            for workspace in access {
-                guard let quota = workspace.quotaBytes, quota > 0, let used = workspace.usedBytes else { continue }
-                let fraction = Double(used) / Double(quota)
-                guard fraction >= almostFull else { continue }
-                return MenuHeadline(title: fraction >= 1 ? "Storage is full" : "Storage almost full",
-                                    detail: "Your files are safe. \(Format.bytes(used)) of \(Format.bytes(quota)) used in \(workspace.name).",
+            // A full workspace comes before one that is merely close.
+            let fullest = access.filter { ($0.storageFraction ?? 0) >= almostFull }
+                .max { ($0.storageFraction ?? 0) < ($1.storageFraction ?? 0) }
+            if let workspace = fullest, let used = workspace.usedBytes, let quota = workspace.quotaBytes {
+                let usage = "\(Format.bytes(used)) of \(Format.bytes(quota)) used in \(workspace.name)."
+                return MenuHeadline(title: workspace.isFull ? "Storage is full" : "Storage almost full",
+                                    detail: workspace.writable == false
+                                        ? "Your files are safe. \(usage) New changes are paused until you free up space or add storage."
+                                        : "Your files are safe. \(usage)",
                                     tone: .attention, action: .managePlan(workspaceID: workspace.id))
             }
             return nil
@@ -178,6 +183,17 @@ struct MenuHeadline: Equatable {
         }
         return nil
     }
+}
+
+extension MeAccess.Workspace {
+    /// Used storage as a fraction of the quota, or nil when the server reports no quota.
+    var storageFraction: Double? {
+        guard let quota = quotaBytes, quota > 0, let used = usedBytes else { return nil }
+        return Double(used) / Double(quota)
+    }
+
+    /// At or over the quota. The server stops accepting changes once usage goes over it.
+    var isFull: Bool { (storageFraction ?? 0) >= 1 }
 }
 
 extension AppModel {

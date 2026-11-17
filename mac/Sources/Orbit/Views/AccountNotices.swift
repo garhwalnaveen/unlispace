@@ -38,11 +38,15 @@ struct PlanNotices: View {
                 if !workspace.storageReady {
                     return Notice(id: workspace.id, text: "\(workspace.name): Storage is being set up. Your drive appears when it is ready.", waiting: true)
                 }
+                // Over quota is reported as not writable too; it is a storage problem, not a plan problem.
+                if workspace.isFull, let used = workspace.usedBytes, let quota = workspace.quotaBytes {
+                    return Notice(id: workspace.id, text: "\(workspace.name): Your files are safe. Storage is full (\(Format.bytes(used)) of \(Format.bytes(quota))), so new changes are paused. Free up space or add storage.")
+                }
                 if workspace.writable == false {
                     return Notice(id: workspace.id, text: "\(workspace.name): Your files are safe. Saving changes is paused. Check the plan to continue.")
                 }
-                if let quota = workspace.quotaBytes, quota > 0, let used = workspace.usedBytes,
-                   Double(used) / Double(quota) >= MenuHeadline.almostFull {
+                if let fraction = workspace.storageFraction, fraction >= MenuHeadline.almostFull,
+                   let used = workspace.usedBytes, let quota = workspace.quotaBytes {
                     return Notice(id: workspace.id, text: "\(workspace.name): Your files are safe. \(Format.bytes(used)) of \(Format.bytes(quota)) is used. Free up space or add storage before it runs out.")
                 }
                 return nil

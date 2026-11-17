@@ -92,6 +92,30 @@ import OrbitKit
         #expect(ready { $0.access = unmetered }.title == "All files are up to date")
     }
 
+    /// The server marks a workspace over its quota as not writable (`writable && usedBytes <= quotaBytes`).
+    /// With an active plan that is a storage problem, never "plan inactive".
+    @Test func anOverQuotaWorkspaceWithAnActivePlanIsFullNotInactive() throws {
+        let overQuota = #"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":false,"usedBytes":11000000000,"quotaBytes":10000000000}"#
+        let full = ready { $0.access = try! self.access(overQuota) }
+        #expect(full.title == "Storage is full")
+        #expect(full.detail?.hasPrefix("Your files are safe.") == true)
+        #expect(full.detail?.contains("New changes are paused") == true)
+        #expect(full.action == .managePlan(workspaceID: "a"))
+        let notices = PlanNotices.notices(access: try access(overQuota), workspaces: [])
+        #expect(notices.count == 1 && notices[0].text.contains("Storage is full") && !notices[0].text.contains("plan"))
+
+        // Not writable while under quota is the plan, and an expired plan stays inactive even when over quota.
+        let underQuota = #"{"id":"b","name":"Beta","state":"paid","storageReady":true,"writable":false,"usedBytes":1000000000,"quotaBytes":10000000000}"#
+        #expect(ready { $0.access = try! self.access(underQuota) }.title == "Changes are paused — plan inactive")
+        let expiredOver = #"{"id":"c","name":"Gone","state":"expired","storageReady":true,"writable":false,"usedBytes":11000000000,"quotaBytes":10000000000}"#
+        #expect(ready { $0.access = try! self.access(expiredOver) }.title == "Changes are paused — plan inactive")
+        // An inactive plan in one workspace outranks a full one in another, and full outranks almost full.
+        #expect(ready { $0.access = try! self.access("\(overQuota),\(underQuota)") }.action == .managePlan(workspaceID: "b"))
+        let nearly = #"{"id":"d","name":"Near","state":"paid","storageReady":true,"writable":true,"usedBytes":9500000000,"quotaBytes":10000000000}"#
+        #expect(ready { $0.access = try! self.access("\(nearly),\(overQuota)") }.title == "Storage is full")
+        #expect(PlanNotices.notices(access: try access(underQuota), workspaces: [])[0].text.contains("Check the plan"))
+    }
+
     @Test func anEndedTrialPausesChangesWhenTheServerHasNoAccessReport() throws {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let orgs = try JSONDecoder().decode(WorkspacesResult.self, from: Data(#"""
