@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-11-17T10:45:14.514Z",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "bucket": "d-01m7ks6adtss34tjfc9b3f22h9",
+  "prefix": "orbit-benchmark-97d8d6ab-9232-4861-80ea-7bfccdcfa939/",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.12.1"
+  },
+  "method": {
+    "rounds": 2,
+    "warmups": 3,
+    "samplesPerRound": 8,
+    "concurrency": 8,
+    "maxSockets": 64,
+    "awsMaxAttempts": 1,
+    "extension503Retries": 4,
+    "requestDeadlineMs": 300000,
+    "selectedScenarios": [
+      "truncate 4 KiB, end of 64 MiB"
+    ],
+    "figure": "Median of round p50s; fanout rows use individual request latencies",
+    "cache": "No client object cache; server caches uncontrolled",
+    "verification": "SHA-256 after timing; streaming digest during timing",
+    "limitation": "Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment."
+  },
+  "rows": [
+    {
+      "name": "truncate 4 KiB, end of 64 MiB",
+      "kind": "truncate",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            2789.7963330000057,
+            3389.1073329999927,
+            3477.339208999998,
+            3477.896458000003,
+            3479.8471250000002,
+            3499.0902500000084,
+            3644.535917000001,
+            3666.3742500000226
+          ],
+          "complete": true,
+          "p50Ms": 3478.8717915000016
+        },
+        {
+          "samplesMs": [
+            3402.101041999995,
+            3417.3305830000318,
+            3550.0605000000214,
+            3723.997040999995,
+            3743.728000000003,
+            3938.615458000044,
+            3940.5675420000334,
+            3956.4478339999914
+          ],
+          "complete": true,
+          "p50Ms": 3733.862520499999
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "cf522ab46af87b1ec2daea4f37efd9e12b04c74841e967f361c723d7e162abfe",
+      "medianMs": 3606.3671560000003
+    }
+  ],
+  "preflight": "passed",
+  "cleanup": "Benchmark tree soft-deleted and verified absent; no incomplete multipart uploads; immutable history and retained shards may still consume quota",
+  "finishedAt": "2026-11-17T10:52:39.184Z"
+}

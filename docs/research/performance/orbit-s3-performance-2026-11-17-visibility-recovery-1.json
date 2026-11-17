@@ -1,0 +1,206 @@
+{
+  "startedAt": "2026-11-17T10:02:41.354Z",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "bucket": "d-01m7ks6adtss34tjfc9b3f22h9",
+  "prefix": "orbit-benchmark-b222a0ad-7d52-41b0-a086-b894bf15c8b5/",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.12.1"
+  },
+  "method": {
+    "rounds": 2,
+    "warmups": 3,
+    "samplesPerRound": 8,
+    "concurrency": 8,
+    "maxSockets": 64,
+    "awsMaxAttempts": 1,
+    "extension503Retries": 4,
+    "requestDeadlineMs": 300000,
+    "selectedScenarios": [
+      "truncate 4 KiB, end of 32 MiB",
+      "insert 4 KiB, middle of 32 MiB",
+      "truncate 4 KiB, end of 64 MiB",
+      "insert 4 KiB, start of 64 MiB",
+      "delete 4 KiB, start of 64 MiB"
+    ],
+    "figure": "Median of round p50s; fanout rows use individual request latencies",
+    "cache": "No client object cache; server caches uncontrolled",
+    "verification": "SHA-256 after timing; streaming digest during timing",
+    "limitation": "Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment."
+  },
+  "rows": [
+    {
+      "name": "truncate 4 KiB, end of 32 MiB",
+      "kind": "truncate",
+      "size": 33554432,
+      "rounds": [
+        {
+          "samplesMs": [
+            3265.477332999988,
+            3460.013249999989,
+            3561.379667000001,
+            3707.0210420000076,
+            4083.739749999979,
+            4084.284458000009,
+            4084.8417499999923,
+            4107.9457500000135
+          ],
+          "complete": true,
+          "p50Ms": 3895.380395999993
+        },
+        {
+          "samplesMs": [
+            3294.178666999971,
+            3476.6167499999865,
+            3521.6503329999978,
+            3619.8870840000454,
+            3810.109582999954,
+            3828.412707999989,
+            3979.433040999982,
+            4008.429375000007
+          ],
+          "complete": true,
+          "p50Ms": 3714.9983334999997
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "6c2137bc791d151c89178bac03606e90d7945485fa4a163f83fe154162f7a696",
+      "medianMs": 3805.1893647499965
+    },
+    {
+      "name": "insert 4 KiB, middle of 32 MiB",
+      "kind": "insert-middle",
+      "size": 33554432,
+      "rounds": [
+        {
+          "samplesMs": [
+            6618.677832999965,
+            6620.605041999952,
+            6619.915541999973,
+            6622.8592499999795,
+            6620.192708999966,
+            6620.816500000074,
+            6620.774083000026,
+            6621.184084000066
+          ],
+          "complete": true,
+          "p50Ms": 6620.689562499989
+        },
+        {
+          "samplesMs": [
+            3487.0370829999447,
+            3664.745792000089,
+            3664.262040999951,
+            3770.30483300006,
+            3792.0520419999957,
+            3997.6794159999117,
+            3998.4743330001365,
+            4049.292832999956
+          ],
+          "complete": true,
+          "p50Ms": 3781.178437500028
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "bbdef7fe781cfae6ca0f69b3c01c31f724840873b47d16d7e0a2f6b92aae3440",
+      "medianMs": 5200.934000000008
+    },
+    {
+      "name": "truncate 4 KiB, end of 64 MiB",
+      "kind": "truncate",
+      "size": 67108864,
+      "rounds": [],
+      "status": "failed",
+      "phase": "warmup",
+      "fixtureSHA256": "a84a1c90b262602bd2a45d829fb7b0ba48559714d12a7e3a37600f2b8d862332",
+      "error": {
+        "name": "AbortError"
+      }
+    },
+    {
+      "name": "insert 4 KiB, start of 64 MiB",
+      "kind": "insert-start",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            2694.4779159999453,
+            2953.853708000155,
+            3031.556249999907,
+            3149.3683329999913,
+            3446.619583999971,
+            3447.8974580001086,
+            3448.3520840001293,
+            3451.252457999857
+          ],
+          "complete": true,
+          "p50Ms": 3297.993958499981
+        },
+        {
+          "samplesMs": [
+            2092.4302920000628,
+            2645.6354999998584,
+            2988.1732079999056,
+            2989.0196669998113,
+            2989.263374999864,
+            3117.704625000013,
+            3143.2037500001024,
+            3369.967499999795
+          ],
+          "complete": true,
+          "p50Ms": 2989.1415209998377
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "9bc86e87f7e3c69e9cf5cf8ca446632ee84d3acb0df226af8d56c42ea1ecaf3c",
+      "medianMs": 3143.5677397499094
+    },
+    {
+      "name": "delete 4 KiB, start of 64 MiB",
+      "kind": "delete-start",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            2903.27633399982,
+            3133.2094580000266,
+            3391.5185420000926,
+            3394.5542500000447,
+            3413.223042000085,
+            3650.799167000223,
+            3651.614499999676,
+            3677.826624999754
+          ],
+          "complete": true,
+          "p50Ms": 3403.888646000065
+        },
+        {
+          "samplesMs": [
+            3562.7307500001043,
+            3737.4103749999776,
+            3917.9686670000665,
+            3919.1523750000633,
+            4016.429041999858,
+            4210.483084000181,
+            4214.35479200026,
+            4236.900915999897
+          ],
+          "complete": true,
+          "p50Ms": 3967.7907084999606
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "25f274fe078d740fd730f3cd98e87b945384e4a014aebffdb618ebcf67264543",
+      "medianMs": 3685.8396772500128
+    }
+  ],
+  "preflight": "passed",
+  "cleanup": "Benchmark tree soft-deleted and verified absent; no incomplete multipart uploads; immutable history and retained shards may still consume quota",
+  "finishedAt": "2026-11-17T10:44:53.404Z"
+}

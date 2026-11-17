@@ -66,7 +66,7 @@ function address(url: URL, host: string): { bucket: string | null; key: string }
   return slash < 0 ? { bucket: rest || null, key: "" } : { bucket: rest.slice(0, slash), key: rest.slice(slash + 1) };
 }
 
-export async function handle(request: Request, deps: Deps): Promise<Response> {
+export async function handle(request: Request, deps: Deps, ctx?: Pick<ExecutionContext, "waitUntil">): Promise<Response> {
   let url = new URL(request.url);
   const storageMount = url.searchParams.has("x-s3sdk-mount");
   const requestId = crypto.randomUUID();
@@ -86,7 +86,9 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
     const { bucket, key } = address(url, deps.host);
     const q = url.searchParams, method = request.method;
     const response = await route();
-    await deps.resolver.recordUse?.(auth.key.keyId);
+    const tracking = deps.resolver.recordUse?.(auth.key.keyId);
+    if (tracking && ctx) ctx.waitUntil(tracking.catch(() => { console.error("Access key use tracking failed"); }));
+    else await tracking;
     response.headers.set("x-amz-request-id", requestId);
     protocol(response);
     return response;
@@ -95,7 +97,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
       const ctxFor = (b: string): ObjectContext => ({
         request, url, auth, key, now: deps.now, state,
         resolveSource: async bucket => {
-          const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
+          const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket, "read"));
           authorize(auth.key, info.driveId, "read");
           return new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId);
         },
@@ -106,7 +108,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
         return listBuckets(deps, auth);
       }
       if (key === "") return bucketRoute(bucket, ctxFor(bucket));
-      const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
+      const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket, ["GET", "HEAD", "DELETE"].includes(method) ? "read" : "write"));
       authorize(auth.key, info.driveId, "read");
       const c = ctxFor(info.driveId);
       if (new TextEncoder().encode(key).length > 1024 || key.startsWith("/") || key.replace(/\/$/, "").split("/").some(p => p === "." || p === ".." || p === "")) throw new S3Error(400, "InvalidArgument");
@@ -176,7 +178,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
       let displayName: string | undefined;
       try { const value = request.headers.get("x-uls-display-name"); if (value !== null) displayName = decodeURIComponent(value); }
       catch { throw new S3Error(400, "InvalidArgument"); }
-      const sourceInfo = source ? await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, source)) : null;
+      const sourceInfo = source ? await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, source, "read")) : null;
       const created = source
         ? await control(() => deps.controlPlane.forkDrive(auth.key.keyId, {source, alias: bucket}))
         : await control(() => deps.controlPlane.createDrive(auth.key.keyId, {alias: bucket, ...(displayName !== undefined ? {displayName} : {}), ...(placementHeader ? {placement: placements[placementHeader]} : {})}));
@@ -186,7 +188,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
       return new Response(null, {headers: {location: `/${bucket}`, "x-uls-drive-id": created.driveId,
         ...(sourceInfo && "forkPoint" in created ? {"x-uls-fork-source-id": sourceInfo.driveId, "x-uls-fork-point": new Date(created.forkPoint as number).toISOString()} : {})}});
     }
-    const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
+    const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket, "read"));
     authorize(auth.key, info.driveId, "read");
     c = {...c, dp: new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId)};
     if (method === "DELETE" && !q.size) {
@@ -274,13 +276,13 @@ async function objectVersions(c: ObjectContext): Promise<Response> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     let deps: Deps;
     try { deps = depsFromEnv(env); }
     catch (e) { console.error("misconfigured", e); return protocol(errorResponse(new S3Error(503, "ServiceUnavailable", "Gateway is not configured"), crypto.randomUUID())); }
     const internal = await handleIngressBridge(request, deps, env.ULS_INGRESS_SECRET);
     if (internal) { internal.headers.set("cache-control","no-store"); return internal; }
-    return handle(request, deps);
+    return handle(request, deps, ctx);
   },
 } satisfies ExportedHandler<Env>;
 export type { Access };

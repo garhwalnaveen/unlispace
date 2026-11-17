@@ -107,6 +107,17 @@ describe("ControlPlane RPC", () => {
 		await cp.deleteDrive(id, "rpc-root", { hard: false });
 		await expect(cp.resolveBucket(id, "rpc-root")).rejects.toMatchObject({ code: "no_such_bucket" });
 	});
+	it("resolves reads without storage accounting while retaining scope and revocation checks", async () => {
+		const { w, cp, id, root, org } = await fixture();
+		w.dp.configureQuota = async () => { throw new Error("Storage accounting unavailable"); };
+		expect(await cp.resolveBucket(id, root, "read")).toMatchObject({driveId: root, writable: false, access: "admin"});
+		await expect(cp.resolveBucket(id, root)).rejects.toThrow("Storage accounting unavailable");
+		await expect(cp.resolveBucket(id, root, "invalid" as any)).rejects.toMatchObject({code: "invalid_argument"});
+		await w.env.DB.prepare("UPDATE access_keys SET drives='[]' WHERE id=?").bind(id).run();
+		await expect(cp.resolveBucket(id, root, "read")).rejects.toMatchObject({code: "no_such_bucket"});
+		await w.env.DB.prepare("DELETE FROM memberships WHERE org_id=?").bind(org.id).run();
+		await expect(cp.resolveBucket(id, root, "read")).rejects.toMatchObject({code: "access_denied"});
+	});
 	it("enforces child-key scope, workspace, access, ancestry and current membership", async () => {
 		const { w, s, org, root, call, cp, id } = await fixture();
 		for (const opts of [{ drives: [] }, { drives: null }, { drives: [root, root] }]) await expect(cp.mintChildKey(id, opts as any)).rejects.toMatchObject({ code: "invalid_argument" });

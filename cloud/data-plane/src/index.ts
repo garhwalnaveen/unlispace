@@ -178,6 +178,7 @@ async function putShard(request: Request, env: Env, stub: DriveStub, driveId: st
 		if (tooLarge) return err(413, "too_large");
 		const msg = e instanceof Error ? e.message : String(e);
 		if (/sha-?256|checksum|digest/i.test(msg)) return err(400, "hash_mismatch");
+		if (msg.includes("(10001)")) return err(503, "service_unavailable");
 		return err(400, "bad_request", `upload failed: ${msg}`);
 	}
 	finally { if (quota) await quota.finish(key, stored); }

@@ -1,0 +1,7 @@
+{
+  "requestedByUser": true,
+  "scenarioWorkers": 2,
+  "stoppedAt": "2026-11-17T08:10:11.019437+00:00",
+  "interruptedReport": "recovery-serial-interrupted.json",
+  "reason": "User requested concurrent scenarios for speed; completed serial cases retained, unfinished case rerun from scratch."
+}

@@ -25,6 +25,8 @@ it("preserves bounded input-validation reasons without exposing upstream auth or
         await expect(make(status, code, "private upstream details").stat("file")).rejects.not.toHaveProperty("message", "private upstream details");
     }
     await expect(make(400, "bad_request", { secret: "not text" }).stat("file")).rejects.toHaveProperty("message", "InvalidArgument");
+    await expect(make(503, "service_unavailable", "private storage details").putShard({ h: "a".repeat(64), n: 1 }, new Uint8Array([1])))
+        .rejects.toMatchObject({ status: 503, code: "ServiceUnavailable", message: "ServiceUnavailable" });
 });
 
 it("reuses stored chunks and resolves concurrent R2 duplicate-upload races", async () => {

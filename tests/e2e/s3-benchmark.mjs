@@ -5,18 +5,22 @@ import { createRequire } from 'node:module';
 import { arch, platform, release } from 'node:os';
 import { resolve } from 'node:path';
 import { addAbortSignal } from 'node:stream';
+import { Agent } from 'node:https';
+import { s3Signer } from './s3-sign.mjs';
 
 const require = createRequire(new URL('../../cloud/s3-gateway/package.json', import.meta.url));
 const aws = require('@aws-sdk/client-s3');
 const { NodeHttpHandler } = require('@smithy/node-http-handler');
 const { S3SDKClient } = await import(new URL('../../cloud/s3-gateway/node_modules/@spacefs/s3sdk/dist/index.js', import.meta.url));
 const KiB = 1024, MiB = 1024 * KiB;
+const REQUEST_DEADLINE_MS = 300000;
 const sizes = [4 * KiB, MiB, 32 * MiB, 64 * MiB];
 const label = n => n < MiB ? `${n / KiB} KiB` : `${n / MiB} MiB`;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-export function requestHandler(timeoutMs = 120000) {
+export function requestHandler(timeoutMs = REQUEST_DEADLINE_MS) {
   const handler = new NodeHttpHandler({ connectionTimeout: 15000, requestTimeout: timeoutMs,
-    throwOnRequestTimeout: true, socketTimeout: timeoutMs, httpsAgent: { maxSockets: 64, keepAlive: true } });
+    // An explicit agent keeps Expect: 100-continue from waiting out the entire request deadline.
+    throwOnRequestTimeout: true, socketTimeout: timeoutMs, httpsAgent: new Agent({ maxSockets: 64, keepAlive: true }) });
   return {
     metadata: handler.metadata,
     async handle(request, options = {}) {
@@ -61,6 +65,30 @@ export const median = values => {
   const sorted = [...values].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
+
+export async function cleanupTree(config, prefix, fetcher = fetch) {
+  assert(/^orbit-benchmark-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/$/.test(prefix), 'Cleanup requires the exact generated benchmark root');
+  const mount = new URL(`/${encodeURIComponent(config.bucket)}?x-uls-mount`, config.endpoint);
+  const sign = s3Signer(new URL('../../', import.meta.url).pathname);
+  const response = await fetcher(mount, {headers:await sign(mount,{method:'GET',key:config}),signal:AbortSignal.timeout(120000)});
+  assert(response.ok, 'Cleanup token request failed');
+  const grant = await response.json(), endpoint = new URL(grant.endpoint);
+  assert(grant.canWrite && typeof grant.token === 'string' && /^d-[0-9a-z]{26}$/.test(grant.driveId));
+  assert.equal(/^d-[0-9a-z]{26}$/.test(config.bucket) ? grant.driveId : grant.alias,config.bucket);
+  assert((endpoint.protocol === 'https:' || (endpoint.protocol === 'http:' && ['localhost','127.0.0.1'].includes(endpoint.hostname))) && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash);
+  const base = new URL(`/v0/drives/${grant.driveId}/`, endpoint);
+  const stat = new URL('stat', base); stat.searchParams.set('path',prefix);
+  const request = (url, init = {}) => fetcher(url, {...init,headers:{authorization:`Bearer ${grant.token}`,...init.headers},signal:AbortSignal.timeout(120000)});
+  const before = await request(stat);
+  if (before.status === 404) { assert.equal((await before.json()).error,'no_such_path'); return; }
+  assert(before.ok, 'Cleanup stat failed');
+  const entry = await before.json();
+  assert.equal(entry.type, 'folder');
+  const deleted = await request(new URL('commit',base),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ops:[{op:'delete',path:prefix,ifVersion:entry.versionId}],requestId:randomUUID()})});
+  assert(deleted.ok, 'Benchmark tree deletion failed'); await deleted.arrayBuffer();
+  const after = await request(stat);
+  assert.equal(after.status,404); assert.equal((await after.json()).error,'no_such_path');
+}
 
 export function scenarios(names = []) {
   const rows = [];
@@ -127,19 +155,19 @@ async function run(configPath, output, names = []) {
   assert(!url.username && !url.password && !url.search && !url.hash);
   const client = new S3SDKClient({ endpoint, accessKeyId, secretAccessKey, region: config.region ?? 'us-east-1',
     s3: { maxAttempts: 1, requestHandler: requestHandler() },
-    fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(120000) }),
+    fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(REQUEST_DEADLINE_MS) }),
   });
   const prefix = `orbit-benchmark-${randomUUID()}/`, rows = [];
   const report = { startedAt: new Date().toISOString(), endpoint, bucket, prefix,
     host: { platform: platform(), release: release(), arch: arch(), node: process.version },
-    method: { rounds: 2, warmups: 3, samplesPerRound: 8, concurrency: 8, maxSockets: 64, awsMaxAttempts: 1, extension503Retries: 4, requestDeadlineMs: 120000, selectedScenarios: selected.map(row => row.name),
+    method: { rounds: 2, warmups: 3, samplesPerRound: 8, concurrency: 8, maxSockets: 64, awsMaxAttempts: 1, extension503Retries: 4, requestDeadlineMs: REQUEST_DEADLINE_MS, selectedScenarios: selected.map(row => row.name),
       figure: 'Median of round p50s; fanout rows use individual request latencies',
       cache: 'No client object cache; server caches uncontrolled', verification: 'SHA-256 after timing; streaming digest during timing',
       limitation: 'Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment.' }, rows };
   const save = () => writeFile(output, JSON.stringify(report, null, 2) + '\n');
   const put = (key, body) => client.putObject(bucket, key, body);
   const get = async key => Buffer.from((await client.getObject(bucket, key)).body);
-  const send = command => client.s3.send(command, { abortSignal: AbortSignal.timeout(120000) });
+  const send = command => client.s3.send(command, { abortSignal: AbortSignal.timeout(REQUEST_DEADLINE_MS) });
   async function verify(key, expected) { verifyBytes(await get(key), expected, key); }
   async function multipart(key, body, partSize) {
     const { UploadId } = await send(new aws.CreateMultipartUploadCommand({ Bucket: bucket, Key: key }));
@@ -280,11 +308,15 @@ async function run(configPath, output, names = []) {
   } finally {
     if (report.error?.name === 'IncompatibleGateway') report.cleanup = 'No benchmark writes attempted';
     else try {
-      const listing = await client.listObjects(bucket, { prefix });
-      assert(listing.keys.every(key => key.startsWith(prefix)));
-      await pool(listing.keys.length, 8, i => client.deleteObject(bucket, listing.keys[i]));
-      assert.equal((await client.listObjects(bucket, { prefix })).keys.length, 0);
-      report.cleanup = 'Live benchmark objects deleted; immutable history and retained shards may still consume quota';
+      const uploads = await send(new aws.ListMultipartUploadsCommand({Bucket:bucket,Prefix:prefix}));
+      assert(!uploads.IsTruncated, 'Too many incomplete benchmark uploads');
+      for (const upload of uploads.Uploads ?? []) {
+        assert(upload.Key?.startsWith(prefix) && upload.UploadId);
+        await send(new aws.AbortMultipartUploadCommand({Bucket:bucket,Key:upload.Key,UploadId:upload.UploadId}));
+      }
+      await cleanupTree(config,prefix);
+      assert.equal((await send(new aws.ListMultipartUploadsCommand({Bucket:bucket,Prefix:prefix}))).Uploads?.length ?? 0,0);
+      report.cleanup = 'Benchmark tree soft-deleted and verified absent; no incomplete multipart uploads; immutable history and retained shards may still consume quota';
     } catch (error) { report.cleanup = `failed: ${error.name}`; }
     report.finishedAt = new Date().toISOString(); await save(); client.s3.destroy();
   }

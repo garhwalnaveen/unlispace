@@ -1,0 +1,233 @@
+{
+  "startedAt": "2026-11-17T10:02:41.355Z",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "bucket": "d-01m7ks6adtss34tjfc9b3f22h9",
+  "prefix": "orbit-benchmark-cf0b1654-dded-43ed-9f7a-67bdbd5f2112/",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.12.1"
+  },
+  "method": {
+    "rounds": 2,
+    "warmups": 3,
+    "samplesPerRound": 8,
+    "concurrency": 8,
+    "maxSockets": 64,
+    "awsMaxAttempts": 1,
+    "extension503Retries": 4,
+    "requestDeadlineMs": 300000,
+    "selectedScenarios": [
+      "patch 16 × 4 KiB in 32 MiB",
+      "delete 4 KiB, middle of 32 MiB",
+      "patch 16 × 4 KiB in 64 MiB",
+      "insert 4 KiB, middle of 64 MiB",
+      "delete 4 KiB, middle of 64 MiB"
+    ],
+    "figure": "Median of round p50s; fanout rows use individual request latencies",
+    "cache": "No client object cache; server caches uncontrolled",
+    "verification": "SHA-256 after timing; streaming digest during timing",
+    "limitation": "Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment."
+  },
+  "rows": [
+    {
+      "name": "patch 16 × 4 KiB in 32 MiB",
+      "kind": "patch",
+      "size": 33554432,
+      "rounds": [
+        {
+          "samplesMs": [
+            23017.610249999998,
+            23413.399375000008,
+            24262.072207999998,
+            24259.117375,
+            24353.238417000015,
+            24944.662750000018,
+            25778.789542000013,
+            25777.685917000024
+          ],
+          "complete": true,
+          "p50Ms": 24307.655312500006
+        },
+        {
+          "samplesMs": [
+            19007.10729199997,
+            19150.177917000023,
+            19286.14837499999,
+            19422.832333999977,
+            19532.807792000007,
+            19842.979374999995,
+            20033.840417,
+            20058.275041999994
+          ],
+          "complete": true,
+          "p50Ms": 19477.820062999992
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "44494225572f863aa95488799f943c4dbf6c2ed3b1523135934d04b4097bce08",
+      "medianMs": 21892.73768775
+    },
+    {
+      "name": "delete 4 KiB, middle of 32 MiB",
+      "kind": "delete-middle",
+      "size": 33554432,
+      "rounds": [
+        {
+          "samplesMs": [
+            3964.8070409999928,
+            4219.975749999983,
+            4221.492291999981,
+            4221.586125000031,
+            4450.735166999977,
+            4453.117084000027,
+            4456.3733340000035,
+            4475.007207999937
+          ],
+          "complete": true,
+          "p50Ms": 4336.160646000004
+        },
+        {
+          "samplesMs": [
+            3781.5480830000015,
+            3877.352124999976,
+            3902.5797500000335,
+            4124.4030419999035,
+            4126.522333999979,
+            4142.69216700003,
+            4310.488750000019,
+            4334.703916000086
+          ],
+          "complete": true,
+          "p50Ms": 4125.462687999941
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "91168f2a042ee8d6629b90a939e4b5a6f9dec992985145230e7029f58b345422",
+      "medianMs": 4230.811666999973
+    },
+    {
+      "name": "patch 16 × 4 KiB in 64 MiB",
+      "kind": "patch",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            19579.526459000073,
+            19684.931125000003,
+            19873.381458000047,
+            20066.86354099994,
+            20738.431290999986,
+            21147.64725000004,
+            21148.45229200006,
+            21181.644625000074
+          ],
+          "complete": true,
+          "p50Ms": 20402.647415999963
+        },
+        {
+          "samplesMs": [
+            19799.31495800009,
+            20524.82958300016,
+            20537.51599999983,
+            20661.06108299992,
+            20861.742874999996,
+            21060.993083999958,
+            21082.278374999994,
+            21083.990208000178
+          ],
+          "complete": true,
+          "p50Ms": 20761.40197899996
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "eb35f2ace19ecff31727d5bd8388ff5e15e560897b4a1b18cfa95ebd9d384458",
+      "medianMs": 20582.02469749996
+    },
+    {
+      "name": "insert 4 KiB, middle of 64 MiB",
+      "kind": "insert-middle",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            3940.2057079998776,
+            4283.987833000021,
+            4510.111624999903,
+            4673.8803750001825,
+            4801.581541999942,
+            4943.629417000106,
+            4966.088874999899,
+            5074.229458000045
+          ],
+          "complete": true,
+          "p50Ms": 4737.730958500062
+        },
+        {
+          "samplesMs": [
+            4094.7059169998392,
+            4176.900041999994,
+            4285.836750000017,
+            4427.018583999947,
+            4608.769667000044,
+            5005.511415999848,
+            5044.66654100013,
+            5152.080374999903
+          ],
+          "complete": true,
+          "p50Ms": 4517.894125499995
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "4b175945f603f70c0bc214361f74deb197313839af0cd8cc8caad39d2d596825",
+      "medianMs": 4627.812542000029
+    },
+    {
+      "name": "delete 4 KiB, middle of 64 MiB",
+      "kind": "delete-middle",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            3752.2117920001037,
+            3753.450124999974,
+            3931.3027089999523,
+            4169.94837499992,
+            4209.356541000074,
+            4369.229166999925,
+            4388.8090829998255,
+            4492.695707999868
+          ],
+          "complete": true,
+          "p50Ms": 4189.652457999997
+        },
+        {
+          "samplesMs": [
+            3427.0258749998175,
+            3673.9602500000037,
+            3989.329332999885,
+            4019.4001660002396,
+            4238.896790999919,
+            4252.962082999758,
+            4401.993834000081,
+            4420.213167000096
+          ],
+          "complete": true,
+          "p50Ms": 4129.148478500079
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "974fda1e6df8bfa7037aefa7d5e91836ec34df9a6e2a679c4e405aa8e0e96aa0",
+      "medianMs": 4159.400468250038
+    }
+  ],
+  "preflight": "passed",
+  "cleanup": "Benchmark tree soft-deleted and verified absent; no incomplete multipart uploads; immutable history and retained shards may still consume quota",
+  "finishedAt": "2026-11-17T10:42:44.211Z"
+}

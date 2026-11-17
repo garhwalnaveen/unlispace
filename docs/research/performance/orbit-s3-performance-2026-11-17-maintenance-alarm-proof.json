@@ -1,0 +1,167 @@
+{
+  "rows": [
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:35:44.267Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 32500,
+      "wallMs": 34535,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908144242
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:35:44.267Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 32000,
+      "wallMs": 34017,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908180886
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:35:44.267Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 32500,
+      "wallMs": 34424,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908219699
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:35:44.267Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 32500,
+      "wallMs": 34269,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908262363
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:35:44.267Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 30000,
+      "wallMs": 31763,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908313706
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:35:44.267Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 30000,
+      "wallMs": 31932,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908381427
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:35:44.267Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 32500,
+      "wallMs": 34499,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908480240
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:43:31.192Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 32500,
+      "wallMs": 34652,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908611230
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:43:31.192Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 30000,
+      "wallMs": 31829,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908648006
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:43:31.192Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 30000,
+      "wallMs": 31829,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908684650
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:43:31.192Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 30000,
+      "wallMs": 31891,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908726227
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:43:31.192Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 30000,
+      "wallMs": 31850,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908774589
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:43:31.192Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 32500,
+      "wallMs": 34414,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908844747
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:43:31.192Z",
+      "versionId": "7058a6df-6229-44de-a74e-e483f00e4342",
+      "cpuMs": 30000,
+      "wallMs": 31902,
+      "outcome": "exceededCpu",
+      "timestamp": 1794908951761
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:50:05.132Z",
+      "versionId": "2cbae379-5ed3-4469-99d7-b53c85ab8eeb",
+      "cpuMs": 185631,
+      "wallMs": 198028,
+      "outcome": "exceededWallTime",
+      "timestamp": 1794909005175
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:50:05.132Z",
+      "versionId": "2cbae379-5ed3-4469-99d7-b53c85ab8eeb",
+      "cpuMs": 185369,
+      "wallMs": 197600,
+      "outcome": "exceededWallTime",
+      "timestamp": 1794909205525
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:50:05.132Z",
+      "versionId": "2cbae379-5ed3-4469-99d7-b53c85ab8eeb",
+      "cpuMs": 178041,
+      "wallMs": 188866,
+      "outcome": "exceededWallTime",
+      "timestamp": 1794909408040
+    },
+    {
+      "kind": "alarm",
+      "scheduledTime": "2026-11-17T09:50:05.132Z",
+      "versionId": "397c83ad-807a-4f79-9260-34f9d07b2f85",
+      "cpuMs": 2819,
+      "wallMs": 6332,
+      "outcome": "ok",
+      "timestamp": 1794909606439
+    }
+  ],
+  "limitation": "Authority identity matched through its commit and shard-authorization activity during the benchmark; alarm internals are not individually timed. Earlier truncate verification timeouts preceded the later observed CPU-exhaustion window."
+}

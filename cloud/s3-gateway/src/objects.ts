@@ -101,10 +101,17 @@ export async function getObject(c: ObjectContext): Promise<Response> {
   }
   if (c.request.method === "HEAD") return new Response(null, { status, headers });
   const iterator = c.dp.bytes(manifest, start, end);
-  return new Response(new ReadableStream<Uint8Array>({
+  const body = new ReadableStream<Uint8Array>({
     async pull(controller) { try { const next = await iterator.next(); if (next.done) controller.close(); else controller.enqueue(next.value); } catch (e) { controller.error(e); } },
     async cancel() { await iterator.return(undefined); },
-  }), { status, headers });
+  });
+  if (typeof FixedLengthStream !== "undefined") {
+    // Workers derive Content-Length from the stream, rather than the header alone.
+    const fixed = new FixedLengthStream(end - start);
+    void body.pipeTo(fixed.writable).catch(() => {});
+    return new Response(fixed.readable, { status, headers });
+  }
+  return new Response(body, { status, headers });
 }
 export async function putObject(c: ObjectContext): Promise<Response> {
   const current = await optionalHead(c.dp, c.key);

@@ -32,6 +32,7 @@ test(`streams a signed ${testLength}-byte PUT over a real HTTP socket with bound
     dataPlane:{async fetch(req) {
       const path = new URL(req.url).pathname;
       if (path.endsWith("/manifest")) return Response.json({error:"no_such_path"},{status:404});
+      if (path.endsWith("/shards/missing")) return Response.json({missing:(await req.json()).hashes});
       if (path.includes("/shards/")) {
         const hash = createHash("sha256"); let size=0;
         for await (const part of req.body) {size+=part.length;hash.update(part);}

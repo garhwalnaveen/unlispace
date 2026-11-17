@@ -1,0 +1,65 @@
+{
+  "startedAt": "2026-11-17T07:05:33.894Z",
+  "failure": {
+    "name": "ContentVerificationError",
+    "receivedBytes": 218910720,
+    "expectedBytes": 268435456,
+    "actualSHA256": "2860515112bcb0378fe6c1d127cf8e16cfc75a97aa9d9d0ad6f1290b61b3f9fc",
+    "expectedSHA256": "871a93585d886f2c621c68fc7d62848f5c920c291799d51df53d6dbc76a762a0"
+  },
+  "rows": [
+    {
+      "key": "orbit-benchmark-c5e0d06c-1e74-497c-b2ae-4bf3d06762bb/12/operation-3",
+      "versionId": "v_01M7KZDRXB0QEGBB6HW1QG3G6T",
+      "status": "complete",
+      "receivedBytes": 268435456,
+      "sha256": "5fda331830f84fc4aa9e93db688a668304eee75fb49682a803cabedfcd7b9e30",
+      "prefixSHA256": "d22cc603e29296f04b614293e8a4e3c3bcbce192a7ac19af7b10294a3a8979cf",
+      "matchesExpectedSHA256": false,
+      "matchesFailedResponsePrefix": false
+    },
+    {
+      "key": "orbit-benchmark-c5e0d06c-1e74-497c-b2ae-4bf3d06762bb/12/operation-4",
+      "versionId": "v_01M7KZDYR0T1RR9AZPDY36QDJH",
+      "status": "complete",
+      "receivedBytes": 268435456,
+      "sha256": "8c0086469f0dca171f3ad9e6bc40ae4bbf1d9affcef4c671386ef2a9de9903e2",
+      "prefixSHA256": "7a765d1e2f79e739e8bd798742b5252d6d2520d9e8c9a956d5c5264eec93d109",
+      "matchesExpectedSHA256": false,
+      "matchesFailedResponsePrefix": false
+    },
+    {
+      "key": "orbit-benchmark-c5e0d06c-1e74-497c-b2ae-4bf3d06762bb/12/operation-5",
+      "versionId": "v_01M7KZDERV2G0A6XW2XRN0KHTY",
+      "status": "complete",
+      "receivedBytes": 268435456,
+      "sha256": "971bd961c2a779478440af41595322a93f3853315333da5c5b761e5a6450c2aa",
+      "prefixSHA256": "ede8a64cf7850befa92c37f0dc88c8f0267afc9abde74c812c479c0a6a8e649f",
+      "matchesExpectedSHA256": false,
+      "matchesFailedResponsePrefix": false
+    },
+    {
+      "key": "orbit-benchmark-c5e0d06c-1e74-497c-b2ae-4bf3d06762bb/12/operation-6",
+      "versionId": "v_01M7KZDGJ2Y8254YMDDG760MGW",
+      "status": "complete",
+      "receivedBytes": 268435456,
+      "sha256": "3f81312172835a44535e4fa672181f9d338cd4e3cb468bcc03044c999d16c77b",
+      "prefixSHA256": "e2e13526e8007f2ecc1a01b49d2bf3ca257b4dd0ed37b4261a0fd649f79df699",
+      "matchesExpectedSHA256": false,
+      "matchesFailedResponsePrefix": false
+    },
+    {
+      "key": "orbit-benchmark-c5e0d06c-1e74-497c-b2ae-4bf3d06762bb/12/operation-7",
+      "versionId": "v_01M7KZDEC3YCXJNZ3B7FBSQ602",
+      "status": "complete",
+      "receivedBytes": 268435456,
+      "sha256": "871a93585d886f2c621c68fc7d62848f5c920c291799d51df53d6dbc76a762a0",
+      "prefixSHA256": "2860515112bcb0378fe6c1d127cf8e16cfc75a97aa9d9d0ad6f1290b61b3f9fc",
+      "matchesExpectedSHA256": true,
+      "matchesFailedResponsePrefix": true
+    }
+  ],
+  "matchedExpectedObject": true,
+  "method": "16 MiB ranges, eight concurrent requests, fixed object version; SHA-256 calculated in byte order",
+  "finishedAt": "2026-11-17T07:16:49.315Z"
+}

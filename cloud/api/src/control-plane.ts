@@ -41,11 +41,16 @@ export class ControlPlane extends WorkerEntrypoint<AppEnv> implements ControlPla
 		if (!row || (k.drives !== null && !k.drives.includes(row.id))) throw new HttpError(404, "no_such_bucket");
 		return row;
 	}
-	async #info(ctx: Ctx, k: Key, d: R.DriveRow) {
-		const e = await entitlements(ctx, k.orgId);
-		const writable = d.status === "ready" && e.writable && k.access !== "read";
-		if (writable) await configureStorageQuota(ctx, k.orgId, e.quotaBytes);
-		return { driveId: d.id, alias: d.alias, displayName: d.name, placement: d.placement, createdAt: d.created_at, access: k.access, writable: writable && await storageUsage(ctx, k.orgId) <= e.quotaBytes };
+	async #info(ctx: Ctx, k: Key, d: R.DriveRow, want: "read" | "write" = "write") {
+		let writable = false;
+		if (want === "write") {
+			const e = await entitlements(ctx, k.orgId);
+			if (d.status === "ready" && e.writable && k.access !== "read") {
+				await configureStorageQuota(ctx, k.orgId, e.quotaBytes);
+				writable = await storageUsage(ctx, k.orgId) <= e.quotaBytes;
+			}
+		}
+		return { driveId: d.id, alias: d.alias, displayName: d.name, placement: d.placement, createdAt: d.created_at, access: k.access, writable };
 	}
 	#authed(k: Key) { return { userId: k.userId, email: "", sid: k.accessKeyId }; }
 	#body(ctx: Ctx, body: Options, hard = false) {
@@ -70,9 +75,10 @@ export class ControlPlane extends WorkerEntrypoint<AppEnv> implements ControlPla
 		const rows = (await ctx.env.DB.prepare("SELECT d.*,m.role,o.tier FROM drives d JOIN memberships m ON m.org_id=d.org_id AND m.user_id=? JOIN orgs o ON o.id=d.org_id WHERE d.org_id=? AND d.status!='deleted' ORDER BY d.created_at,d.id").bind(k.userId, k.orgId).all<R.DriveRow>()).results;
 		return Promise.all(rows.filter(d => k.drives === null || k.drives.includes(d.id)).map(d => this.#info(ctx, k, d)));
 	}
-	async resolveBucket(id: string, bucket: string) {
+	async resolveBucket(id: string, bucket: string, want: "read" | "write" = "write") {
+		if (want !== "read" && want !== "write") throw new HttpError(400, "invalid_argument");
 		const k = await this.#key(id), ctx = this.#context();
-		return this.#info(ctx, k, await this.#bucket(ctx, k, bucket));
+		return this.#info(ctx, k, await this.#bucket(ctx, k, bucket), want);
 	}
 	async createDrive(id: string, opts: { alias: string; displayName?: string; placement?: string }) {
 		const k = await this.#key(id), ctx = this.#context(); this.#admin(k);

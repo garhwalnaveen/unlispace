@@ -1,0 +1,13 @@
+{
+  "startedAt": "2026-11-17T09:50:02.282Z",
+  "sourceReport": "parallel-2.json",
+  "prefix": "orbit-benchmark-56cff5fb-24e8-402b-a70a-6b35baaead39/",
+  "abortedUploads": 0,
+  "status": "failed",
+  "error": {
+    "name": "ServiceUnavailable",
+    "status": 503,
+    "requestId": "35029ea8-33ca-4da7-9de7-29c6a7d1adc7"
+  },
+  "finishedAt": "2026-11-17T09:53:23.349Z"
+}

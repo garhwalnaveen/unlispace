@@ -79,6 +79,16 @@ export async function listObjects(c: ObjectContext, bucket: string): Promise<Res
   const k = keyText(encode);
   let body = tag("Name", bucket) + tag("Prefix", k(prefix));
   const contents: string[] = [], common: string[] = [];
+  const batch: Listed[] = [];
+  const flush = async () => {
+    // shortcut: one manifest lookup per file, store validators in listings if bounded parallel reads remain slow.
+    const rows = await Promise.allSettled(batch.map(async item => {
+      const e = item.entry!;
+      return `<Contents>${tag("Key", k(item.key))}${tag("LastModified", iso(e.mtimeMs))}${tag("ETag", await etag(e.type === "folder" ? {...e, shards:[]} : await c.dp.manifest(item.key, e.versionId)))}${tag("Size", e.type === "folder" ? 0 : e.size)}${tag("StorageClass", "STANDARD")}</Contents>`;
+    }));
+    for (const row of rows) { if (row.status === "rejected") throw row.reason; contents.push(row.value); }
+    batch.length = 0;
+  };
   let count = 0, truncated = false, last: Listed | null = null;
   if (max > 0) {
     for await (const item of walkKeys(c, prefix, delimiter, after)) {
@@ -86,11 +96,12 @@ export async function listObjects(c: ObjectContext, bucket: string): Promise<Res
       count++; last = item;
       if (item.prefix) common.push(`<CommonPrefixes>${tag("Prefix", k(item.key))}</CommonPrefixes>`);
       else {
-        const e = item.entry!;
-        contents.push(`<Contents>${tag("Key", k(item.key))}${tag("LastModified", iso(e.mtimeMs))}${tag("ETag", await etag(e.type === "folder" ? {...e, shards:[]} : await c.dp.manifest(item.key)))}${tag("Size", e.type === "folder" ? 0 : e.size)}${tag("StorageClass", "STANDARD")}</Contents>`);
+        batch.push(item);
+        if (batch.length === 8) await flush();
       }
     }
   }
+  if (batch.length) await flush();
   const next = truncated && last ? b64(`${last.prefix ? "p" : "k"}:${last.key}`) : null;
   if (delimiter) body += tag("Delimiter", delimiter);
   body += tag("MaxKeys", max);

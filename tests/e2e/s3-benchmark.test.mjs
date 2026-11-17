@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { edited, errorDetails, median, pool, requestHandler, scenarios, verifyBytes } from './s3-benchmark.mjs';
+import { cleanupTree, edited, errorDetails, median, pool, requestHandler, scenarios, verifyBytes } from './s3-benchmark.mjs';
 
 test('all 49 supplied scenarios have unique names and the documented sizes', () => {
   const rows = scenarios();
@@ -75,6 +75,26 @@ test('request deadline rejects both stalled headers and a stalled response body'
   }
 });
 
+test('uploads proceed when a server withholds 100 Continue', async () => {
+  let received = 0;
+  const server = createServer();
+  server.on('checkContinue', (request, response) => {
+    request.on('data', bytes => { received += bytes.length; });
+    request.on('end', () => { response.writeHead(200); response.end('ok'); });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const handler = requestHandler(500);
+  try {
+    const {response} = await handler.handle({protocol:'http:',hostname:'127.0.0.1',port:server.address().port,method:'PUT',path:'/',headers:{expect:'100-continue','content-length':'7'},body:Buffer.from('payload')});
+    assert.equal(response.statusCode, 200);
+    for await (const _chunk of response.body) {}
+    assert.equal(received, 7);
+  } finally {
+    handler.destroy(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('edit oracle preserves exact bytes at splice, write, patch and truncate boundaries', () => {
   const source = Buffer.alloc(1024 * 1024, 7), data = Buffer.alloc(4096, 9);
   for (const kind of ['append', 'truncate', 'write', 'patch', 'insert-start', 'insert-middle', 'delete-start', 'delete-middle']) {
@@ -139,4 +159,21 @@ test('a write refusal stops before the 49 workloads and saves a credential-free 
     await new Promise(resolve => server.close(resolve));
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('cleanup deletes only the exact generated tree and verifies absence', async () => {
+  const prefix='orbit-benchmark-12345678-1234-1234-1234-123456789abc/';
+  const config={endpoint:'https://s3.example',bucket:'d-00000000000000000000000000',accessKeyId:'TESTKEY',secretAccessKey:'test-secret'};
+  let calls=0;
+  await cleanupTree(config,prefix,async (url,init)=>{
+    calls++;
+    if(calls===1) { assert.equal(new URL(url).search,'?x-uls-mount'); return Response.json({canWrite:true,token:'test-token',driveId:config.bucket,endpoint:'https://data.example'}); }
+    assert.equal(init.headers.authorization,'Bearer test-token');
+    if(calls===2) { assert.equal(new URL(url).searchParams.get('path'),prefix); return Response.json({type:'folder',versionId:'v1'}); }
+    if(calls===3) { const body=JSON.parse(init.body); assert.deepEqual(body.ops,[{op:'delete',path:prefix,ifVersion:'v1'}]); return Response.json({seq:1}); }
+    assert.equal(new URL(url).searchParams.get('path'),prefix);
+    return Response.json({error:'no_such_path'},{status:404});
+  });
+  assert.equal(calls,4);
+  for (const unsafe of ['', 'unrelated/', `${prefix}nested/`]) await assert.rejects(cleanupTree(config,unsafe,async()=>{throw new Error('must not request');}),/exact generated/);
 });

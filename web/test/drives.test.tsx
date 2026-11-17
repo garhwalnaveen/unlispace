@@ -1,7 +1,19 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
-import { drive, json, org, renderApp } from "./fixtures";
+import { deferred, drive, json, org, renderApp } from "./fixtures";
+it("shows a loading placeholder until drives are available", async () => {
+  const pending = deferred<Response>();
+  vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("/orgs") ? pending.promise : Promise.resolve(json({ workspaces: [] }))));
+  renderApp();
+  expect(screen.getByRole("heading", { name: "Your drives" })).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("Loading your drives…");
+  expect(screen.queryByText("—")).not.toBeInTheDocument();
+  pending.resolve(json({ orgs: [org] }));
+  expect(await screen.findByRole("heading", { name: "Space" })).toBeInTheDocument();
+  expect(screen.getByText("1 drive")).toBeVisible();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+});
 it("shows the trial, explains plan limits, and requires exact drive-name confirmation before deletion", async () => {
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "POST") return json({ error: "plan_limit" }, 403);

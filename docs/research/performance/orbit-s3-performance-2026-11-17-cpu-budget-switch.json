@@ -1,0 +1,6 @@
+{
+  "at": "2026-11-17T09:49:33.404627+00:00",
+  "reason": "Repeated DriveAuthority alarm CPU exhaustion at default 30-second limit; preserve completed rounds and rerun unresolved cases after validated production CPU-budget increase.",
+  "interruptedReport": "parallel-1-interrupted.json",
+  "userRequestedScenarioConcurrency": 2
+}

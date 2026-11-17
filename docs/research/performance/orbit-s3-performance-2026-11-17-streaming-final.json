@@ -1,0 +1,78 @@
+{
+  "startedAt": "2026-11-17T08:11:35.127Z",
+  "finishedAt": "2026-11-17T09:37:34.374Z",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "bucket": "d-01m7ks6adtss34tjfc9b3f22h9",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.12.1"
+  },
+  "method": {
+    "rounds": 2,
+    "warmups": 3,
+    "samplesPerRound": 8,
+    "concurrency": 8,
+    "maxSockets": 64,
+    "awsMaxAttempts": 1,
+    "extension503Retries": 4,
+    "requestDeadlineMs": 300000,
+    "selectedScenarios": [
+      "stream get 256 MiB"
+    ],
+    "figure": "Median of round p50s; fanout rows use individual request latencies",
+    "cache": "No client object cache; server caches uncontrolled",
+    "verification": "SHA-256 after timing; streaming digest during timing",
+    "limitation": "Parallel scenario timings share network, CPU and backend traffic. These medians are not comparable to isolated baseline timings. All rows require complete verified rounds; interrupted partial samples are excluded.",
+    "outerScenarioConcurrencyMax": 2,
+    "recoverySerialCases": 4,
+    "recoveryParallelCases": 29,
+    "parallelRequestedByUser": true
+  },
+  "rows": [
+    {
+      "name": "stream get 256 MiB",
+      "kind": "stream",
+      "size": 268435456,
+      "rounds": [
+        {
+          "samplesMs": [
+            121316.66783300001,
+            148425.03520800002,
+            154917.10825,
+            158908.239042,
+            180310.324166,
+            180372.608333,
+            184408.94920799998,
+            194941.84875
+          ],
+          "complete": true,
+          "p50Ms": 169609.28160400002
+        },
+        {
+          "samplesMs": [
+            136241.930125,
+            146734.50929099997,
+            178444.48095800006,
+            180255.102708,
+            183222.47895899997,
+            183400.75641600002,
+            183454.91266600002,
+            186217.36208400008
+          ],
+          "complete": true,
+          "p50Ms": 181738.79083349998
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "f74dd4027761cd2ca2686ac62917588f9ca35f30e38140f4423add3000ddb90a",
+      "medianMs": 175674.03621875,
+      "attemptMode": "parallel",
+      "worker": 2
+    }
+  ],
+  "sourceReport": "parallel-2.json",
+  "cleanup": "passed after cleanup recovery; original failure preserved"
+}

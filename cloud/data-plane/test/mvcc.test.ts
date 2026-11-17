@@ -9,6 +9,24 @@ const stub=(id:string)=>(env.DRIVE_AUTHORITY as DurableObjectNamespace<DriveAuth
 const child=()=>`mvcc-${crypto.randomUUID().slice(0,8)}`;
 const manifest=(drive:string,path:string)=>(api(`/v0/drives/${drive}/manifest?path=${encodeURIComponent(path)}`).then(r=>r.json())) as Promise<{shards:{h:string;n:number}[];versionId:string}>;
 
+it("uses key lookups when exporting retained shard visibility",async()=>{
+ const source=await newDrive();
+ await runInDurableObject(stub(source),(_instance,ctx)=>{
+  for(let i=0;i<1000;i++)ctx.storage.sql.exec("INSERT INTO mv_retained_shards(_branch,_rev,_dead,h,n) VALUES(?,0,0,?,4096)",source,i.toString(16).padStart(64,"0"));
+  const count=ctx.storage.sql.exec<{n:number}>("SELECT COUNT(*) AS n FROM retained_shards");
+  expect(count.one().n).toBe(1000);
+  expect(count.rowsRead).toBeLessThan(10000);
+  ctx.storage.sql.exec("DROP INDEX mv_retained_shards_identity");
+ });
+ await evictDurableObject(stub(source));
+ await stub(source).locate();
+ await runInDurableObject(stub(source),(_instance,ctx)=>{
+  const count=ctx.storage.sql.exec<{n:number}>("SELECT COUNT(*) AS n FROM retained_shards");
+  expect(count.one().n).toBe(1000);
+  expect(count.rowsRead).toBeLessThan(10000);
+ });
+});
+
 it("keeps frozen namespace, history, shard grants and branch routing across mutations and eviction",async()=>{
  const source=await newDrive(),fork=child(),nested=child();
  await putFile(source,"folder/a","before");

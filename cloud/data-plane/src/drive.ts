@@ -18,7 +18,7 @@ import { INLINE_MANIFEST_BYTES, iterateManifest, loadManifest, loadMetadata, loa
 import { EXPORT_COLUMNS, validateExportRow, withinDeadline, type ExportHeader } from "./exports";
 import { GC_SCHEMA, GC_INTERVAL_MS, LineageGC } from "./gc";
 import { quotaFor } from "./quota";
-import { hasBranches, migrateBranches, forkBranch, branchSql, branchIds } from "./mvcc";
+import { hasBranches, migrateBranches, forkBranch, branchSql, branchIds, ensureBranchIndexes } from "./mvcc";
 
 type Row = Record<string, SqlStorageValue>;
 interface VersionRow extends Row {
@@ -112,7 +112,7 @@ class DriveStore {
 	constructor(private ctx: DurableObjectState, private env: Env, sql?: SqlStorage, queue = {tail: Promise.resolve() as Promise<unknown>}) {
 		this.queue = queue;
 		this.sql = sql ?? ctx.storage.sql;
-		if (!sql && hasBranches(this.sql)) this.sql.exec("CREATE INDEX IF NOT EXISTS mv_nodes_identity ON mv_nodes(id,_branch,_rev DESC)");
+		if (!sql && hasBranches(this.sql)) ensureBranchIndexes(this.sql);
 		if (!sql && !hasBranches(this.sql)) this.ctx.storage.transactionSync(() => {
 			for (const stmt of [...SCHEMA, ...GC_SCHEMA, ...HISTORY_SCHEMA]) this.sql.exec(stmt);
 			migrateNodes(this.sql);
