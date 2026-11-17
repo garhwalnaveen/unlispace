@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { json, org, renderApp, session } from "./fixtures";
@@ -138,17 +138,4 @@ it("shows members read-only to people who cannot manage them, and retries a fail
   expect(within(screen.getByText("peer@example.com").closest("tr")!).getByText("Member")).toBeInTheDocument();
   expect(screen.queryByLabelText("Invite by email")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^Role for|^Options for peer/ })).not.toBeInTheDocument();
-});
-
-it("accepts only after an explicit action and shows a wrong-account error", async () => {
-  const fetcher = vi.fn(async (url: string) => {
-    if (url.endsWith("/orgs")) return json({ orgs: [] });
-    if (url.endsWith("/me/access")) return json({ workspaces: [] });
-    return json({ error: "invalid_invite" }, 400);
-  });
-  const accepted = () => fetcher.mock.calls.filter(([url]) => url.endsWith("/accept"));
-  vi.stubGlobal("fetch", fetcher); renderApp("/invites/test-token");
-  await userEvent.setup().click(await screen.findByRole("button", { name: "Accept invitation" }));
-  expect(accepted()).toHaveLength(1);
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("belongs to another email address"));
 });

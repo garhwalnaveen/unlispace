@@ -2,11 +2,13 @@ import { NativeSelect } from "./components/ui/native-select";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
-import { ChevronDown, MoreHorizontal, Users } from "lucide-react";
-import { useCallback, useState, type FormEvent } from "react";
+import { ChevronDown, MoreHorizontal, UserPlus, Users } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { errorMessage } from "./api";
 import { useAuth } from "./context";
+import { Card } from "./onboarding/Card";
+import { useWorkspace } from "./shell/workspace";
 import { formatDay, PageHeader, Section } from "./settings/parts";
 import { ErrorNotice, Loading, Modal, useLoad } from "./ui";
 import type { Invitation, Member, Role } from "./teams";
@@ -155,8 +157,49 @@ export function TeamPage() {
 export function AcceptInvitation() {
   const { token = "" } = useParams();
   const { auth, user } = useAuth();
+  const workspace = useWorkspace();
   const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"joining" | "leaving" | null>(null);
   const [error, setError] = useState<unknown>();
-  return <section className="panel"><h1>Join a workspace</h1><p>You are signed in as <strong>{user?.email}</strong>. Accept only if this is the email address that received the invitation.</p><p>Joining gives the workspace access to your email address. Files you add to its drives belong to that workspace.</p><ErrorNotice error={error} /><div className="actions"><Button variant="default" disabled={busy} onClick={() => { setBusy(true); setError(undefined); void auth.api.teams.accept(token).then(result => navigate(`/orgs/${encodeURIComponent(result.orgId)}/team`)).catch(setError).finally(() => setBusy(false)); }}>{busy ? "Joining…" : "Accept invitation"}</Button><Link to="/">Back to drives</Link></div><p className="muted small">If this is the wrong account, <Link to="/settings">sign out in Account</Link> and reopen the invitation.</p></section>;
+  // Files are home: once the joined workspace is in the list, open it.
+  const [joined, setJoined] = useState<string | null>(null);
+  const reloading = useRef(false);
+  useEffect(() => {
+    if (!joined) return;
+    if (workspace.loading) reloading.current = true;
+    if (workspace.orgs.some((org) => org.id === joined) || (reloading.current && !workspace.loading)) navigate("/", { replace: true });
+  }, [joined, workspace.orgs, workspace.loading, navigate]);
+  async function accept() {
+    setBusy("joining");
+    setError(undefined);
+    try {
+      const { orgId } = await auth.api.teams.accept(token);
+      workspace.setCurrent(orgId);
+      workspace.reload();
+      setJoined(orgId);
+    } catch (reason) {
+      setError(reason);
+      setBusy(null);
+    }
+  }
+  // Signing out returns here after sign-in, because this page is the saved destination.
+  async function switchAccount() {
+    setBusy("leaving");
+    setError(undefined);
+    try { await auth.logout(); }
+    catch (reason) { setError(reason); setBusy(null); }
+  }
+  return (
+    <div className="ob-page">
+    <Card icon={<UserPlus />} title="Join a workspace" lead={<>You are signed in as <strong>{user?.email}</strong>. Accept if this is the address the invitation was sent to.</>}>
+      <p className="ob-muted">People in the workspace will see your email address. Files you add to its drives belong to the workspace.</p>
+      <ErrorNotice error={error} />
+      <Button variant="default" className="ob-main" disabled={busy !== null} onClick={() => void accept()}>{busy === "joining" ? "Joining…" : "Accept invitation"}</Button>
+      <div className="ob-row ob-center">
+        <Link className="ob-link" to="/">Not now</Link>
+        <button type="button" className="ob-link" disabled={busy !== null} onClick={() => void switchAccount()}>{busy === "leaving" ? "Signing out…" : "Use a different account"}</button>
+      </div>
+    </Card>
+    </div>
+  );
 }

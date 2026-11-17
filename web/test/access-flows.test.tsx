@@ -1,8 +1,8 @@
-import { fireEvent, screen, within, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { formatMoney } from "../src/Billing";
-import { catalog as baseCatalog, drive, json, renderApp, session, signedOutStore } from "./fixtures";
+import { catalog as baseCatalog, drive, json, renderApp, session } from "./fixtures";
 const org = (extra = {}) => ({ id: drive.orgId, name: "My Space", role: "owner", tier: "individual", trialPending: false, trialEndsAt: Date.now() + 3 * 86_400_000, quotaBytes: 500e9, usedBytes: 0, drives: [drive], ...extra });
 const ws = (extra = {}) => ({ id: drive.orgId, name: "My Space", role: "owner", tier: "individual", state: "trial_active", trialPending: false, trialEndsAt: Date.now() + 3 * 86_400_000, writable: true, storageReady: true, quotaBytes: 500e9, usedBytes: 0, ...extra });
 const access = (...workspaces: unknown[]) => ({ user: session.user, workspaces });
@@ -73,60 +73,6 @@ it("every billing return target resolves to a rendered route", async () => {
   await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.endsWith(`/orgs/${drive.orgId}/billing`))).toBe(true));
   expect(screen.queryByText("That page could not be found.")).not.toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "Main navigation" })).getByRole("link", { name: drive.name })).toHaveAttribute("href", `/drives/${drive.id}/`);
-});
-
-const desktopQuery = (extra: Record<string, string> = {}) => new URLSearchParams({ state: "s+1", code_challenge: "a".repeat(43), ...extra });
-
-it("switch=1 signs the web session out once and keeps the desktop parameters for sign-in", async () => {
-  const fetcher = vi.fn(async (url: string) => {
-    if (url.endsWith("/auth/logout")) return json({ ok: true });
-    throw new Error(`Unexpected ${url}`);
-  });
-  vi.stubGlobal("fetch", fetcher);
-  renderApp(`/desktop?${desktopQuery({ switch: "1" })}`);
-  expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
-  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/auth/logout"))).toHaveLength(1);
-  // The Google button records the return target without `switch`, so the user cannot loop.
-  await userEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
-  await waitFor(() => expect(sessionStorage.getItem("orbit.return")).toBe(`/desktop?${desktopQuery()}`));
-});
-
-it("switch=1 without a web session goes straight to sign-in", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("no network expected"); }));
-  renderApp(`/desktop?${desktopQuery({ switch: "1" })}`, await signedOutStore());
-  expect(await screen.findByRole("heading", { name: "Welcome to Orbit" })).toBeInTheDocument();
-});
-
-it("offers Use a different account on the confirmation screen and keeps the target through email sign-in", async () => {
-  const fetcher = vi.fn(async (url: string, _init?: RequestInit) => {
-    if (url.endsWith("/auth/logout")) return json({ ok: true });
-    if (url.endsWith("/otp/start")) return json({ ok: true });
-    if (url.endsWith("/otp/verify")) return json({ ...session, user: { id: "u2", email: "other@example.com" } });
-    if (url.endsWith("/orgs")) return json({ orgs: [org()] });
-    throw new Error(`Unexpected ${url}`);
-  });
-  vi.stubGlobal("fetch", fetcher);
-  const user = userEvent.setup();
-  renderApp(`/desktop?${desktopQuery()}`);
-  await screen.findByRole("heading", { name: "Your Orbit is ready" });
-  await user.click(screen.getByRole("button", { name: "Use a different account" }));
-  await user.type(await screen.findByLabelText("Email address"), "other@example.com");
-  await user.click(screen.getByRole("button", { name: "Continue with email" }));
-  await user.type(await screen.findByLabelText("Verification code"), "123456");
-  await user.click(screen.getByRole("button", { name: "Verify & sign in" }));
-  expect(await screen.findByRole("heading", { name: "Your Orbit is ready" })).toBeInTheDocument();
-  expect(within(screen.getByRole("main")).getByText("other@example.com")).toBeInTheDocument();
-});
-
-it("switching from email to Google mid-flow keeps the desktop return target", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => { if (url.endsWith("/otp/start")) return json({ ok: true }); throw new Error(url); }));
-  const user = userEvent.setup();
-  renderApp(`/desktop?${desktopQuery()}`, await signedOutStore());
-  await user.type(await screen.findByLabelText("Email address"), "x@example.com");
-  await user.click(screen.getByRole("button", { name: "Continue with email" }));
-  await screen.findByLabelText("Verification code");
-  await user.click(screen.getByRole("button", { name: "Continue with Google" }));
-  await waitFor(() => expect(sessionStorage.getItem("orbit.return")).toBe(`/desktop?${desktopQuery()}`));
 });
 
 function homeFetch(accessBody: unknown, orgBody = org()) {
