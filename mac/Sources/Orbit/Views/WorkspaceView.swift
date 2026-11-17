@@ -52,6 +52,8 @@ struct WorkspaceView: View {
                 page
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Theme.canvas)
+            .orbitControls()
             .toolbar { toolbar }
         }
         .windowTitle(navigation.page.title)
@@ -118,7 +120,7 @@ struct WorkspaceSidebar: View {
             VStack(alignment: .leading, spacing: 6) {
                 Divider()
                 Label(model.statusTitle, systemImage: model.statusSymbol)
-                    .font(.caption).foregroundStyle(.secondary)
+                    .orbitLabel().foregroundStyle(.secondary)
                     .padding(.horizontal, 12).padding(.top, 4)
                     .accessibilityLabel("Status: \(model.statusTitle)")
                 Button(action: openAccount) {

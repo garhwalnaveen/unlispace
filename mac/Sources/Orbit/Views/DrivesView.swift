@@ -56,7 +56,7 @@ struct DrivesView: View {
                     Text(shown.count == store.drives.count
                          ? Format.count(shown.count, "drive", "drives")
                          : "\(shown.count) of \(store.drives.count) drives")
-                        .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                        .orbitLabel().foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 Divider()
@@ -73,7 +73,7 @@ struct DrivesView: View {
                     ForEach(shown) { DriveRow(model: model, drive: $0) }
                     FirstFileChecklist(model: model)
                 }
-                .listStyle(.inset)
+                .listStyle(.inset).scrollContentBackground(.hidden)
             }
         }
     }
@@ -99,7 +99,7 @@ struct DriveRow: View {
                     }
                     if store.isReadOnly(drive.driveId) { Text("Read only") }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption.monospaced()).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             if busy { ProgressView().controlSize(.small).accessibilityLabel(drive.mountState.label) }
@@ -182,7 +182,7 @@ struct NewDriveSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New Drive").font(.headline)
+            Text("New Drive").font(Theme.display(20))
             if directory.isLoading && directory.workspaces.isEmpty {
                 ProgressView("Loading workspaces…")
             } else if directory.manageable.isEmpty {
@@ -199,17 +199,19 @@ struct NewDriveSheet: View {
                     }
                 }
             }
-            if let error { Text(error).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            if let error { Text(error).font(.callout).foregroundStyle(Theme.danger).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(creating ? "Creating…" : "Create", action: create)
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.defaultAction).buttonStyle(.orbitProminent)
                     .disabled(creating || target == nil || trimmed.isEmpty || trimmed.count > 100)
             }
         }
         .padding(20)
         .frame(width: 380)
+        .background(Theme.canvas)
+        .orbitControls()
         .task(id: directory.loadKey) { await directory.load() }
     }
 

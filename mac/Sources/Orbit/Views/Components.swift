@@ -2,19 +2,17 @@ import AppKit
 import SwiftUI
 import OrbitKit
 
-// The app uses system text styles, semantic colors, and standard controls throughout.
-// This file holds the few pieces that are shared between screens.
+// Pieces shared between screens. Colors, type, and button styles live in Theme.swift.
 
 struct OrbitMark: View {
     var size: CGFloat = 20
 
     var body: some View {
+        // The landing page's mark: a planet and one tilted ring, drawn on a 28-point grid.
         ZStack {
-            Ellipse().strokeBorder(lineWidth: size * 1.7 / 24)
-                .frame(width: size * 20 / 24, height: size * 10 / 24).rotationEffect(.degrees(-35))
-            Circle().frame(width: size * 6.6 / 24, height: size * 6.6 / 24)
-            Circle().frame(width: size * 2.8 / 24, height: size * 2.8 / 24)
-                .offset(x: size / 3, y: -size / 4)
+            Ellipse().strokeBorder(lineWidth: size * 1.7 / 28)
+                .frame(width: size * 25.7 / 28, height: size * 11.7 / 28).rotationEffect(.degrees(-28))
+            Circle().frame(width: size * 8.8 / 28, height: size * 8.8 / 28)
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
@@ -49,9 +47,17 @@ struct MountStateLabel: View {
 
     var body: some View {
         Label(state.label, systemImage: state.symbol)
-            .font(.caption)
-            .foregroundStyle(state == .error ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+            .orbitLabel()
+            .foregroundStyle(tint)
             .accessibilityLabel("Status: \(state.label)")
+    }
+
+    private var tint: Color {
+        switch state {
+        case .mounted: Theme.success
+        case .error: Theme.danger
+        default: Theme.muted
+        }
     }
 }
 
@@ -91,8 +97,8 @@ struct InlineMessage<Actions: View>: View {
     private var tint: Color {
         switch kind {
         case .info: .secondary
-        case .warning: .orange
-        case .error: .red
+        case .warning: Theme.warning
+        case .error: Theme.danger
         }
     }
 }
@@ -117,7 +123,7 @@ struct SignInControls: View {
             Button("Open Browser Again") { session.openSignInBrowser() }
             Button("Cancel") { session.cancelSignIn() }
         } else if prominent {
-            Button("Sign In…") { session.signIn() }.buttonStyle(.borderedProminent)
+            Button("Sign In…") { session.signIn() }.buttonStyle(.orbitProminent)
         } else {
             Button("Sign In…") { session.signIn() }
         }

@@ -33,7 +33,7 @@ struct OfflineFilesView: View {
                                            description: Text("Keeping a drive offline downloads all of its files to this Mac."))
                 } else {
                     List(pins) { pin in OfflinePinRow(store: store, pin: pin) }
-                        .listStyle(.inset)
+                        .listStyle(.inset).scrollContentBackground(.hidden)
                 }
             }
         } else {

@@ -38,7 +38,7 @@ struct SetupView: View {
                     }
                     if let message = error ?? model.messages.error {
                         Label(message, systemImage: "exclamationmark.octagon")
-                            .foregroundStyle(.red).textSelection(.enabled)
+                            .foregroundStyle(Theme.danger).textSelection(.enabled)
                             .accessibilityLabel("Error: \(message)")
                     }
                 }
@@ -48,6 +48,8 @@ struct SetupView: View {
             Divider()
             footer.padding(.horizontal, 20).padding(.vertical, 12)
         }
+        .background(Theme.canvas)
+        .orbitControls()
         .frame(minWidth: 520, minHeight: 480)
         .windowTitle("Set Up Orbit")
         .task(id: step) {
@@ -69,7 +71,7 @@ struct SetupView: View {
 
     private func heading(_ title: String, _ detail: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            Text(title).font(Theme.display(26)).accessibilityAddTraits(.isHeader)
             Text(detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -126,13 +128,13 @@ struct SetupView: View {
 
     private var footer: some View {
         HStack {
-            Text("Step \(step.rawValue + 1) of \(SetupStep.allCases.count)").font(.callout).foregroundStyle(.secondary)
+            Text("Step \(step.rawValue + 1) of \(SetupStep.allCases.count)").orbitLabel().foregroundStyle(.secondary)
             Spacer()
             if mounting { ProgressView().controlSize(.small) }
             Button("Back") { error = nil; step = step.previous }
                 .disabled(step == .signIn || mounting)
             Button(primaryTitle, action: advance)
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(.defaultAction).buttonStyle(.orbitProminent)
                 .disabled(mounting || (step == .signIn && session.signingIn) || (step == .drives && !model.isAccountLive))
         }
     }
@@ -200,7 +202,7 @@ struct ShortcutPicker: View {
             ForEach(WorkspaceShortcut.allCases) { Text($0.label).tag($0) }
         }
         if let problem = store.problem {
-            Text(problem).font(.caption).foregroundStyle(.red)
+            Text(problem).font(.caption).foregroundStyle(Theme.danger)
         }
     }
 }

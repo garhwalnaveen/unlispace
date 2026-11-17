@@ -48,8 +48,12 @@ Workspace data is cached for five minutes and shared by every screen that needs 
 
 ## Interface
 
-The app uses standard macOS controls, system text styles, and semantic colors; `Views/Components.swift`
-holds the few shared pieces. It follows the system appearance unless Settings › General says otherwise.
+The app shares its look with the Orbit landing page and web app. `Views/Theme.swift` holds the colors
+(warm near-black ink on an off-white canvas, with the landing page's dark values in dark mode), the
+Helvetica Neue display face, the uppercase monospaced label style, and the pill button style;
+`Views/Components.swift` holds the shared views. Text fields, pickers, toggles, lists, the sidebar,
+and menus stay standard macOS controls. The app follows the system appearance unless Settings ›
+General says otherwise.
 
 - **Window**: sidebar with Drives, Activity, Offline Files, Search, and Ask AI (⌘1–⌘5, ⌘F for
   Search, ⌘R to refresh). A banner above every page reports connection state, errors, and conflicts.

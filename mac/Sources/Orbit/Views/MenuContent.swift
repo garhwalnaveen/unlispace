@@ -32,7 +32,7 @@ struct MenuContent: View {
             OrbitMark(size: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.session.account?.email ?? "Orbit").font(.headline).lineLimit(1).truncationMode(.middle)
-                Label(model.statusTitle, systemImage: model.statusSymbol).font(.caption).foregroundStyle(.secondary)
+                Label(model.statusTitle, systemImage: model.statusSymbol).orbitLabel().foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             Button("Open Orbit") { windows?.showWorkspace() }
@@ -47,7 +47,7 @@ struct MenuContent: View {
                 HStack { SignInControls(session: model.session) }
             }
             if let error = messages.error {
-                Label(error, systemImage: "exclamationmark.octagon").foregroundStyle(.red).lineLimit(3)
+                Label(error, systemImage: "exclamationmark.octagon").foregroundStyle(Theme.danger).lineLimit(3)
             }
             if let conflict = messages.conflict {
                 Label(StatusBanner.conflictText(conflict), systemImage: "exclamationmark.triangle").lineLimit(3)

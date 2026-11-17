@@ -23,6 +23,7 @@ struct SettingsView: View {
             }
         }
         .frame(width: 560, height: 460)
+        .orbitControls()
         .task { await model.permissions.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.permissions.refresh() }
@@ -80,7 +81,7 @@ private struct AccountSettings: View {
                 LabeledContent("Not signed in") { HStack { SignInControls(session: session) } }
             }
         } footer: {
-            if let error = model.messages.error { Text(error).foregroundStyle(.red) }
+            if let error = model.messages.error { Text(error).foregroundStyle(Theme.danger) }
         }
         if model.isAccountLive { WorkspacesSection(directory: model.workspaces) }
     }
@@ -116,7 +117,7 @@ struct WorkspacesSection: View {
                     .buttonStyle(.link).font(.caption).disabled(directory.isLoading)
             }
         } footer: {
-            if let error = directory.error { Text(error).foregroundStyle(.red) }
+            if let error = directory.error { Text(error).foregroundStyle(Theme.danger) }
             else if !directory.workspaces.isEmpty { Text("Team and Billing open in your browser.") }
         }
         .task(id: directory.loadKey) { await directory.load(force: true) }
@@ -156,7 +157,7 @@ private struct StorageSettings: View {
             }
             .disabled(!model.engine.isConnected || config.uploadLimitUnsupported)
         } footer: {
-            if let error = config.uploadLimitError { Text(error).foregroundStyle(.red) }
+            if let error = config.uploadLimitError { Text(error).foregroundStyle(Theme.danger) }
             else if config.uploadLimitUnsupported { Text("Update Orbit to limit upload speed.") }
             else if !model.engine.isConnected { Text("Available when the background service is running.") }
         }
