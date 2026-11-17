@@ -29,6 +29,7 @@ struct MenuContent: View {
         }
         .padding(12)
         .frame(width: 340)
+        .orbitControls()
         .task(id: model.workspaces.loadKey) { await model.workspaces.load() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Orbit menu")
@@ -54,7 +55,7 @@ struct MenuContent: View {
         if error != nil || messages.conflict != nil || messages.notice != nil {
             VStack(alignment: .leading, spacing: 6) {
                 if let error {
-                    Label(error, systemImage: "exclamationmark.octagon").foregroundStyle(.red).lineLimit(3)
+                    Label(error, systemImage: "exclamationmark.octagon").foregroundStyle(Theme.danger).lineLimit(3)
                         .accessibilityLabel("Error: \(error)")
                 }
                 if let conflict = messages.conflict {

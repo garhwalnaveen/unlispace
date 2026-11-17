@@ -73,7 +73,7 @@ struct DrivesView: View {
                     Text(shown.count == store.drives.count
                          ? Format.count(shown.count, "drive", "drives")
                          : "\(shown.count) of \(store.drives.count) drives")
-                        .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                        .orbitLabel().foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 Divider()
@@ -96,7 +96,7 @@ struct DrivesView: View {
                         DriveRow(model: model, drive: drive) { navigation.driveEdit = $0 }
                     }
                 }
-                .listStyle(.inset)
+                .listStyle(.inset).scrollContentBackground(.hidden)
             }
         }
     }
@@ -122,7 +122,7 @@ struct DriveRow: View {
                     if store.isReadOnly(drive.driveId) { Text("· View only") }
                     if store.isKeptOffline(drive.driveId) { Text("· Kept offline") }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption.monospaced()).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             if busy { ProgressView().controlSize(.small).accessibilityLabel(drive.mountState.label) }
@@ -279,7 +279,7 @@ struct NewDriveSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New Drive").font(.headline)
+            Text("New Drive").font(Theme.display(20))
             Text("A drive is a folder of files with history. It appears in Finder as soon as it is created.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if directory.isLoading && directory.workspaces.isEmpty {
@@ -298,17 +298,19 @@ struct NewDriveSheet: View {
                     }
                 }
             }
-            if let error { Text(error).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            if let error { Text(error).font(.callout).foregroundStyle(Theme.danger).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(creating ? "Creating…" : "Create Drive", action: create)
-                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.defaultAction).buttonStyle(.orbitProminent)
                     .disabled(creating || target == nil || trimmed.isEmpty || trimmed.count > 100)
             }
         }
         .padding(20)
         .frame(width: 380)
+        .background(Theme.canvas)
+        .orbitControls()
         .task(id: directory.loadKey) { await directory.load() }
     }
 

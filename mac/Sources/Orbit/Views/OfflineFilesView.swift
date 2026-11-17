@@ -33,7 +33,7 @@ struct OfflineFilesView: View {
                                            description: Text("Drives you keep offline appear here. Keeping one offline downloads all of its files to this Mac, so they open without a connection."))
                 } else {
                     List(pins) { pin in OfflinePinRow(store: store, pin: pin) }
-                        .listStyle(.inset)
+                        .listStyle(.inset).scrollContentBackground(.hidden)
                 }
             }
         } else {

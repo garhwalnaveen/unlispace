@@ -53,6 +53,8 @@ struct WorkspaceView: View {
                 page
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Theme.canvas)
+            .orbitControls()
             .toolbar { toolbar }
         }
         .windowTitle(navigation.page.title)

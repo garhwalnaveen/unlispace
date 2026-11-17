@@ -14,7 +14,7 @@ struct ActivityView: View {
                 HeadlineLabel(headline: Self.summary(model), font: .headline).accessibilityAddTraits(.isHeader)
                 Spacer()
                 if !items.isEmpty {
-                    Text(Format.count(items.count, "item", "items")).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                    Text(Format.count(items.count, "item", "items")).orbitLabel().foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -27,7 +27,7 @@ struct ActivityView: View {
                                        description: Text("Save or drop a file into a drive in Finder and its upload appears here with its progress."))
             } else {
                 List(items) { ActivityRow(content: .init($0)) }
-                    .listStyle(.inset)
+                    .listStyle(.inset).scrollContentBackground(.hidden)
             }
             if model.isLive, let uploads = model.activity.uploads { UploadQueueFooter(uploads: uploads) }
         }
@@ -114,12 +114,12 @@ private struct ActivityRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: content.symbol)
-                .foregroundStyle(content.failed ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                .foregroundStyle(content.failed ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.secondary))
                 .frame(width: 18).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(content.title).lineLimit(1).truncationMode(.middle)
                 Text(content.status).font(.caption)
-                    .foregroundStyle(content.failed ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(content.failed ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.secondary))
                 switch content.progress {
                 case .none: EmptyView()
                 case .indeterminate: ProgressView().progressViewStyle(.linear).accessibilityLabel(content.title)
@@ -146,7 +146,7 @@ private struct UploadQueueFooter: View {
             HStack(spacing: 6) {
                 if full {
                     Label("Your files are safe. Too many are waiting to upload, so new ones wait until some finish.", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Theme.warning)
                 } else {
                     Text("Waiting to upload")
                 }

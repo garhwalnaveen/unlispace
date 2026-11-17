@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { readOnboarding } from "../src/onboarding/state";
-import { authStore, drive, json, renderApp, session, signedOutStore } from "./fixtures";
+import { drive, json, renderApp, session, signedOutStore } from "./fixtures";
 
 /** Resolves once the sidebar marks `name` as the open drive. */
 const openDrive = (name: string) => waitFor(() => expect(within(screen.getByRole("navigation", { name: "Main navigation" })).getByRole("link", { name })).toHaveAttribute("aria-current", "page"));
@@ -131,17 +131,11 @@ it("keeps a deployed billing address inside the signed-in app, one click from th
   expect(screen.queryByText("That page could not be found.")).not.toBeInTheDocument();
 });
 
-it("shows the public landing page at the root and keeps drive routes protected", async () => {
+it("sends signed-out visitors at the root to sign-in and keeps drive routes protected", async () => {
   renderApp("/", await signedOutStore());
-  expect(await screen.findByRole("navigation", { name: "Product navigation" })).toBeInTheDocument();
-  for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
+  expect(await screen.findByRole("heading", { name: "Sign in to Orbit" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Orbit home" })).toHaveAttribute("href", "/");
   expect(screen.queryByRole("navigation", { name: "Main navigation" })).not.toBeInTheDocument();
-});
-
-it("renders the public overview before session recovery finishes", () => {
-  renderApp("/overview", authStore({ signedIn: false }));
-  expect(screen.getByRole("heading", { level: 1, name: "One filesystem for people and AI agents" })).toBeInTheDocument();
-  expect(screen.queryByText("Loading your account…")).not.toBeInTheDocument();
 });
 
 it("redirects signed-out drive visitors to sign in and returns them to the drive afterwards", async () => {

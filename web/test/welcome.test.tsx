@@ -3,7 +3,6 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Drive } from "../src/api";
-import { MAC_APP_DOWNLOAD_URL } from "../src/onboarding/config";
 import { s3Endpoint, snippet as s3Snippet } from "../src/settings/s3";
 const S3_ENDPOINT = s3Endpoint()!;
 import { noteSignIn, readOnboarding, startOnboarding, writeOnboarding } from "../src/onboarding/state";
@@ -66,25 +65,17 @@ describe("welcome question", () => {
 });
 
 describe("on my Mac", () => {
-  it("offers the download, then how to sign in and where the drive appears", async () => {
+  it("says the Mac download is unavailable until a release is configured", async () => {
     vi.stubGlobal("fetch", welcomeFetch());
-    vi.spyOn(console, "error").mockImplementation(() => {});
     const user = userEvent.setup();
     renderApp("/welcome");
     await user.click(await choose(/On my Mac/));
     expect(heading()).toHaveTextContent("Get Orbit for Mac");
-    expect(screen.getByText("Step 2 of 2")).toBeInTheDocument();
-    const steps = within(screen.getByRole("list")).getAllByRole("listitem").map((item) => item.querySelector("strong")?.textContent);
-    expect(steps).toEqual(["Download Orbit", "Open Orbit and sign in", "Find your drive in Finder"]);
-    const download = screen.getByRole("link", { name: "Download for Mac" });
-    expect(download).toHaveAttribute("href", MAC_APP_DOWNLOAD_URL);
-    expect(screen.queryByRole("button", { name: "Continue to your files" })).not.toBeInTheDocument();
-    fireEvent.click(download);
-    expect(screen.getByRole("link", { name: "Download again" })).toHaveAttribute("href", MAC_APP_DOWNLOAD_URL);
+    expect(screen.getByText("The Mac download is not available yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Download for Mac" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Continue to your files" }));
     await leftWelcome();
     expect(readOnboarding()).toMatchObject({ status: "done", path: "mac" });
-    // Downloading is not the same as connecting: the step stays open until the app signs in.
     expect(readOnboarding()?.macOpened).toBeUndefined();
   });
 

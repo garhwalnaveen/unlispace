@@ -55,6 +55,7 @@ import OrbitKit
             let compact = NSSize(width: 680, height: 440)
             let setup = NSSize(width: 560, height: 520)
             let settings = NSSize(width: 560, height: 460)
+            let sheet = NSSize(width: 380, height: 200)
 
             // First run: nobody is signed in and setup has not been finished.
             let firstRun = Fixtures.offline()
@@ -154,6 +155,21 @@ import OrbitKit
             failing.activation.record { $0.dismissed = true }
             try menuShot("menu-upload-failed", failing)
 
+            func workspace(_ id: String, _ name: String) -> JSONValue {
+                .object(["id": .string(id), "name": .string(name), "role": .string("owner"), "tier": .string("team")])
+            }
+            // With the web origin loaded the directory is cached, so the sheet shows it instead of loading again.
+            let config = JSONValue.object(["webOrigin": .string("https://example.invalid")])
+            let owner = try await Fixtures.showing(SnapshotClient(api: [
+                "/orgs": .object(["orgs": .array([workspace("studio", "Studio"), workspace("personal", "Personal")])]),
+                "/client-config": config,
+            ]))
+            await owner.workspaces.load()
+            try shot("new-drive", size: sheet, NewDriveSheet(directory: owner.workspaces))
+            let member = try await Fixtures.showing(SnapshotClient(api: ["/orgs": .object(["orgs": .array([])]), "/client-config": config]))
+            await member.workspaces.load()
+            try shot("new-drive-unavailable", size: sheet, NewDriveSheet(directory: member.workspaces))
+
             let many = (1...60).map { DriveInfo(driveId: "d\($0)", name: "Project \($0)", mountState: $0 % 7 == 0 ? .mounted : .unmounted,
                                                 mountPath: $0 % 7 == 0 ? "/Volumes/Project \($0)" : nil) }
             let crowded = try await Fixtures.showing(SnapshotClient(drives: many))
@@ -198,6 +214,7 @@ import OrbitKit
         // The Settings scene supplies its own window; a plain titled window is the closest stand-in.
         window.styleMask = settings == nil ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView] : [.titled, .closable]
         window.toolbarStyle = .unified
+        window.applyOrbitChrome()
         window.title = settings?.title ?? ""
         window.isReleasedWhenClosed = false
         window.appearance = appearance

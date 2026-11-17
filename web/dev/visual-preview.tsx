@@ -1,5 +1,5 @@
 // Development-only visual fixture. This does not authenticate or contact a real backend.
-// Open /design-preview.html?view=files|empty|error|loading|account&theme=light|dark.
+// Open /design-preview.html?view=files|empty|error|loading|account&theme=light|dark, or ?route=/any/app/path.
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "../src/App";

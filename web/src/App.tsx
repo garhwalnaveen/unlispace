@@ -11,7 +11,6 @@ import {
 import { Callback, Desktop, Embed, Login } from "./AuthPages";
 import { useAuth } from "./context";
 import { DriveBrowser } from "./DriveBrowser";
-import { Landing, LandingNavigation } from "./Landing";
 import { OrbitMark } from "./OrbitMark";
 import { AccessKeys } from "./AccessKeys";
 import { Billing } from "./Billing";
@@ -56,7 +55,6 @@ export function App() {
   const { auth, ready, user, error } = useAuth();
   const location = useLocation();
   const authPage = ["/login", "/auth/callback", "/desktop"].includes(location.pathname);
-  const marketing = location.pathname === "/overview" || (location.pathname === "/" && ready && !user);
   // Pages embedded in the desktop app render without the web chrome; the app supplies its own.
   const embedded = location.pathname.startsWith("/embed/");
   const [theme, setTheme] = useTheme();
@@ -78,8 +76,8 @@ export function App() {
     <ErrorNotice error={error} />
     <Button onClick={() => void auth.retry().catch(() => {})}>Retry session</Button>
   </>;
-  // Signed-in pages get the sidebar shell; sign-in, desktop connect and the public page keep a plain header.
-  if (ready && user && !authPage && !marketing)
+  // Signed-in pages get the sidebar shell; sign-in and desktop connect keep a plain header.
+  if (ready && user && !authPage)
     return (
       <Routes>
         <Route element={<Focused />}>
@@ -88,6 +86,7 @@ export function App() {
         </Route>
         <Route element={<Shell theme={theme} setTheme={setTheme} />}>
           <Route path="/" element={<>{sessionError}<Home /></>} />
+          <Route path="/overview" element={<Navigate to="/" replace />} />
           <Route path="/billing" element={<WorkspacePage page="billing" />} />
           <Route path="/team" element={<WorkspacePage page="team" />} />
           <Route path="/drives/:id/*" element={<DriveBrowser />} />
@@ -103,22 +102,18 @@ export function App() {
       </Routes>
     );
   return (
-    <div className={`app ${marketing ? "marketing" : "welcome"}`}>
+    <div className="app welcome">
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-        <Link className="brand" to={user ? "/" : "/overview"} aria-label={marketing ? "OrbitFS home" : "Orbit home"}>
+        <Link className="brand" to="/" aria-label="Orbit home">
           <OrbitMark className="brand-mark" />
-          <span>{marketing ? "OrbitFS" : "Orbit"}</span>
+          <span>Orbit</span>
         </Link>
-        {marketing && <LandingNavigation />}
         <div className="topbar-right">
-          {marketing ? (user ? <Link className="marketing-signin" to="/">Open workspace</Link> : <>
-            <Link className="marketing-signin" to="/login">Sign in</Link>
-            <Button asChild variant="default"><Link to="/login">Get Early Access</Link></Button>
-          </>) : <div className="theme-switch" role="group" aria-label="Appearance">
+          <div className="theme-switch" role="group" aria-label="Appearance">
             {THEMES.map((value) => (
               <Button
                 key={value}
@@ -131,18 +126,18 @@ export function App() {
                 <Icon name={value === "system" ? "monitor" : value === "light" ? "sun" : "moon"} />
               </Button>
             ))}
-          </div>}
+          </div>
         </div>
         </div>
       </header>
       <main id="main" tabIndex={-1}>
         {sessionError}
-        {!ready && location.pathname !== "/overview" ? (
+        {!ready ? (
           <Loading>Loading your account…</Loading>
         ) : (
           <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/overview" element={<Landing />} />
+            <Route path="/" element={<Navigate to="/login" replace />} />
+            <Route path="/overview" element={<Navigate to="/login" replace />} />
             <Route path="/login" element={<Login />} />
             <Route path="/auth/callback" element={<Callback />} />
             <Route path="/desktop" element={<Desktop />} />

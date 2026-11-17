@@ -83,8 +83,9 @@ function MacStep({ onDone }: { onDone: () => void }) {
         <li><div><strong>Open Orbit and sign in</strong><span>Orbit sends you back to this browser to confirm it is you.</span></div></li>
         <li><div><strong>Find your drive in Finder</strong><span>It appears as soon as the app has connected.</span></div></li>
       </ol>
-      {!onMac && <p className="ob-muted">This device is not a Mac. You can download Orbit later on your Mac from Get started.</p>}
-      {downloaded ? <>
+      {!MAC_APP_DOWNLOAD_URL && <p className="ob-muted">The Mac download is not available yet.</p>}
+      {MAC_APP_DOWNLOAD_URL && !onMac && <p className="ob-muted">This device is not a Mac. You can download Orbit later on your Mac from Get started.</p>}
+      {!MAC_APP_DOWNLOAD_URL ? <Button variant="default" className="ob-main" onClick={onDone}>Continue to your files</Button> : downloaded ? <>
         <Button variant="default" className="ob-main" onClick={onDone}>Continue to your files</Button>
         <Button asChild variant="ghost" className="ob-main">{download}</Button>
       </> : <Button asChild variant="default" className="ob-main">{download}</Button>}

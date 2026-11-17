@@ -32,8 +32,8 @@ enum AccessStatus: Equatable {
 
     var color: Color {
         switch self {
-        case .enabled: .green
-        case .denied, .needsApproval, .failed: .orange
+        case .enabled: Theme.success
+        case .denied, .needsApproval, .failed: Theme.warning
         default: .secondary
         }
     }

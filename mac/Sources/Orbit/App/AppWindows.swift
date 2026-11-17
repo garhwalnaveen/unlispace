@@ -62,6 +62,7 @@ final class AppWindows {
         controller.sizingOptions = []
         let window = NSWindow(contentViewController: controller)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.applyOrbitChrome()
         window.isReleasedWhenClosed = false
         window.setContentSize(size)
         window.contentMinSize = minimum

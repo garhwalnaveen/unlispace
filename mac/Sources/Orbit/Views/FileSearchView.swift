@@ -76,7 +76,7 @@ struct FileSearchView: View {
                         .task(id: cursor) { await search(key: searchKey) }
                 }
             }
-            .listStyle(.inset)
+            .listStyle(.inset).scrollContentBackground(.hidden)
         } else if searched && !loading && error == nil {
             ContentUnavailableView.search(text: term)
         } else {

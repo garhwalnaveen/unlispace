@@ -67,7 +67,8 @@ actor SnapshotClient: DaemonClient {
     private let continuation: AsyncStream<DaemonEvent>.Continuation
 
     init(drives: [DriveInfo] = [], transfers: [TransferInfo] = [], queue: UploadsSnapshot? = nil, pins: [OfflinePin]? = [],
-         state: EngineState = .idle) {
+         state: EngineState = .idle, api: [String: JSONValue] = [:]) {
+        self.replies = Dictionary(uniqueKeysWithValues: api.map { ("GET " + $0.key, $0.value) })
         self.drives = drives
         live = transfers
         if let queue { self.queue = queue }

@@ -17,12 +17,14 @@ struct SettingsView: View {
                     case .advanced: AdvancedSettings(model: model)
                     }
                 }
-                .formStyle(.grouped)
+                .formStyle(.grouped).scrollContentBackground(.hidden).background(Theme.canvas)
                 .tabItem { Label(item.title, systemImage: item.symbol) }
                 .tag(item)
             }
         }
         .frame(width: 560, height: 460)
+        .orbitWindow()
+        .orbitControls()
         .task { await model.permissions.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.permissions.refresh() }
@@ -80,7 +82,7 @@ private struct AccountSettings: View {
                 LabeledContent("Not signed in") { HStack { SignInControls(session: session) } }
             }
         } footer: {
-            if let error = model.messages.error { Text(error).foregroundStyle(.red) }
+            if let error = model.messages.error { Text(error).foregroundStyle(Theme.danger) }
         }
         if model.isAccountLive { WorkspacesSection(directory: model.workspaces) }
         if session.account != nil {
@@ -134,7 +136,8 @@ struct WorkspacesSection: View {
                     .buttonStyle(.link).font(.caption).disabled(directory.isLoading)
             }
         } footer: {
-            if let error = directory.error { Text(error).foregroundStyle(.red) }
+            if let error = directory.error { Text(error).foregroundStyle(Theme.danger) }
+            else if !directory.workspaces.isEmpty { Text("Team and Billing open in your browser.") }
         }
         .task(id: directory.loadKey) { await directory.load(force: true) }
     }
@@ -194,7 +197,7 @@ private struct StorageSettings: View {
         } header: {
             Text("Uploads")
         } footer: {
-            if let error = config.uploadLimitError { Text(error).foregroundStyle(.red) }
+            if let error = config.uploadLimitError { Text(error).foregroundStyle(Theme.danger) }
             else if config.uploadLimitUnsupported { Text("Update Orbit to limit upload speed.") }
             else if !model.engine.isConnected { Text("Available when your drives are connected.") }
         }

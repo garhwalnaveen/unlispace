@@ -152,7 +152,7 @@ struct SetupView: View {
 
     private func problem(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.octagon")
-            .foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(Theme.danger).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             .accessibilityLabel("Error: \(message)")
     }
 
@@ -220,7 +220,7 @@ struct SetupView: View {
                 Button(later) { finish(true) }
             }
             Button(primaryTitle, action: advance)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.orbitProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(primaryDisabled)
         }
@@ -356,7 +356,7 @@ struct ShortcutPicker: View {
             ForEach(WorkspaceShortcut.allCases) { Text($0.label).tag($0) }
         }
         if let problem = store.problem {
-            Text(problem).font(.caption).foregroundStyle(.red)
+            Text(problem).font(.caption).foregroundStyle(Theme.danger)
         }
     }
 }

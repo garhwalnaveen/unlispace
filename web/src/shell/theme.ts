@@ -6,7 +6,7 @@ export const THEMES: Theme[] = ["system", "light", "dark"];
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem("orbit.theme");
-    return saved === "light" || saved === "dark" || saved === "system" ? saved : "dark";
+    return saved === "light" || saved === "dark" || saved === "system" ? saved : "light";
   });
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
