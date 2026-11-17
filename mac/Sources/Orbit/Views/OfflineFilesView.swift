@@ -9,8 +9,8 @@ struct OfflineFilesView: View {
 
     var body: some View {
         if !model.isLive {
-            ContentUnavailableView("Offline files unavailable", systemImage: "arrow.down.circle",
-                                   description: Text("Offline files appear once you are signed in and connected."))
+            ContentUnavailableView("No offline files yet", systemImage: "arrow.down.circle",
+                                   description: Text("Drives you keep offline appear here once you are signed in and your drives are connected."))
         } else if let pins = store.pins {
             let candidates = store.drives.filter { !store.isKeptOffline($0.driveId) }
             VStack(spacing: 0) {
@@ -30,7 +30,7 @@ struct OfflineFilesView: View {
                 Divider()
                 if pins.isEmpty {
                     ContentUnavailableView("No offline files", systemImage: "arrow.down.circle",
-                                           description: Text("Keeping a drive offline downloads all of its files to this Mac."))
+                                           description: Text("Drives you keep offline appear here. Keeping one offline downloads all of its files to this Mac, so they open without a connection."))
                 } else {
                     List(pins) { pin in OfflinePinRow(store: store, pin: pin) }
                         .listStyle(.inset).scrollContentBackground(.hidden)

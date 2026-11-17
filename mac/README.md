@@ -32,8 +32,8 @@ ulsd          the engine: mounts, sync, the session and its refresh token
 routing engine events, sign-out, and `uls://` links.
 
 **No stand-in engine.** When the socket is unreachable `EngineLink.client` is nil, the stores are
-cleared, and every screen says the background service is not running. The app never shows sample
-data.
+cleared, and every screen says the drives are disconnected and how to bring them back. The app
+never shows sample data.
 
 **Refresh.** Engine events carry live changes. Polling reconciles: every 5 s while transfers or
 mounts are in flight, every 20 s when idle, and with backoff from 2 s to 60 s while the engine is
@@ -55,15 +55,42 @@ Helvetica Neue display face, the uppercase monospaced label style, and the pill 
 and menus stay standard macOS controls. The app follows the system appearance unless Settings ›
 General says otherwise.
 
+- **Setup** (first run): five short pages. Welcome ("Your cloud drive in Finder, with history") →
+  what you get → sign in (opens the browser, then shows "Finish in your browser", "Waiting for your
+  browser…", "Open Browser Again", and "Setting up your drive") → permissions (one card per
+  permission with a one-sentence reason, its own Allow button, and its live state; optional ones are
+  marked) → "Your drive is in Finder" with **Show in Finder**. Setup puts the account's first drive
+  in Finder itself. Closing the window early leaves setup unfinished; "Finish Later" on the last page
+  finishes it and leaves the open steps on the Get started list (`SetupFlow.swift`).
+- **Menu bar**: one status headline with at most one action (`MenuHeadline`: "All files are up to
+  date", "Syncing 3 files", "Setup not finished", "A drive needs attention", "Storage almost full",
+  "Changes are paused — plan inactive", "An upload didn't finish", …), then drives with **Open in
+  Finder**, recent activity, and a footer with Open on the Web, Settings, and Quit.
+- **Get started** (`GetStarted`): "Get started · N of M done", shown in the menu and above the
+  drive list until every step is done or the user hides it. A step skipped in setup stays open.
 - **Window**: sidebar with Drives, Activity, Offline Files, Search, and Ask AI (⌘1–⌘5, ⌘F for
-  Search, ⌘R to refresh). A banner above every page reports connection state, errors, and conflicts.
-- **Menu bar**: status, the first six drives, and app commands.
-- **Setup**: sign in, choose drives to mount and review permissions, pick the global shortcut.
-- **Settings**: General, Account (with workspaces and links to Team and Billing on the web),
-  Storage, Permissions, Advanced.
+  Search, ⌘R to refresh). Each drive row says its state in words ("In Finder", "Not in Finder",
+  "Couldn't connect to Finder") and has one button, **Open in Finder**, which puts the drive in
+  Finder first when needed. The "…" menu holds Add a File, Eject, Keep Offline, Rename, Make a Copy,
+  Open on the Web, and, last, Delete, which always asks first and says what happens. A banner above
+  every page reports connection state, errors, and conflicts.
+- **Settings**: General (open at login, appearance, shortcut, updates), Account (email, workspace,
+  plan and storage, Manage Plan on the Web, sign out), Drives & Storage (space for opened files,
+  offline files, upload speed), Permissions (the same items as setup), Advanced (diagnostics,
+  technical identifiers, developer overrides).
 
-Buttons and menu items use title case; everything else is a plain sentence. User-facing text says
-"background service", never "engine" or "daemon".
+Wording. Buttons and menu items use title case; everything else is a plain sentence. The product
+is always "Orbit". Outside Settings › Advanced the app never says "engine", "daemon", "mount",
+"alias", or "lineage": a drive is "in Finder" or not, and Orbit "runs in the background". Sizes
+read KB/MB/GB. Plan and storage messages start with "Your files are safe" and then say what to do.
+Links that leave the app say so ("Open on the Web", "Manage Plan on the Web").
+
+**Rename and Delete.** The app sends `PATCH /drives/{id}` and `DELETE /drives/{id}` through the
+background service's `api.request`. The service forwards only the routes on its allowlist
+(`allowed_api_request` in `engine/ulsd/src/engine.rs`), which today includes the copy route
+(`POST /drives/{id}/fork`) but not those two. Until they are added there, Rename and Delete open the
+drive on the web and say so (`DriveManagement.isUnsupported`); nothing else in the app changes when
+the allowlist does.
 
 ## Build and test
 ```
@@ -95,8 +122,8 @@ says the background service is not installed.
 
 ## Run
 Open `build/Orbit.app`. The app is `LSUIElement` (no Dock icon) and registers the `uls://` URL
-scheme. The engine's LaunchAgent is registered only when you turn on the background service in
-setup or Settings › Permissions. "Open at login" uses `SMAppService.mainApp`.
+scheme. The engine's LaunchAgent is registered only when you allow Orbit to run in the background
+in setup, on the Get started list, or in Settings › Permissions. "Open at login" uses `SMAppService.mainApp`.
 
 `Orbit --engine-status | --enable-engine | --disable-engine` prints one status word and exits,
 for deployment and support tools.

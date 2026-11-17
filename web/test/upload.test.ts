@@ -13,7 +13,7 @@ const file = (bytes: Uint8Array<ArrayBuffer> = new Uint8Array([1, 2, 3])) => new
 it("rejects above-limit files before hashing or requesting a token", async () => {
   const api = {stat:vi.fn()} as unknown as DriveApi;
   const oversized = {size:MAX_WEB_UPLOAD+1,slice:vi.fn()} as unknown as globalThis.File;
-  await expect(uploadFile(api,oversized,"large.bin",vi.fn())).rejects.toThrow("up to 3 GiB");
+  await expect(uploadFile(api,oversized,"large.bin",vi.fn())).rejects.toThrow("up to 3 GB");
   expect(api.stat).not.toHaveBeenCalled(); expect(oversized.slice).not.toHaveBeenCalled();
 });
 it("probes dedup, uploads with a write bearer and commits ifAbsent before reporting success", async () => {

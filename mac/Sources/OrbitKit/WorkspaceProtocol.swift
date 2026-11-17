@@ -87,6 +87,15 @@ public struct ClientConfiguration: Decodable, Sendable {
         return url.appendingPathComponent("orgs").appendingPathComponent(orgId).appendingPathComponent(section)
     }
 
+    /// The signed-in home of the web app.
+    public var home: URL? { origin }
+
+    /// A drive's files on the web (`/drives/<id>`).
+    public func drivePage(driveId: String) -> URL? {
+        guard let url = origin, !driveId.isEmpty, Self.isSafeToken(driveId) else { return nil }
+        return url.appendingPathComponent("drives").appendingPathComponent(driveId)
+    }
+
     /// An embedded web page (`/embed/<page>`) with a one-time handoff in the fragment, which never reaches servers or logs.
     public func embedPage(_ page: String, handoff: String) -> URL? {
         guard let url = origin, ["ai"].contains(page),

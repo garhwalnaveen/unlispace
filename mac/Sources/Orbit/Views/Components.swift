@@ -32,12 +32,55 @@ extension MountState {
 
     var label: String {
         switch self {
-        case .unmounted: "Not mounted"
-        case .mounting: "Mounting…"
-        case .mounted: "Mounted"
+        case .unmounted: "Not in Finder"
+        case .mounting: "Connecting to Finder…"
+        case .mounted: "In Finder"
         case .unmounting: "Ejecting…"
-        case .error: "Mount failed"
+        case .error: "Couldn't connect to Finder"
         }
+    }
+}
+
+/// The few shared measurements: one corner radius and one neutral surface, as in the web app.
+enum OrbitStyle {
+    static let radius: CGFloat = 8
+    static let border = Color.primary.opacity(0.1)
+}
+
+extension View {
+    /// A neutral rounded surface with a hairline border.
+    func orbitCard(padding: CGFloat = 12) -> some View {
+        self.padding(padding)
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: OrbitStyle.radius))
+            .overlay(RoundedRectangle(cornerRadius: OrbitStyle.radius).strokeBorder(OrbitStyle.border))
+    }
+}
+
+extension MenuHeadline.Tone {
+    var color: Color {
+        switch self {
+        case .good: .green
+        case .busy: .accentColor
+        case .attention: .orange
+        case .neutral: .secondary
+        }
+    }
+}
+
+/// A status headline as a symbol and words, so it never depends on color alone.
+struct HeadlineLabel: View {
+    var headline: MenuHeadline
+    var font = Font.caption
+    var lines = 1
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: headline.symbol).foregroundStyle(headline.tone.color).accessibilityHidden(true)
+            Text(headline.title).foregroundStyle(.secondary).lineLimit(lines).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(font)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Status: \(headline.title)")
     }
 }
 
@@ -136,6 +179,17 @@ struct SignInControls: View {
 enum Format {
     static func bytes(_ count: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: max(0, count), countStyle: .file)
+    }
+
+    /// An error in words for the user. The background service's own message is used as it is;
+    /// its error code and the word for the service itself stay in the logs.
+    static func problem(_ error: Error) -> String {
+        if case DaemonClientError.remote(let remote) = error {
+            let message = LogFormat.scrub(remote.message)
+            return message.isEmpty ? remote.code.replacingOccurrences(of: "_", with: " ") : message
+        }
+        if case DaemonClientError.notConnected = error { return "Orbit isn't connected to your drives." }
+        return LogFormat.describe(error)
     }
 
     static func percent(_ fraction: Double) -> String {

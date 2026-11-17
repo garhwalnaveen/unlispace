@@ -10,15 +10,14 @@ enum AccessStatus: Equatable {
     var label: String {
         switch self {
         case .checking: "Checking…"
-        case .notRequested: "Off"
-        case .enabled: "On"
-        case .quiet: "Delivered quietly"
+        case .notRequested, .notEnabled: "Not allowed yet"
+        case .enabled: "Allowed"
+        case .quiet: "Allowed, delivered quietly"
         case .denied: "Not allowed"
-        case .notEnabled: "Off"
         case .needsApproval: "Needs approval"
         case .unavailable: "Unavailable"
-        case .managed: "Set per app"
-        case .failed: "Failed"
+        case .managed: "Asked when needed"
+        case .failed: "Couldn't check"
         }
     }
 
@@ -71,109 +70,52 @@ enum AccessStatus: Equatable {
     }
 }
 
-/// Permission rows for a grouped form. macOS prompts appear only when the user presses a button here.
+/// Permission rows for a grouped form in Settings. macOS prompts appear only when the user presses a button here.
 struct PermissionsContent: View {
     var model: AppModel
 
-    private var engine: EngineLink { model.engine }
-    private var permissions: PermissionsStore { model.permissions }
-
     var body: some View {
+        let items = model.permissionItems
         Section {
-            PermissionRow(title: "Background service", detail: "Keeps drives mounted and uploads your changes.",
-                          status: .engine(engine.install), actionTitle: engineAction) {
-                if engine.install == .enabled || engine.install == .requiresApproval {
-                    DaemonLifecycle.openLoginItemsSettings()
-                } else { engine.enable() }
-            }
-            PermissionRow(title: "Files and folders", detail: "macOS asks each app the first time it opens a file on a drive.",
-                          status: .managed, actionTitle: "Open Settings…") {
-                openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")
-            }
+            ForEach(items.filter { !$0.optional }) { PermissionRow(model: model, item: $0) }
         } header: {
-            Text("Required")
+            Text("Needed for your drives")
         } footer: {
-            if case .failed(let message) = engine.install { Text(message) }
-            else if engine.install == .notInstalled { Text("This copy of Orbit has no background service. Install the full app.") }
+            if case .failed(let message) = model.engine.install { Text(message) }
+            else if model.engine.install == .notInstalled { Text("This copy of Orbit can't run in the background. Install the full app.") }
         }
         Section {
-            PermissionRow(title: "Conflict notifications", detail: "Tells you when two versions of a file were kept.",
-                          status: permissions.notificationAccess, actionTitle: notificationAction) {
-                if permissions.notificationAccess == .notRequested {
-                    Task { await permissions.enableNotifications() }
-                } else {
-                    openSettings("x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.orbit.app")
-                }
-            }
-            .disabled(permissions.requestingNotifications)
-            PermissionRow(title: "Open at login", detail: "Starts Orbit in the menu bar when you log in.",
-                          status: permissions.loginAccess, actionTitle: loginAction) {
-                if permissions.loginAccess == .notEnabled { permissions.setLaunchAtLogin(true) }
-                else { DaemonLifecycle.openLoginItemsSettings() }
-            }
+            ForEach(items.filter(\.optional)) { PermissionRow(model: model, item: $0) }
         } header: {
             Text("Optional")
         } footer: {
-            if let message = permissions.notificationMessage ?? permissions.loginMessage { Text(message) }
-        }
-    }
-
-    private var engineAction: String? {
-        switch engine.install {
-        case .notInstalled: nil
-        case .enabled: "Manage…"
-        case .requiresApproval: "Approve…"
-        default: "Turn On"
-        }
-    }
-
-    private var notificationAction: String? {
-        switch permissions.notificationAccess {
-        case .checking, .unavailable: nil
-        case .notRequested: "Turn On"
-        default: "Open Settings…"
-        }
-    }
-
-    private var loginAction: String? {
-        switch permissions.loginAccess {
-        case .checking, .unavailable: nil
-        case .notEnabled: "Turn On"
-        case .needsApproval: "Approve…"
-        default: "Manage…"
-        }
-    }
-
-    private func openSettings(_ address: String) {
-        if let url = URL(string: address), NSWorkspace.shared.open(url) { return }
-        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.systempreferences") {
-            NSWorkspace.shared.open(app)
+            if let message = model.permissions.notificationMessage ?? model.permissions.loginMessage { Text(message) }
         }
     }
 }
 
-private struct PermissionRow: View {
-    var title: String
-    var detail: String
-    var status: AccessStatus
-    var actionTitle: String?
-    var action: () -> Void
+/// One permission in Settings: what it is, why Orbit asks, whether it is granted, and a button of its own.
+/// Setup shows the same item as a `PermissionCard`.
+struct PermissionRow: View {
+    var model: AppModel
+    var item: PermissionItem
 
     var body: some View {
         LabeledContent {
             HStack(spacing: 10) {
-                Label(status.label, systemImage: status.symbol)
-                    .labelStyle(StatusLabelStyle(tint: status.color))
+                Label(item.status.label, systemImage: item.status.symbol)
+                    .labelStyle(StatusLabelStyle(tint: item.status.color))
                     .font(.callout).foregroundStyle(.secondary)
-                if let actionTitle {
-                    Button(actionTitle, action: action)
-                        .accessibilityLabel("\(actionTitle): \(title)")
-                        .disabled(status == .checking)
+                if let action = item.action {
+                    Button(action) { model.act(on: item.id) }
+                        .accessibilityLabel("\(action): \(item.title)")
+                        .disabled(item.status == .checking
+                                  || (item.id == .notifications && model.permissions.requestingNotifications))
                 }
             }
         } label: {
-            Text(title)
-            Text(detail)
+            Text(item.title)
+            Text(item.reason)
         }
     }
 }

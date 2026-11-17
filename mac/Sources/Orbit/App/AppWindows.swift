@@ -7,6 +7,7 @@ import SwiftUI
 final class WorkspaceNavigation {
     var page: WorkspacePage = .drives
     var showingNewDrive = false
+    var driveEdit: DriveEdit?
 }
 
 /// Creates and shows the app's windows. Views receive it through the environment; nothing reaches for a global.
@@ -15,16 +16,12 @@ final class AppWindows {
     let navigation = WorkspaceNavigation()
 
     @ObservationIgnored private let model: AppModel
-    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var workspace: NSWindow?
     @ObservationIgnored private var setup: NSWindow?
 
-    init(model: AppModel, defaults: UserDefaults = .standard) {
-        self.model = model
-        self.defaults = defaults
-    }
+    init(model: AppModel) { self.model = model }
 
-    private var setupCompleted: Bool { defaults.bool(forKey: Preference.setupCompleted) }
+    private var setupCompleted: Bool { model.setupCompleted }
 
     /// The window to show at launch, on Dock click, and for the global shortcut.
     func showMain() {
@@ -44,18 +41,18 @@ final class AppWindows {
 
     func showSetup() {
         if setup == nil {
-            let view = SetupView(model: model) { [weak self] in self?.finishSetup() }.environment(self)
+            let view = SetupView(model: model) { [weak self] in self?.finishSetup(openWindow: $0) }.environment(self)
             setup = makeWindow(size: NSSize(width: 560, height: 520), minimum: NSSize(width: 520, height: 480),
                                autosave: nil, content: view)
         }
         present(setup)
     }
 
-    private func finishSetup() {
-        defaults.set(true, forKey: Preference.setupCompleted)
+    private func finishSetup(openWindow: Bool) {
+        model.setupCompleted = true
         setup?.close()
         setup = nil
-        showWorkspace()
+        if openWindow { showWorkspace() }
     }
 
     /// Each root view names its own window with `windowTitle`.

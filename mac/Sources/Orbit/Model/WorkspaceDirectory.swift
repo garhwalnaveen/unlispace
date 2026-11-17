@@ -83,7 +83,7 @@ final class WorkspaceDirectory {
             loadedAt = newConfig == nil ? nil : Date()
         case .failure(let failure):
             // Plan access alone is enough for the notices; report only when both are missing.
-            error = newAccess == nil ? "Could not load workspaces: \(LogFormat.describe(failure))" : nil
+            error = newAccess == nil ? "Could not load workspaces: \(Format.problem(failure))" : nil
             loadedAt = newAccess == nil ? nil : Date()
         }
     }
@@ -95,6 +95,40 @@ final class WorkspaceDirectory {
 
     func createDrive(named name: String, in workspace: WorkspaceInfo) async throws {
         _ = try await request("/orgs/\(workspace.id)/drives", method: "POST", body: .object(["name": .string(name)]))
+        await engine.refresh()
+        await load(force: true)
+    }
+
+    // MARK: Drives
+
+    func workspace(forDrive driveID: String) -> WorkspaceInfo? {
+        workspaces.first { $0.drives?.contains { $0.id == driveID } == true }
+    }
+
+    /// Renaming, copying, and deleting need an owner or admin. An unknown workspace is left to the server to decide.
+    func canManage(driveID: String) -> Bool {
+        guard isAvailable else { return false }
+        return workspace(forDrive: driveID)?.canManage ?? true
+    }
+
+    func renameDrive(_ drive: DriveInfo, to name: String) async throws {
+        _ = try await request("/drives/\(drive.driveId)", method: "PATCH", body: .object(["name": .string(name)]))
+        await engine.refresh()
+        await load(force: true)
+    }
+
+    /// A copy starts with the same files and history and changes separately from then on.
+    func copyDrive(_ drive: DriveInfo, named name: String) async throws {
+        _ = try await request("/drives/\(drive.driveId)/fork", method: "POST", body: .object(["name": .string(name)]))
+        await engine.refresh()
+        await load(force: true)
+    }
+
+    func deleteDrive(_ drive: DriveInfo) async throws {
+        let client = try engine.connectedClient()
+        _ = try await request("/drives/\(drive.driveId)", method: "DELETE")
+        // The drive is gone from the account; take it out of Finder as well.
+        if drive.mountState == .mounted { try? await client.unmount(driveId: drive.driveId) }
         await engine.refresh()
         await load(force: true)
     }

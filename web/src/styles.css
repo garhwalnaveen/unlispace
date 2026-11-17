@@ -48,6 +48,9 @@
   --destructive: #b91c1c;
   --success: #059669;
   --warning: #d9632b;
+  --sidebar: #efefef;
+  --hover: rgb(0 0 0 / 0.045);
+  --selected: rgb(0 0 0 / 0.08);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -63,6 +66,9 @@
   --destructive: #f87171;
   --success: #34d399;
   --warning: #f0925f;
+  --sidebar: #141414;
+  --hover: rgb(255 255 255 / 0.05);
+  --selected: rgb(255 255 255 / 0.09);
 }
 
 @layer base {
@@ -99,7 +105,8 @@
 .theme-switch [aria-pressed="true"] { background: var(--muted); color: var(--foreground); }
 main { max-width: 1200px; margin: 0 auto; padding: 32px; }
 
-.workspace .page-heading { align-items: flex-start; margin-bottom: 28px; }
+.page-heading h1 { font-size: 26px; letter-spacing: -0.7px; line-height: 1.25; margin-bottom: 8px; }
+.shell .page-heading { align-items: flex-start; padding-bottom: 24px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
 .page-heading > div { min-width: 0; }
 .page-heading p { max-width: 68ch; }
 .page-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
@@ -175,7 +182,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 32px; }
 .file-table-head:hover { background: transparent; }
 .file-name { display: flex; align-items: center; min-width: 0; gap: 10px; overflow-wrap: anywhere; }
 .file-icon { display: inline-flex; flex-shrink: 0; color: var(--muted-foreground); }
-.ask-ai { display: flex; flex-direction: column; gap: 12px; height: calc(100dvh - 68px - 64px); min-height: 420px; }
+ .ask-ai { display: flex; flex-direction: column; gap: 12px; height: calc(100dvh - 92px); min-height: 420px; }
 .ask-ai [data-slot="button"] { font-family: var(--font-sans); font-size: 13px; letter-spacing: 0; text-transform: none; }
 .ask-ai .page-heading { margin-bottom: 0; }
 main.embedded { max-width: none; padding: 16px; }
@@ -335,6 +342,7 @@ main.embedded .ask-ai { height: calc(100dvh - 32px); min-height: 0; }
   .section-heading { align-items: flex-start; }
   .org-section > .section-heading { padding: 16px; gap: 8px; }
   .drive-card { padding: 20px 16px; }
+  .shell .page-heading { padding-bottom: 20px; }
   .file-row { grid-template-columns: minmax(0, 1fr) 64px; gap: 8px; padding-inline: 12px; }
   .drive-card-actions, .drive-card .drive-tools { padding-left: 0; margin-left: 0; }
   .upload-toolbar { align-items: flex-start; flex-direction: column; }

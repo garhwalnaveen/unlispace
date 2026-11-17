@@ -1,6 +1,12 @@
 import Observation
 import OrbitKit
 
+extension TransferActivity {
+    /// Still has work to do. A file waiting in the upload queue is active even when its row also carries
+    /// a finished transfer: that is the previous upload of the same file, which the list pairs it with.
+    var isActive: Bool { pending != nil || transfer?.isFinished == false }
+}
+
 /// Transfers in flight, the upload queue, and a short history of finished uploads.
 @MainActor @Observable
 final class ActivityStore {
