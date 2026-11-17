@@ -79,7 +79,8 @@ final class WorkspaceDirectory {
         case .success(let list):
             workspaces = list
             error = nil
-            loadedAt = Date()
+            // Without the web links the copy is incomplete, so the next request loads again.
+            loadedAt = newConfig == nil ? nil : Date()
         case .failure(let failure):
             // Plan access alone is enough for the notices; report only when both are missing.
             error = newAccess == nil ? "Could not load workspaces: \(LogFormat.describe(failure))" : nil
@@ -100,7 +101,7 @@ final class WorkspaceDirectory {
 
     /// A one-time signed-in URL for a page of the web app, with the PKCE verifier that unlocks it.
     func embeddedPage(_ page: String) async throws -> (url: URL, verifier: String) {
-        await load()
+        await load(force: config == nil)
         guard let config else { throw URLError(.badServerResponse) }
         let verifier = PKCE.makeVerifier()
         struct Handoff: Decodable { let handoff: String }
