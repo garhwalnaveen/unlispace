@@ -25,13 +25,18 @@ struct StubPrompts: UserPrompts {
     /// A model whose engine socket does not exist, so it can never connect to a real engine.
     static func offline(defaults: UserDefaults = MemoryDefaults()) -> AppModel {
         let socket = "/tmp/orbit-no-socket-\(UUID().uuidString)"
-        return AppModel(defaults: defaults, engine: EngineLink(makeClient: { UnixSocketDaemonClient(socketPath: socket) }),
-                        prompts: StubPrompts())
+        let model = AppModel(defaults: defaults, engine: EngineLink(makeClient: { UnixSocketDaemonClient(socketPath: socket) }),
+                             prompts: StubPrompts())
+        // Most tests describe the app after first-run setup; the ones about setup turn this off.
+        model.setupCompleted = true
+        return model
     }
 
     /// A model connected to a test double.
-    static func connected(to client: any DaemonClient = MockDaemonClient(), defaults: UserDefaults = MemoryDefaults()) -> AppModel {
-        let model = AppModel(defaults: defaults, engine: EngineLink(makeClient: { client }), prompts: StubPrompts())
+    static func connected(to client: any DaemonClient = MockDaemonClient(), defaults: UserDefaults = MemoryDefaults(),
+                          prompts: any UserPrompts = StubPrompts()) -> AppModel {
+        let model = AppModel(defaults: defaults, engine: EngineLink(makeClient: { client }), prompts: prompts)
+        model.setupCompleted = true
         model.engine.adopt(client)
         return model
     }
@@ -53,6 +58,11 @@ actor SnapshotClient: DaemonClient {
     var live: [TransferInfo] = []
     var queue: UploadsSnapshot? = UploadsSnapshot(pending: [], journalBytes: 0, journalCapBytes: 10_000_000_000)
     var pins: [OfflinePin]? = []
+    /// Replies to `apiRequest`, keyed by "METHOD /path". A request without a reply is refused like an older engine would.
+    var replies: [String: JSONValue] = [:]
+    var failures: [String: DaemonError] = [:]
+    private(set) var requests: [String] = []
+    private(set) var unmounted: [String] = []
     private let stream: AsyncStream<DaemonEvent>
     private let continuation: AsyncStream<DaemonEvent>.Continuation
 
@@ -75,7 +85,19 @@ actor SnapshotClient: DaemonClient {
     func uploads() async throws -> UploadsSnapshot? { queue }
     func listPins(driveId: String?) async throws -> [OfflinePin]? { pins }
     func mount(driveId: String) async throws {}
-    func unmount(driveId: String) async throws {}
+    func unmount(driveId: String) async throws { unmounted.append(driveId) }
+    func reply(_ request: String, _ json: String) throws {
+        replies[request] = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+    }
+    func fail(_ request: String, code: String, message: String = "") { failures[request] = DaemonError(code: code, message: message) }
+    func setDrives(_ new: [DriveInfo]) { drives = new }
+    func apiRequest(method: String, path: String, body: JSONValue?) async throws -> JSONValue {
+        let request = "\(method) \(path)"
+        requests.append(request)
+        if let failure = failures[request] { throw DaemonClientError.remote(failure) }
+        if let reply = replies[request] { return reply }
+        throw DaemonClientError.remote(DaemonError(code: "bad_request", message: "unsupported API path"))
+    }
     func setConfig(_ config: DaemonConfig) async throws {}
     func authSet(_ params: AuthSetParams) async throws -> AuthSetResult { AuthSetResult(user: Fixtures.account) }
     func authSignOut() async throws {}
@@ -84,9 +106,19 @@ actor SnapshotClient: DaemonClient {
 
 extension Fixtures {
     /// A connected model showing exactly what `client` reports.
-    static func showing(_ client: SnapshotClient) async throws -> AppModel {
-        let model = connected(to: client)
+    static func showing(_ client: SnapshotClient, prompts: any UserPrompts = StubPrompts()) async throws -> AppModel {
+        let model = connected(to: client, prompts: prompts)
         try await model.engineRefresh(client)
         return model
+    }
+
+    /// The account's workspace, plan, and web address as the server reports them.
+    static func workspace(_ client: SnapshotClient, drives: [String] = [], role: String = "owner",
+                          state: String = "paid", writable: Bool = true, used: Int64 = 2_100_000_000,
+                          quota: Int64 = 10_000_000_000) async throws {
+        let list = drives.map { #"{"id":"\#($0)","status":"ready"}"# }.joined(separator: ",")
+        try await client.reply("GET /orgs", #"{"orgs":[{"id":"org1","name":"Acme","role":"\#(role)","tier":"teams","drives":[\#(list)]}]}"#)
+        try await client.reply("GET /me/access", #"{"workspaces":[{"id":"org1","name":"Acme","state":"\#(state)","storageReady":true,"writable":\#(writable),"usedBytes":\#(used),"quotaBytes":\#(quota)}]}"#)
+        try await client.reply("GET /client-config", #"{"webOrigin":"https://orbit.example"}"#)
     }
 }

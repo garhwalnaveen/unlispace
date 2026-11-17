@@ -27,7 +27,7 @@ final class EngineConfigStore {
                 uploadLimitError = nil
             } catch {
                 if UploadLimit.isUnsupported(error) { uploadLimitUnsupported = true }
-                else { uploadLimitError = "Could not change the upload limit: \(LogFormat.describe(error))" }
+                else { uploadLimitError = "Could not change the upload limit: \(Format.problem(error))" }
             }
             await engine.refresh()
         }

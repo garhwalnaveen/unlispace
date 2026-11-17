@@ -35,11 +35,11 @@ import OrbitTestSupport
         let unknown = #"{"id":"c","name":"C","state":"paid","storageReady":true}"#
         let drive = DriveInfo(driveId: "one", name: "One", mountState: .mounted)
         let readOnly = DaemonMount(driveId: "one", mountpoint: "/Volumes/One", readOnly: true, adapter: "smb")
-        #expect(!FirstFileChecklist.canAddFile(access: try access(expired), drives: [], mounts: nil))
-        #expect(FirstFileChecklist.canAddFile(access: try access("\(expired),\(writable)"), drives: [], mounts: nil))
-        #expect(FirstFileChecklist.canAddFile(access: try access(unknown), drives: [], mounts: nil))
-        #expect(FirstFileChecklist.canAddFile(access: nil, drives: [drive], mounts: nil))
-        #expect(!FirstFileChecklist.canAddFile(access: nil, drives: [drive], mounts: [readOnly]))
+        #expect(!GetStarted.canAddFile(access: try access(expired), drives: [], mounts: nil))
+        #expect(GetStarted.canAddFile(access: try access("\(expired),\(writable)"), drives: [], mounts: nil))
+        #expect(GetStarted.canAddFile(access: try access(unknown), drives: [], mounts: nil))
+        #expect(GetStarted.canAddFile(access: nil, drives: [drive], mounts: nil))
+        #expect(!GetStarted.canAddFile(access: nil, drives: [drive], mounts: [readOnly]))
     }
 
     @Test func planNoticesNameTheWorkspaceAndPreferServerAccess() throws {
@@ -120,7 +120,7 @@ import OrbitTestSupport
         transfer.status = .failed
         model.apply(.transfer(transfer))
         #expect(model.activity.transfers.isEmpty)
-        #expect(model.messages.error == "Upload failed: /notes.txt")
+        #expect(model.messages.error == "“notes.txt” didn't finish uploading.")
     }
 
     @Test func finishedUploadHistoryIsBounded() {
@@ -179,7 +179,7 @@ import OrbitTestSupport
         model.engine.install = .enabled
         model.engineIsUnavailable(error: DaemonClientError.disconnected)
         #expect(model.status == .engineStopped)
-        #expect(model.statusTitle == AppStatus.engineStopped.title)
+        #expect(model.statusTitle == "Drives are disconnected")
         model.engine.install = .notInstalled
         model.engineIsUnavailable(error: nil)
         #expect(model.status == .engineMissing)
@@ -205,7 +205,7 @@ import OrbitTestSupport
         #expect(model.drives.isKeptOffline("work") && !model.drives.isKeptOffline("demo"))
         #expect(model.drives.pins(for: "work").count == 1)
         #expect(model.activity.uploads != nil)
-        #expect(model.statusTitle == "No uploads pending")
+        #expect(model.statusTitle == "All files are up to date")
     }
 
     @Test func aSignedOutEngineClearsStaleDrives() async throws {

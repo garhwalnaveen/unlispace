@@ -103,8 +103,21 @@ final class DriveStore {
         run(driveId) { try await $0.pin(driveId: driveId, path: path, pinned: pinned) }
     }
 
+    /// "Open in Finder" for any drive: one that is not in Finder yet is put there first.
+    func open(_ drive: DriveInfo) {
+        if drive.mountState == .mounted {
+            openInFinder(drive)
+            return
+        }
+        run(drive.driveId, { try await $0.mount(driveId: drive.driveId) }) { [weak self] in
+            guard let self, let mounted = self.drive(id: drive.driveId) else { return }
+            self.openInFinder(mounted)
+        }
+    }
+
     /// One action per drive at a time; the lock is released whether or not the engine accepts it.
-    private func run(_ driveID: String, _ operation: @escaping @Sendable (any DaemonClient) async throws -> Void) {
+    private func run(_ driveID: String, _ operation: @escaping @Sendable (any DaemonClient) async throws -> Void,
+                     then: (@MainActor () -> Void)? = nil) {
         guard let client = engine.client, !pendingActions.contains(driveID) else { return }
         if let drive = drive(id: driveID), isBusy(drive) { return }
         pendingActions.insert(driveID)
@@ -113,8 +126,9 @@ final class DriveStore {
             do {
                 try await operation(client)
                 await engine.refresh()
+                then?()
             } catch {
-                messages.report(LogFormat.describe(error))
+                messages.report(Format.problem(error))
                 Log.app.error("daemon op failed: \(LogFormat.describe(error))")
             }
         }
@@ -137,7 +151,7 @@ final class DriveStore {
     @discardableResult func openInFinder(_ drive: DriveInfo) -> Bool {
         guard engine.isConnected, drive.mountState == .mounted, let path = drive.mountPath else { return false }
         guard NSWorkspace.shared.open(URL(fileURLWithPath: path)) else {
-            messages.report("Finder could not open \(drive.name). Eject it and mount it again.")
+            messages.report("Finder could not open \(drive.name). Eject it, then open it again.")
             return false
         }
         activation.record { $0.finderOpened = true }
@@ -190,7 +204,7 @@ final class DriveStore {
                 messages.fileCopy = "Copied \(name) to \(drive.name). Activity shows when it has uploaded."
             } catch {
                 guard owner == session.account?.id else { return }
-                messages.fileCopy = "Could not copy \(name): \(LogFormat.describe(error))"
+                messages.fileCopy = "Could not copy \(name): \(Format.problem(error))"
             }
         }
     }

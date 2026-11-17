@@ -1,0 +1,245 @@
+import Foundation
+import Testing
+import OrbitKit
+@testable import Orbit
+
+/// The menu-bar panel says one thing and offers one action. These cover which thing wins.
+@Suite @MainActor struct MenuHeadlineTests {
+    private static let finder = DriveInfo(driveId: "design", name: "Design", mountState: .mounted, mountPath: "/Volumes/Design")
+    private static let idle = DriveInfo(driveId: "archive", name: "Archive", mountState: .unmounted)
+    private static let broken = DriveInfo(driveId: "legal", name: "Legal", mountState: .error)
+
+    /// Signed in, connected, set up, one drive in Finder, nothing in flight.
+    private func ready(_ change: (inout MenuHeadline.Input) -> Void = { _ in }) -> MenuHeadline {
+        var input = MenuHeadline.Input()
+        input.hasCredentials = true
+        input.connected = true
+        input.drives = [Self.idle, Self.finder]
+        change(&input)
+        return MenuHeadline.make(input)
+    }
+
+    private func access(_ json: String) throws -> [MeAccess.Workspace] {
+        try JSONDecoder().decode(MeAccess.self, from: Data(#"{"workspaces":[\#(json)]}"#.utf8)).workspaces
+    }
+
+    @Test func aQuietAccountIsUpToDateAndOpensTheDriveInFinder() {
+        let headline = ready()
+        #expect(headline.title == "All files are up to date")
+        #expect(headline.tone == .good)
+        // The drive already in Finder is the one to open, not simply the first in the list.
+        #expect(headline.action == .openInFinder(driveID: "design"))
+        #expect(headline.action?.title == "Open in Finder")
+        #expect(ready { $0.drives = [Self.idle] }.action == .openInFinder(driveID: "archive"))
+        // An engine that does not report its upload queue cannot promise everything is uploaded.
+        #expect(ready { $0.uploadQueueKnown = false }.title == "Your drives are connected")
+    }
+
+    @Test func syncingCountsFilesAndNeverCountsTheDriveTotal() {
+        #expect(ready { $0.filesInFlight = 1; $0.changesInFlight = true }.title == "Syncing 1 file")
+        let three = ready { $0.filesInFlight = 3; $0.changesInFlight = true; $0.transferredBytes = (6_200_000, 10_400_000) }
+        #expect(three.title == "Syncing 3 files")
+        #expect(three.detail == "\(Format.bytes(6_200_000)) of \(Format.bytes(10_400_000))")
+        #expect(three.detail?.contains("MB") == true)
+        #expect(three.action == .showActivity && three.tone == .busy)
+        #expect(ready { $0.changesInFlight = true }.title == "Syncing changes")
+        #expect(ready { $0.status = .syncing }.title == "Syncing changes")
+    }
+
+    @Test func setupAndSignInComeBeforeEverythingElse() {
+        let waiting = ready { $0.signingIn = true; $0.setupCompleted = false }
+        #expect(waiting.title == "Finish in your browser" && waiting.action == .openBrowserAgain)
+        let unfinished = ready { $0.setupCompleted = false; $0.filesInFlight = 2 }
+        #expect(unfinished.title == "Setup not finished" && unfinished.action == .continueSetup)
+        let signedOut = ready { $0.hasCredentials = false }
+        #expect(signedOut.title == "You're signed out" && signedOut.action == .signIn)
+        #expect(ready { $0.hasCredentials = false; $0.canRestoreSignIn = true }.action == .restoreSignIn)
+        #expect(ready { $0.sessionPending = true }.title == "Setting up your drive")
+    }
+
+    @Test func aStoppedBackgroundServiceSaysHowToBringDrivesBack() {
+        func stopped(_ install: EngineInstallState) -> MenuHeadline { ready { $0.connected = false; $0.install = install } }
+        #expect(stopped(.notRegistered).action == .allowBackground)
+        #expect(stopped(.requiresApproval).action == .approveBackground)
+        #expect(stopped(.enabled).action == .tryAgain)
+        #expect(stopped(.failed("Launch agent rejected")).detail == "Launch agent rejected")
+        #expect(stopped(.notInstalled).action == nil)
+        let all = [stopped(.notRegistered), stopped(.requiresApproval), stopped(.enabled), stopped(.notInstalled)]
+        #expect(all.allSatisfy { $0.tone == .attention })
+        // The default UI never names the machinery.
+        #expect(all.allSatisfy { text in ["daemon", "engine", "service"].allSatisfy { !"\(text.title) \(text.detail ?? "")".lowercased().contains($0) } })
+    }
+
+    @Test func planAndStorageMessagesReassureBeforeTheyAsk() throws {
+        let expired = try access(#"{"id":"a","name":"Acme","state":"expired","storageReady":true,"writable":false}"#)
+        let paused = ready { $0.access = expired; $0.filesInFlight = 4 }
+        #expect(paused.title == "Changes are paused — plan inactive")
+        #expect(paused.detail?.hasPrefix("Your files are safe.") == true)
+        #expect(paused.action == .managePlan(workspaceID: "a"))
+        #expect(paused.action?.title == "Manage Plan on the Web")
+
+        let nearly = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":true,"usedBytes":9500000000,"quotaBytes":10000000000}"#)
+        let almost = ready { $0.access = nearly }
+        #expect(almost.title == "Storage almost full")
+        #expect(almost.detail?.hasPrefix("Your files are safe.") == true && almost.detail?.contains("GB") == true)
+        #expect(almost.action == .managePlan(workspaceID: "a"))
+        let over = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":true,"usedBytes":10000000000,"quotaBytes":10000000000}"#)
+        #expect(ready { $0.access = over }.title == "Storage is full")
+        let roomy = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":true,"usedBytes":8900000000,"quotaBytes":10000000000}"#)
+        #expect(ready { $0.access = roomy }.title == "All files are up to date")
+        // A server that reports no quota is never called full.
+        let unmetered = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":true}"#)
+        #expect(ready { $0.access = unmetered }.title == "All files are up to date")
+    }
+
+    /// The server marks a workspace over its quota as not writable (`writable && usedBytes <= quotaBytes`).
+    /// With an active plan that is a storage problem, never "plan inactive".
+    @Test func anOverQuotaWorkspaceWithAnActivePlanIsFullNotInactive() throws {
+        let overQuota = #"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":false,"usedBytes":11000000000,"quotaBytes":10000000000}"#
+        let full = ready { $0.access = try! self.access(overQuota) }
+        #expect(full.title == "Storage is full")
+        #expect(full.detail?.hasPrefix("Your files are safe.") == true)
+        #expect(full.detail?.contains("New changes are paused") == true)
+        #expect(full.action == .managePlan(workspaceID: "a"))
+        let notices = PlanNotices.notices(access: try access(overQuota), workspaces: [])
+        #expect(notices.count == 1 && notices[0].text.contains("Storage is full") && !notices[0].text.contains("plan"))
+
+        // Not writable while under quota is the plan, and an expired plan stays inactive even when over quota.
+        let underQuota = #"{"id":"b","name":"Beta","state":"paid","storageReady":true,"writable":false,"usedBytes":1000000000,"quotaBytes":10000000000}"#
+        #expect(ready { $0.access = try! self.access(underQuota) }.title == "Changes are paused — plan inactive")
+        let expiredOver = #"{"id":"c","name":"Gone","state":"expired","storageReady":true,"writable":false,"usedBytes":11000000000,"quotaBytes":10000000000}"#
+        #expect(ready { $0.access = try! self.access(expiredOver) }.title == "Changes are paused — plan inactive")
+        // An inactive plan in one workspace outranks a full one in another, and full outranks almost full.
+        #expect(ready { $0.access = try! self.access("\(overQuota),\(underQuota)") }.action == .managePlan(workspaceID: "b"))
+        let nearly = #"{"id":"d","name":"Near","state":"paid","storageReady":true,"writable":true,"usedBytes":9500000000,"quotaBytes":10000000000}"#
+        #expect(ready { $0.access = try! self.access("\(nearly),\(overQuota)") }.title == "Storage is full")
+        #expect(PlanNotices.notices(access: try access(underQuota), workspaces: [])[0].text.contains("Check the plan"))
+    }
+
+    /// The server stops changes only when usage is strictly over the quota (`usedBytes <= quotaBytes` is writable).
+    /// Exactly at the quota and writable: full, but nothing is paused, so nothing may say it is.
+    @Test func exactlyAtQuotaAndWritableIsFullButNotPaused() throws {
+        let atQuota = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":true,"usedBytes":10000000000,"quotaBytes":10000000000}"#)
+        #expect(atQuota[0].isFull && !atQuota[0].pausedByStorage)
+        let headline = ready { $0.access = atQuota }
+        #expect(headline.title == "Storage is full")
+        #expect(headline.detail?.hasPrefix("Your files are safe.") == true)
+        #expect(headline.detail?.lowercased().contains("paused") == false)
+        let notices = PlanNotices.notices(access: atQuota, workspaces: [])
+        #expect(notices.count == 1 && notices[0].text.contains("Storage is full"))
+        #expect(!notices[0].text.lowercased().contains("paused"))
+    }
+
+    /// Exactly at the quota and not writable: the server would still take changes at this usage,
+    /// so the cause is the plan, and storage must not be blamed.
+    @Test func exactlyAtQuotaAndNotWritableIsThePlan() throws {
+        let atQuota = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":false,"usedBytes":10000000000,"quotaBytes":10000000000}"#)
+        #expect(!atQuota[0].pausedByStorage)
+        let headline = ready { $0.access = atQuota }
+        #expect(headline.title == "Changes are paused — plan inactive")
+        #expect(headline.action == .managePlan(workspaceID: "a"))
+        let notices = PlanNotices.notices(access: atQuota, workspaces: [])
+        #expect(notices.count == 1 && notices[0].text.contains("Check the plan") && !notices[0].text.contains("Storage is full"))
+        // One byte over is storage again.
+        let over = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":false,"usedBytes":10000000001,"quotaBytes":10000000000}"#)
+        #expect(over[0].pausedByStorage)
+        #expect(ready { $0.access = over }.title == "Storage is full")
+        #expect(ready { $0.access = over }.detail?.contains("New changes are paused") == true)
+        #expect(PlanNotices.notices(access: over, workspaces: [])[0].text.contains("so new changes are paused"))
+    }
+
+    @Test func anEndedTrialPausesChangesWhenTheServerHasNoAccessReport() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let orgs = try JSONDecoder().decode(WorkspacesResult.self, from: Data(#"""
+        {"orgs":[{"id":"a","name":"Acme","role":"owner","tier":"teams","trialEndsAt":1000000000},
+                 {"id":"b","name":"Later","role":"owner","tier":"teams","trialEndsAt":3000000000}]}
+        """#.utf8)).orgs
+        let ended = ready { $0.workspaces = orgs; $0.now = now }
+        #expect(ended.title == "Changes are paused — plan inactive" && ended.action == .managePlan(workspaceID: "a"))
+        #expect(ready { $0.workspaces = [orgs[1]]; $0.now = now }.title == "All files are up to date")
+    }
+
+    @Test func problemsOutrankProgressInAFixedOrder() {
+        let drive = ready { $0.drives = [Self.finder, Self.broken]; $0.failedUpload = "Plan.pdf"; $0.filesInFlight = 2 }
+        #expect(drive.title == "A drive needs attention")
+        #expect(drive.detail?.contains("Legal") == true)
+        #expect(drive.action == .retryDrive(driveID: "legal"))
+        let upload = ready { $0.failedUpload = "Plan.pdf"; $0.filesInFlight = 2 }
+        #expect(upload.title == "An upload didn't finish")
+        #expect(upload.detail?.contains("Plan.pdf") == true && upload.action == .showActivity)
+        #expect(ready { $0.status = .offline; $0.filesInFlight = 2 }.title == "You're offline")
+        let failing = ready { $0.status = .error; $0.error = "timed out" }
+        #expect(failing.title == "Orbit can't sync right now" && failing.detail == "timed out" && failing.action == .tryAgain)
+    }
+
+    @Test func anAccountWithoutDrivesIsOfferedOne() {
+        let none = ready { $0.drives = [] }
+        #expect(none.title == "No drives yet" && none.action == .newDrive)
+    }
+
+    @Test func everyHeadlineHasWordsASymbolAndAtMostOneAction() {
+        let headlines = [ready(), ready { $0.signingIn = true }, ready { $0.hasCredentials = false },
+                         ready { $0.connected = false }, ready { $0.status = .offline }, ready { $0.drives = [] }]
+        #expect(headlines.allSatisfy { !$0.title.isEmpty && !$0.symbol.isEmpty })
+        #expect(headlines.allSatisfy { $0.action == nil || !$0.action!.title.isEmpty })
+    }
+
+    @Test func theModelCountsFilesFromLiveTransfersAndTheUploadQueue() async throws {
+        let transfers = [
+            TransferInfo(id: "up", driveId: "design", path: "/Brand/Style guide.pdf", direction: .upload,
+                         bytesDone: 5_200_000, bytesTotal: 10_400_000, status: .active),
+            TransferInfo(id: "total", driveId: "design", path: "/", direction: .upload, bytesDone: 0, bytesTotal: 0, status: .queued),
+        ]
+        let queue = UploadsSnapshot(pending: [PendingUpload(driveId: "design", path: "/Brand/Logo.svg", bytes: 48_000)],
+                                    journalBytes: 48_000, journalCapBytes: 10_000_000_000)
+        let model = try await Fixtures.showing(SnapshotClient(drives: [Self.finder], transfers: transfers, queue: queue, state: .syncing))
+        #expect(model.headline.title == "Syncing 2 files")
+        #expect(model.statusTitle == model.headline.title)
+
+        model.apply(.transfer(TransferInfo(id: "failed", driveId: "design", path: "/Brand/Interrupted.pdf",
+                                           direction: .upload, bytesDone: 20, bytesTotal: 100, status: .failed)))
+        #expect(model.headline.title == "An upload didn't finish")
+        #expect(model.headline.detail?.contains("Interrupted.pdf") == true)
+        #expect(ActivityView.summary(model).title == "An upload didn't finish")
+    }
+
+    /// A file that uploaded before and changed again: the queue entry is paired with the old finished
+    /// upload of the same path, and must still count as work in progress.
+    @Test func aFileChangedAgainAfterUploadingStillCountsAsSyncing() async throws {
+        let model = try await Fixtures.showing(SnapshotClient(drives: [Self.finder]))
+        model.apply(.transfer(TransferInfo(id: "first", driveId: "design", path: "/notes.txt", direction: .upload,
+                                           bytesDone: 100, bytesTotal: 100, status: .done)))
+        #expect(model.headline.title == "All files are up to date")
+        let queue = UploadsSnapshot(pending: [PendingUpload(driveId: "design", path: "/notes.txt", bytes: 48_000)],
+                                    journalBytes: 48_000, journalCapBytes: 10_000_000_000)
+        model.activity.apply(transfers: [], uploads: queue)
+
+        let row = try #require(model.activity.items.first)
+        #expect(model.activity.items.count == 1 && row.pending != nil && row.transfer?.status == .done)
+        #expect(row.isActive)
+        #expect(model.headline.title == "Syncing 1 file")
+        #expect(ActivityView.summary(model).title == "Syncing 1 file")
+        // The row describes the upload that is waiting, not the one that finished earlier.
+        let content = ActivityRowContent(row)
+        #expect(content.status.hasPrefix("Waiting to upload · ") && !content.failed && content.progress == .none)
+
+        // Once the queue is empty the finished upload is history again.
+        model.activity.apply(transfers: [], uploads: UploadsSnapshot(pending: [], journalBytes: 0, journalCapBytes: 10_000_000_000))
+        #expect(model.activity.items.allSatisfy { !$0.isActive })
+        #expect(ActivityView.summary(model).title == "Nothing is uploading")
+    }
+
+    /// The Activity page reports transfers even when the menu leads with a different problem.
+    @Test func theActivityPageSummarizesTransfersOnly() async throws {
+        let transfer = TransferInfo(id: "up", driveId: "design", path: "/a.pdf", direction: .upload,
+                                    bytesDone: 1, bytesTotal: 2, status: .active)
+        let model = try await Fixtures.showing(SnapshotClient(drives: [Self.finder, Self.broken], transfers: [transfer]))
+        #expect(model.headline.title == "A drive needs attention")
+        #expect(ActivityView.summary(model).title == "Syncing 1 file")
+        let quiet = try await Fixtures.showing(SnapshotClient(drives: [Self.finder]))
+        #expect(ActivityView.summary(quiet).title == "Nothing is uploading")
+        let offline = Fixtures.offline()
+        offline.engineIsUnavailable(error: nil)
+        #expect(ActivityView.summary(offline).title == "No activity yet")
+    }
+}
