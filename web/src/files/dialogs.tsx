@@ -6,7 +6,7 @@ import { Input } from "../components/ui/input";
 import { formatBytes, Modal, useLoad } from "../ui";
 import { deletedItems, restoreDeletedFile, restoreDeletedFolder, type DeletedItem } from "./deleted";
 import { fileError, friendlyDate, plural } from "./format";
-import { baseName, childPath, describeKind, folderSegments, nameProblem, parentFolder } from "./paths";
+import { baseName, childPath, describeKind, folderSegments, nameProblem, outermost, parentFolder } from "./paths";
 
 /** A file or folder the user is acting on. `path` ends with "/" for folders. */
 export interface Item { name: string; path: string; isFolder: boolean; versionId?: string | null; size: number }
@@ -128,8 +128,9 @@ async function subfolders(api: DriveApi, folder: string): Promise<string[]> {
 export function MoveDialog({ api, driveName, items, onMove, onClose }: {
   api: DriveApi; driveName: string; items: Item[]; onMove: (destination: string) => Promise<void>; onClose: () => void;
 }) {
-  const origin = parentFolder(items[0].path);
-  const [destination, setDestination] = useState(origin);
+  const [destination, setDestination] = useState(() => parentFolder(items[0].path));
+  // Items picked from search can come from several folders; only a folder that holds all of them is no move at all.
+  const alreadyThere = outermost(items).every((item) => parentFolder(item.path) === destination);
   const { busy, error, setError, run } = useAction();
   const load = useCallback(() => subfolders(api, destination), [api, destination]);
   const { data: folders, loading, error: loadError, reload } = useLoad(load);
@@ -165,8 +166,8 @@ export function MoveDialog({ api, driveName, items, onMove, onClose }: {
           {folders && !folders.length && <p className="muted fb-picker-note">No folders in here. You can still move {items.length === 1 ? "it" : "them"} to “{target}”.</p>}
         </div>
         <Problem>{error}</Problem>
-        <p className="muted small fb-picker-hint">{destination === origin ? `${items.length === 1 ? "It’s" : "They’re"} already in this folder. Choose another one.` : inside ? "A folder can’t be moved into itself." : "\u00a0"}</p>
-        <Footer busy={busy} label={`Move to “${target}”`} working="Moving…" onClose={onClose} disabled={destination === origin || inside} />
+        <p className="muted small fb-picker-hint">{alreadyThere ? `${items.length === 1 ? "It’s" : "They’re"} already in this folder. Choose another one.` : inside ? "A folder can’t be moved into itself." : "\u00a0"}</p>
+        <Footer busy={busy} label={`Move to “${target}”`} working="Moving…" onClose={onClose} disabled={alreadyThere || inside} />
       </form>
     </Modal>
   );

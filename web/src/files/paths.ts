@@ -12,6 +12,11 @@ export const parentFolder = (path: string) => {
 };
 /** The path the data plane expects for `name` inside `folder`. */
 export const childPath = (folder: string, name: string, isFolder: boolean) => `${folder}${name}${isFolder ? "/" : ""}`;
+/** Drops items that sit inside a folder that is also in the list: acting on the folder already covers them. */
+export const outermost = <T extends { path: string; isFolder: boolean }>(items: T[]): T[] => {
+  const folders = items.filter((item) => item.isFolder).map((item) => item.path);
+  return items.filter((item) => !folders.some((folder) => item.path !== folder && item.path.startsWith(folder)));
+};
 export const folderSegments = (folder: string) => folder.split("/").filter(Boolean);
 
 /** Why `name` cannot be used for a file or folder, or null when it can. */

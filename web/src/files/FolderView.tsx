@@ -13,7 +13,7 @@ import { useListing, useSearch } from "../usePagination";
 import { DetailsPanel } from "./DetailsPanel";
 import { DeletedFilesDialog, DeleteDialog, MoveDialog, NameDialog, type Item } from "./dialogs";
 import { exactDate, fileError, friendlyDate, plural } from "./format";
-import { baseName, childPath, describeKind, folderSegments, parentFolder } from "./paths";
+import { baseName, childPath, describeKind, folderSegments, outermost, parentFolder } from "./paths";
 
 /** Why nothing can be changed here, if so. `member` is a person with view access; the rest are workspace-wide pauses. */
 export type ReadOnly = "member" | "expired" | "storage" | "paused" | null;
@@ -357,7 +357,8 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
         }} />}
       {dialog?.kind === "move" && <MoveDialog api={api} driveName={driveName} items={dialog.items} onClose={() => setDialog(null)}
         onMove={async (destination) => {
-          const { items } = dialog;
+          // Search can select a folder with something inside it, or items from several folders, some already at the destination.
+          const items = outermost(dialog.items).filter((item) => parentFolder(item.path) !== destination);
           for (let i = 0; i < items.length; i += CHUNK)
             await change((drive) => drive.move(items.slice(i, i + CHUNK).map((item) => ({ from: item.path, to: childPath(destination, item.name, item.isFolder), versionId: item.versionId }))));
           setDialog(null); setSelected(new Set());
@@ -366,7 +367,7 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
         }} />}
       {dialog?.kind === "delete" && <DeleteDialog items={dialog.items} onClose={() => setDialog(null)}
         onConfirm={async () => {
-          const { items } = dialog;
+          const items = outermost(dialog.items);
           for (let i = 0; i < items.length; i += CHUNK) await change((drive) => drive.remove(items.slice(i, i + CHUNK)));
           setDialog(null); setSelected(new Set());
           setNotice({ text: `Deleted ${items.length === 1 ? `“${items[0].name}”` : plural(items.length, "item")}.`, deleted: true });

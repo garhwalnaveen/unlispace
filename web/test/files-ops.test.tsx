@@ -254,3 +254,48 @@ it("loads long folders a page at a time and says when a filter has only checked 
   expect(screen.getByText("4 items")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
 });
+
+it("moves and deletes a search selection that spans folders or holds a folder with something inside it", async () => {
+  const found = (path: string, versionId: string) => ({ path, type: path.endsWith("/") ? "folder" : "file", versionId, size: 10, contentType: null, mtimeMs: 1000, seq: 1 });
+  const { sent } = backend({
+    folders: tree(),
+    data: (route) => (route === "search" ? json({ entries: [found("docs/", "v_DOCS"), found("docs/plan.md", "v_PLAN"), found("a.txt", "v_A")], cursor: null }) : undefined),
+  });
+  renderApp(`/drives/${drive.id}/`); const user = userEvent.setup();
+  await screen.findByRole("link", { name: "a.txt" });
+  const search = async () => {
+    const box = screen.getByRole("searchbox", { name: "Search Space" });
+    await user.clear(box); await user.type(box, "docs");
+    await screen.findByText(/3 results/);
+  };
+  const pick = async (...names: string[]) => { for (const name of names) await user.click(screen.getByRole("checkbox", { name: `Select ${name}` })); };
+  const bar = () => within(screen.getByRole("toolbar", { name: "Selected items" }));
+
+  await search(); await pick("plan.md", "a.txt");
+  await user.click(bar().getByRole("button", { name: "Move to…" }));
+  let dialog = screen.getByRole("dialog", { name: "Move 2 items" });
+  await user.click(within(dialog).getByRole("button", { name: "Space" }));
+  await user.click(await within(dialog).findByRole("button", { name: "docs" }));
+  await user.click(await within(dialog).findByRole("button", { name: "Move to “docs”" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(sent("commit").at(-1)!.body).toEqual({ ops: [{ op: "rename", from: "a.txt", to: "docs/a.txt", ifVersion: "v_A" }] });
+
+  await search(); await pick("docs", "plan.md", "a.txt");
+  await user.click(bar().getByRole("button", { name: "Move to…" }));
+  dialog = screen.getByRole("dialog", { name: "Move 3 items" });
+  await user.click(within(dialog).getByRole("button", { name: "Space" }));
+  await user.click(await within(dialog).findByRole("button", { name: "archive" }));
+  await user.click(await within(dialog).findByRole("button", { name: "Move to “archive”" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(sent("commit").at(-1)!.body).toEqual({ ops: [
+    { op: "rename", from: "docs/", to: "archive/docs/", ifVersion: "v_DOCS" },
+    { op: "rename", from: "a.txt", to: "archive/a.txt", ifVersion: "v_A" },
+  ] });
+
+  await search(); await pick("docs", "plan.md");
+  await user.click(bar().getByRole("button", { name: "Delete…" }));
+  dialog = screen.getByRole("dialog", { name: "Delete 2 items?" });
+  await user.click(within(dialog).getByRole("button", { name: "Delete 2 items" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(sent("commit").at(-1)!.body).toEqual({ ops: [{ op: "delete", path: "docs/", ifVersion: "v_DOCS" }] });
+});
