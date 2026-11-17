@@ -155,7 +155,8 @@ struct MenuHeadline: Equatable {
         if let access = input.access {
             // The server also reports a workspace over its quota as not writable. That is a storage
             // problem with an active plan, so it must not be read as the plan being inactive.
-            if let paused = access.first(where: { $0.state == "expired" || ($0.storageReady && $0.writable == false && !$0.isFull) }) {
+            // At or under the quota the server still accepts changes, so there it can only be the plan.
+            if let paused = access.first(where: { $0.state == "expired" || ($0.storageReady && $0.writable == false && !$0.pausedByStorage) }) {
                 return MenuHeadline(title: "Changes are paused — plan inactive",
                                     detail: "Your files are safe. Choose a plan for \(paused.name) to keep saving changes.",
                                     tone: .attention, action: .managePlan(workspaceID: paused.id))
@@ -169,7 +170,7 @@ struct MenuHeadline: Equatable {
             if let workspace = fullest, let used = workspace.usedBytes, let quota = workspace.quotaBytes {
                 let usage = "\(Format.bytes(used)) of \(Format.bytes(quota)) used in \(workspace.name)."
                 return MenuHeadline(title: workspace.isFull ? "Storage is full" : "Storage almost full",
-                                    detail: workspace.writable == false
+                                    detail: workspace.pausedByStorage
                                         ? "Your files are safe. \(usage) New changes are paused until you free up space or add storage."
                                         : "Your files are safe. \(usage)",
                                     tone: .attention, action: .managePlan(workspaceID: workspace.id))
@@ -192,8 +193,15 @@ extension MeAccess.Workspace {
         return Double(used) / Double(quota)
     }
 
-    /// At or over the quota. The server stops accepting changes once usage goes over it.
+    /// At or over the quota. This is only what the storage looks like; changes still save at exactly the quota.
     var isFull: Bool { (storageFraction ?? 0) >= 1 }
+
+    /// The server has stopped accepting changes because usage is over the quota (`used > quota`).
+    /// Not writable at or under the quota has another cause: the plan.
+    var pausedByStorage: Bool {
+        guard writable == false, let quota = quotaBytes, let used = usedBytes else { return false }
+        return used > quota
+    }
 }
 
 extension AppModel {

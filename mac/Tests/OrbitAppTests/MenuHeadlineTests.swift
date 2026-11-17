@@ -116,6 +116,38 @@ import OrbitKit
         #expect(PlanNotices.notices(access: try access(underQuota), workspaces: [])[0].text.contains("Check the plan"))
     }
 
+    /// The server stops changes only when usage is strictly over the quota (`usedBytes <= quotaBytes` is writable).
+    /// Exactly at the quota and writable: full, but nothing is paused, so nothing may say it is.
+    @Test func exactlyAtQuotaAndWritableIsFullButNotPaused() throws {
+        let atQuota = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":true,"usedBytes":10000000000,"quotaBytes":10000000000}"#)
+        #expect(atQuota[0].isFull && !atQuota[0].pausedByStorage)
+        let headline = ready { $0.access = atQuota }
+        #expect(headline.title == "Storage is full")
+        #expect(headline.detail?.hasPrefix("Your files are safe.") == true)
+        #expect(headline.detail?.lowercased().contains("paused") == false)
+        let notices = PlanNotices.notices(access: atQuota, workspaces: [])
+        #expect(notices.count == 1 && notices[0].text.contains("Storage is full"))
+        #expect(!notices[0].text.lowercased().contains("paused"))
+    }
+
+    /// Exactly at the quota and not writable: the server would still take changes at this usage,
+    /// so the cause is the plan, and storage must not be blamed.
+    @Test func exactlyAtQuotaAndNotWritableIsThePlan() throws {
+        let atQuota = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":false,"usedBytes":10000000000,"quotaBytes":10000000000}"#)
+        #expect(!atQuota[0].pausedByStorage)
+        let headline = ready { $0.access = atQuota }
+        #expect(headline.title == "Changes are paused — plan inactive")
+        #expect(headline.action == .managePlan(workspaceID: "a"))
+        let notices = PlanNotices.notices(access: atQuota, workspaces: [])
+        #expect(notices.count == 1 && notices[0].text.contains("Check the plan") && !notices[0].text.contains("Storage is full"))
+        // One byte over is storage again.
+        let over = try access(#"{"id":"a","name":"Acme","state":"paid","storageReady":true,"writable":false,"usedBytes":10000000001,"quotaBytes":10000000000}"#)
+        #expect(over[0].pausedByStorage)
+        #expect(ready { $0.access = over }.title == "Storage is full")
+        #expect(ready { $0.access = over }.detail?.contains("New changes are paused") == true)
+        #expect(PlanNotices.notices(access: over, workspaces: [])[0].text.contains("so new changes are paused"))
+    }
+
     @Test func anEndedTrialPausesChangesWhenTheServerHasNoAccessReport() throws {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let orgs = try JSONDecoder().decode(WorkspacesResult.self, from: Data(#"""
