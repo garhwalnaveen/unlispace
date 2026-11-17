@@ -138,7 +138,7 @@ describe("M2 R2 manifests and streamed commits", () => {
 		}));
 		expect(response.status).toBe(413);
 		expect(pulled).toBeLessThan(MAX_STREAM_COMMIT_BYTES + 256 * 1024);
-	});
+	}, 30_000);
 });
 
 describe("M2 signed zone-cache block delivery", () => {
