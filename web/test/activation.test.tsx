@@ -77,14 +77,14 @@ it("returns from a deployed billing route to the working drives route", async ()
 
 it("shows the public landing page at the root and keeps drive routes protected", async () => {
   renderApp("/", await signedOutStore());
-  expect(await screen.findByRole("navigation", { name: "Page sections" })).toBeInTheDocument();
+  expect(await screen.findByRole("navigation", { name: "Product navigation" })).toBeInTheDocument();
   for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
   expect(screen.queryByRole("navigation", { name: "Main navigation" })).not.toBeInTheDocument();
 });
 
 it("renders the public overview before session recovery finishes", () => {
   renderApp("/overview", authStore({ signedIn: false }));
-  expect(screen.getByRole("heading", { level: 1, name: "Cloud drives that open in Finder" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "One filesystem for people and AI agents" })).toBeInTheDocument();
   expect(screen.queryByText("Loading your account…")).not.toBeInTheDocument();
 });
 
