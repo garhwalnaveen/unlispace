@@ -1,5 +1,4 @@
-import { Input } from "./components/ui/input";
-import { Button } from "./components/ui/button";
+import { Check, LoaderCircle, MailCheck, MonitorCheck, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Link,
@@ -8,25 +7,42 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
-import { API_URL, publicPost, type Session } from "./api";
+import { API_URL, ApiError, publicPost, type Session } from "./api";
+import type { AuthStore } from "./auth";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
 import { useAuth } from "./context";
-import { OrbitMark } from "./OrbitMark";
 import { desktopCallback, desktopParameters, safeReturn } from "./links";
-import { ErrorNotice, Icon, Loading } from "./ui";
+import { Card } from "./onboarding/Card";
+import { noteSignIn, readOnboarding, writeOnboarding } from "./onboarding/state";
+import { ErrorNotice, Loading } from "./ui";
 
+const RESEND_SECONDS = 30;
+
+/** Accepts a session; a newly created account is marked so its first visit opens the welcome flow. */
+function acceptSession(auth: AuthStore, session: Session) {
+  noteSignIn(session.user.id, session.accountCreated);
+  auth.accept(session);
+}
+
+/** Email sign-in: an address, then a six-digit code that is submitted as soon as it is complete. */
 export function OtpForm({
   onSession,
+  onStage,
 }: {
   onSession: (session: Session) => void;
+  /** Called with the address a code was sent to, or null on the email step. */
+  onStage?: (sentTo: string | null) => void;
 }) {
   const [email, setEmail] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"sending" | "verifying" | null>(null);
   const [error, setError] = useState<unknown>();
   const [cooldown, setCooldown] = useState(0);
   const [notice, setNotice] = useState("");
   const codeInput = useRef<HTMLInputElement>(null);
+  const verifying = useRef(false);
   useEffect(() => {
     if (sentTo) codeInput.current?.focus();
   }, [sentTo]);
@@ -35,107 +51,118 @@ export function OtpForm({
     const timer = window.setTimeout(() => setCooldown((seconds) => Math.max(0, seconds - 1)), 1000);
     return () => window.clearTimeout(timer);
   }, [cooldown]);
+  function stage(address: string | null) {
+    setSentTo(address);
+    onStage?.(address);
+  }
   async function requestCode(address: string, resend = false) {
-    setBusy(true);
+    setBusy("sending");
     setError(undefined);
     setNotice("");
     try {
       await publicPost("/auth/otp/start", { email: address });
-      setSentTo(address);
+      stage(address);
       setCode("");
-      setCooldown(30);
-      setNotice(resend ? "A new code has been sent. Use the most recent email." : "");
+      setCooldown(RESEND_SECONDS);
+      setNotice(resend ? "We sent a new code. Use the most recent email." : "");
       codeInput.current?.focus();
     } catch (reason) {
       setError(reason);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!sentTo) { await requestCode(email.trim()); return; }
-    setBusy(true);
+  async function verify(value: string) {
+    if (!sentTo || verifying.current) return;
+    verifying.current = true;
+    setBusy("verifying");
     setError(undefined);
+    setNotice("");
     try {
-      onSession(await publicPost<Session>("/auth/otp/verify", { email: sentTo, code }));
+      onSession(await publicPost<Session>("/auth/otp/verify", { email: sentTo, code: value }));
     } catch (reason) {
       setError(reason);
+      // A wrong code is retyped; anything else (offline, rate limit) can be retried with the same digits.
+      if (reason instanceof ApiError && reason.code === "invalid_code") setCode("");
+      codeInput.current?.focus();
     } finally {
-      setBusy(false);
+      verifying.current = false;
+      setBusy(null);
     }
   }
-  return (
-    <form onSubmit={submit} className="stack">
-      {sentTo ? (
-        <>
-          <p className="muted">
-            Enter the six-digit code sent to <strong>{sentTo}</strong>. It
-            expires in 10 minutes.
-          </p>
-          <label htmlFor="otp">Verification code</label>
-          <Input
-            ref={codeInput}
-            id="otp"
-            name="code"
-            className="otp"
-            value={code}
-            onChange={(event) =>
-              setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-            }
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            autoComplete="one-time-code"
-            required
-          />
-        </>
-      ) : (
-        <>
-          <label htmlFor="email">Email address</label>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            placeholder="name@company.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </>
-      )}
-      <ErrorNotice error={error} />
-      {notice && <p role="status">{notice}</p>}
-      <Button
-        variant="default"
-        disabled={busy || (!!sentTo && code.length !== 6)}
-      >
-        {busy
-          ? "Please wait…"
-          : sentTo
-            ? "Verify & sign in"
-            : "Continue with email"}
-      </Button>
-      {sentTo && (<>
-        <Button type="button" variant="ghost" disabled={busy || cooldown > 0} onClick={() => void requestCode(sentTo, true)}>
-          {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!sentTo) void requestCode(email.trim());
+    else if (code.length === 6) void verify(code);
+  }
+  if (!sentTo)
+    return (
+      <form onSubmit={submit} className="ob-form">
+        <label htmlFor="email">Email address</label>
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          placeholder="name@company.com"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          required
+        />
+        <ErrorNotice error={error} />
+        <Button variant="default" className="ob-main" disabled={busy !== null}>
+          {busy ? "Sending code…" : "Continue with email"}
         </Button>
-        <Button
+      </form>
+    );
+  return (
+    <form onSubmit={submit} className="ob-form">
+      <label htmlFor="otp">Verification code</label>
+      <Input
+        ref={codeInput}
+        id="otp"
+        name="code"
+        className="ob-code"
+        value={code}
+        onChange={(event) => {
+          const digits = event.target.value.replace(/\D/g, "").slice(0, 6);
+          setCode(digits);
+          if (digits.length === 6 && digits !== code) void verify(digits);
+        }}
+        inputMode="numeric"
+        pattern="[0-9]{6}"
+        maxLength={6}
+        autoComplete="one-time-code"
+        placeholder="••••••"
+        aria-describedby="otp-help"
+        readOnly={busy === "verifying"}
+        required
+      />
+      <p id="otp-help" className="ob-muted">Enter the code from the email. It expires in 10 minutes.</p>
+      <ErrorNotice error={error} />
+      {notice && <p className="ob-muted" role="status">{notice}</p>}
+      <Button variant="default" className="ob-main" disabled={busy !== null || code.length !== 6}>
+        {busy === "verifying" ? "Signing in…" : "Sign in"}
+      </Button>
+      <div className="ob-row">
+        <button type="button" className="ob-link" disabled={busy !== null || cooldown > 0} onClick={() => void requestCode(sentTo, true)}>
+          {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+        </button>
+        <button
           type="button"
-          variant="ghost"
-          disabled={busy}
+          className="ob-link"
+          disabled={busy !== null}
           onClick={() => {
-            setSentTo(null);
+            stage(null);
             setCode("");
             setError(undefined);
             setNotice("");
             setCooldown(0);
           }}
         >
-          Change email
-        </Button>
-      </>)}
+          Use a different email
+        </button>
+      </div>
     </form>
   );
 }
@@ -156,37 +183,42 @@ export function Login() {
   const returnTo = safeReturn(params.get("return"));
   const [googleBusy, setGoogleBusy] = useState(false);
   const [googleError, setGoogleError] = useState<unknown>();
+  const [sentTo, setSentTo] = useState<string | null>(null);
   if (user) return <Navigate to={returnTo} replace />;
+  const purpose = returnTo.startsWith("/desktop")
+    ? "Sign in to connect Orbit on this Mac."
+    : returnTo.startsWith("/invites/")
+      ? "Sign in to accept your invitation."
+      : "Your files in Finder, in the browser and in your tools.";
   return (
-    <div className="auth-layout">
-      <section className="auth-form" aria-labelledby="sign-in-title">
-        <div className="auth-heading">
-          <OrbitMark className="auth-mark" />
-          <h1 id="sign-in-title">Welcome to Orbit</h1>
-          <p className="muted">Sign in to access your drives and connect your Mac.</p>
-        </div>
+    <Card
+      icon={sentTo ? <MailCheck /> : undefined}
+      title={sentTo ? "Check your email" : "Sign in to Orbit"}
+      lead={sentTo ? <>We sent a six-digit code to <strong>{sentTo}</strong>.</> : purpose}
+    >
+      {!sentTo && <>
         <ErrorNotice error={googleError} />
         <Button
-          variant="outline" className="w-full"
+          variant="outline" className="ob-main"
           disabled={googleBusy}
           onClick={() => {
             setGoogleBusy(true);
+            setGoogleError(undefined);
             void googleSignIn(returnTo).then(url => window.location.assign(url)).catch(error => { setGoogleError(error); setGoogleBusy(false); });
           }}
         >
-          <svg className="google-mark" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.33 2.98-7.36Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.41l-3.24-2.51c-.9.6-2.05.96-3.38.96-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.92a6 6 0 0 1 0-3.84V7.49H3.07a10 10 0 0 0 0 9.02l3.34-2.59Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.5 3.83 1.5l2.87-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.93 5.49l3.34 2.59C7.2 7.72 9.4 5.96 12 5.96Z"/></svg>
-          Continue with Google
+          <svg className="ob-google" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.33 2.98-7.36Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.41l-3.24-2.51c-.9.6-2.05.96-3.38.96-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.92a6 6 0 0 1 0-3.84V7.49H3.07a10 10 0 0 0 0 9.02l3.34-2.59Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.5 3.83 1.5l2.87-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.93 5.49l3.34 2.59C7.2 7.72 9.4 5.96 12 5.96Z"/></svg>
+          {googleBusy ? "Opening Google…" : "Continue with Google"}
         </Button>
-        <div className="divider">or</div>
-        <OtpForm onSession={auth.accept} />
-        <p className="fine-print">
-          Your first sign-in creates an account.<br />
-          Your seven-day trial starts when your drive is ready.
-        </p>
-      </section>
-    </div>
+        <div className="ob-divider">or</div>
+      </>}
+      <OtpForm onSession={(session) => acceptSession(auth, session)} onStage={setSentTo} />
+      {!sentTo && <p className="ob-fine">New to Orbit? Signing in creates your account with a 7-day trial. No card needed.</p>}
+    </Card>
   );
 }
+
+const GOOGLE_DENIED = "access_denied";
 export function Callback() {
   const { auth } = useAuth();
   const navigate = useNavigate();
@@ -205,9 +237,11 @@ export function Callback() {
     );
     if (!handoff) {
       setError(
-        providerError
-          ? `Google sign-in failed (${providerError}). Please try again.`
-          : "The sign-in link is missing its handoff code. Please sign in again.",
+        providerError === GOOGLE_DENIED
+          ? "Google sign-in was cancelled. Sign in again when you are ready."
+          : providerError
+            ? `Google could not sign you in (${providerError}). Try again, or use your email instead.`
+            : "This sign-in link is incomplete. Sign in again.",
       );
       return;
     }
@@ -219,31 +253,34 @@ export function Callback() {
     }
     void publicPost<Session>("/auth/handoff/exchange", { handoff, webCodeVerifier })
       .then((session) => {
-        auth.accept(session);
+        acceptSession(auth, session);
         const returnTo = safeReturn(sessionStorage.getItem("orbit.return"));
         sessionStorage.removeItem("orbit.return");
         navigate(returnTo, { replace: true });
       })
       .catch(setError);
   }, [auth, navigate]);
+  if (!error) return <Card title="Signing you in…"><Waiting>One moment while we finish with Google.</Waiting></Card>;
   return (
-    <section className="narrow panel">
-      <h1>Finishing sign-in</h1>
-      {error ? (
-        <>
-          <ErrorNotice error={error} />
-          <Link to={`/login?${new URLSearchParams({ return: safeReturn(sessionStorage.getItem("orbit.return")) })}`}>Return to sign in</Link>
-        </>
-      ) : (
-        <Loading>Signing you in…</Loading>
-      )}
-    </section>
+    <Card icon={<TriangleAlert />} title="Sign-in didn't finish" lead="Nothing was changed on your account.">
+      <ErrorNotice error={error} />
+      <Button asChild variant="default" className="ob-main">
+        <Link to={`/login?${new URLSearchParams({ return: safeReturn(sessionStorage.getItem("orbit.return")) })}`}>Back to sign in</Link>
+      </Button>
+    </Card>
   );
 }
-function DesktopStorage({ busy, onOpen }: { busy: boolean; onOpen: () => void }) {
-  const { auth, user } = useAuth();
+function Waiting({ children }: { children: ReactNode }) {
+  return <p className="ob-wait" role="status"><LoaderCircle className="animate-spin" aria-hidden="true" /><span>{children}</span></p>;
+}
+
+type DriveStatus = "checking" | "preparing" | "ready" | "waiting";
+const DRIVE_CHECKS = 10;
+const DRIVE_CHECK_MS = 2000;
+/** Polls for the account's first ready drive, a bounded number of times, until `retry` is called. */
+function useDriveStatus(auth: AuthStore) {
   const [revision, setRevision] = useState(0);
-  const [status, setStatus] = useState<"checking" | "preparing" | "ready" | "waiting">("checking");
+  const [status, setStatus] = useState<DriveStatus>("checking");
   const [error, setError] = useState<unknown>();
   useEffect(() => {
     let active = true;
@@ -257,9 +294,9 @@ function DesktopStorage({ busy, onOpen }: { busy: boolean; onOpen: () => void })
         if (!active) return;
         if (orgs.some(org => org.drives.some(drive => drive.status === "ready"))) {
           setStatus("ready");
-        } else if (++attempts < 10 && orgs.length > 0) {
+        } else if (++attempts < DRIVE_CHECKS && orgs.length > 0) {
           setStatus("preparing");
-          timer = setTimeout(() => void check(), 2000);
+          timer = setTimeout(() => void check(), DRIVE_CHECK_MS);
         } else {
           setStatus("waiting");
         }
@@ -270,33 +307,91 @@ function DesktopStorage({ busy, onOpen }: { busy: boolean; onOpen: () => void })
     void check();
     return () => { active = false; clearTimeout(timer); };
   }, [auth, revision]);
-  return <>
-    <h1>{status === "ready" ? "Your Orbit is ready" : "Preparing your Orbit"}</h1>
-    <p className="muted">Connecting as <strong>{user?.email}</strong></p>
-    <ol className="connection-progress" aria-label="Connection progress">
-      <li><span aria-hidden="true">✓</span> Account verified</li>
-      <li aria-current={status === "ready" ? undefined : "step"}><span aria-hidden="true">{status === "ready" ? "✓" : "2"}</span> {status === "ready" ? "Drive ready" : "Preparing drive"}</li>
-      <li><span aria-hidden="true">3</span> Connect your Mac</li>
-    </ol>
-    {(status === "checking" || status === "preparing") && <Loading>Preparing your drive… New trials start when storage is ready.</Loading>}
-    {status === "ready" && <p className="muted">Open the desktop app to finish connecting your Mac.</p>}
-    {status === "waiting" && <p role="status">Your drive could not be prepared yet. Try again, or check your drives in the browser.</p>}
-    <ErrorNotice error={error} />
-    {status === "waiting" && <Button onClick={() => setRevision(value => value + 1)}>Retry drive setup</Button>}
-    <Button variant="default" onClick={onOpen} disabled={busy || status !== "ready"}>
-      {busy ? "Please wait…" : "Open Orbit"}
-    </Button>
-    <Link className="desktop-browser-link" to="/">View drives in browser</Link>
-  </>;
+  return { status, error, retry: () => setRevision(value => value + 1) };
+}
+
+/** The signed-in part of desktop connect. One state is shown at a time. */
+function DesktopConnect({ state, codeChallenge }: { state: string; codeChallenge: string }) {
+  const { auth, user } = useAuth();
+  const drive = useDriveStatus(auth);
+  const [busy, setBusy] = useState<"opening" | "leaving" | null>(null);
+  const [opened, setOpened] = useState(false);
+  const [error, setError] = useState<unknown>();
+  async function open() {
+    setBusy("opening");
+    setError(undefined);
+    try {
+      const { code } = await auth.api.desktopCode(state, codeChallenge);
+      window.location.href = desktopCallback(code, state);
+      setOpened(true);
+      // Connecting the Mac app is what a new account came for, so the web welcome is not shown again.
+      if (readOnboarding()) writeOnboarding({ status: "done", macOpened: true });
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function anotherAccount() {
+    setBusy("leaving");
+    setError(undefined);
+    try {
+      await auth.logout();
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setBusy(null);
+    }
+  }
+  const account = <p className="ob-muted">Signed in as <strong>{user?.email}</strong></p>;
+  const switchAccount = (
+    <button type="button" className="ob-link ob-skip" disabled={busy !== null} onClick={() => void anotherAccount()}>
+      {busy === "leaving" ? "Signing out…" : "Use a different account"}
+    </button>
+  );
+  if (busy === "opening")
+    return <Card title="Opening Orbit…"><Waiting>Handing your sign-in to the Mac app.</Waiting></Card>;
+  if (opened)
+    return (
+      <Card icon={<Check />} title="You can close this tab" lead="Orbit is opening on your Mac. Your drive appears in Finder once the app has connected.">
+        <ErrorNotice error={error} />
+        <Button variant="outline" className="ob-main" onClick={() => void open()}>Open Orbit again</Button>
+        <p className="ob-muted">Nothing happened? Check that Orbit is installed on this Mac, then open it again.</p>
+        <Link className="ob-link ob-skip" to="/">Open your files on the web</Link>
+      </Card>
+    );
+  if (drive.status === "ready")
+    return (
+      <Card icon={<MonitorCheck />} title="Connect Orbit on this Mac" lead="Orbit will open, and your drive will appear in Finder.">
+        {account}
+        <ErrorNotice error={error} />
+        <Button variant="default" className="ob-main" onClick={() => void open()} disabled={busy !== null}>Open Orbit</Button>
+        {switchAccount}
+      </Card>
+    );
+  if (drive.status === "waiting")
+    return (
+      <Card icon={<TriangleAlert />} title="Your drive isn't ready yet" lead="Your account is safe. Setting up the drive is taking longer than usual.">
+        {account}
+        <ErrorNotice error={error || drive.error} />
+        <Button variant="default" className="ob-main" onClick={drive.retry} disabled={busy !== null}>Try again</Button>
+        <div className="ob-row ob-center"><Link className="ob-link" to="/">Continue on the web</Link>{switchAccount}</div>
+      </Card>
+    );
+  return (
+    <Card title="Setting up your drive" lead="This usually takes a few seconds. Keep this tab open.">
+      <Waiting>Orbit opens as soon as your drive is ready.</Waiting>
+      {account}
+      <ErrorNotice error={error} />
+      {switchAccount}
+    </Card>
+  );
 }
 
 export function Desktop() {
   const { auth, user } = useAuth();
   const location = useLocation();
-  const [busy, setBusy] = useState(false);
-  const [opened, setOpened] = useState(false);
   const [error, setError] = useState<unknown>();
-  useEffect(() => { setOpened(false); setError(undefined); }, [user?.id, location.search]);
   // `switch=1` (from the desktop app's "Use a different account") signs the web session out once,
   // then continues to sign-in with the desktop parameters but without `switch`, so it cannot loop.
   const query = new URLSearchParams(location.search);
@@ -307,19 +402,17 @@ export function Desktop() {
   useEffect(() => {
     if (!switching || !user || switched.current) return;
     switched.current = true;
-    setBusy(true);
-    auth.logout().catch(setError).finally(() => setBusy(false));
+    auth.logout().catch(setError);
   }, [switching, user, auth]);
   let params: ReturnType<typeof desktopParameters> | undefined;
   try {
     params = desktopParameters(location.search);
   } catch (reason) {
     return (
-      <section className="narrow panel">
-        <h1>Desktop sign-in</h1>
+      <Card icon={<TriangleAlert />} title="Start again from the Mac app">
         <ErrorNotice error={reason} />
-        <Link to="/">Back to drives</Link>
-      </section>
+        <Link className="ob-link ob-skip" to="/">Open your files on the web</Link>
+      </Card>
     );
   }
   if (!user)
@@ -330,58 +423,16 @@ export function Desktop() {
       />
     );
   if (switching && !error)
+    return <Card title="Signing out…"><Waiting>Then you can choose another account.</Waiting></Card>;
+  if (switching)
     return (
-      <section className="narrow panel desktop">
-        <Loading>Signing out so you can choose another account…</Loading>
-      </section>
+      <Card icon={<TriangleAlert />} title="Could not sign out" lead="You are still signed in on this browser.">
+        <ErrorNotice error={error} />
+        <Button asChild variant="default" className="ob-main"><Link to={desktopTarget}>Continue as {user.email}</Link></Button>
+      </Card>
     );
-  const { state, codeChallenge } = params;
-  async function open() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      const { code } = await auth.api.desktopCode(state, codeChallenge);
-      window.location.href = desktopCallback(code, state);
-      setOpened(true);
-    } catch (reason) {
-      setError(reason);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function anotherAccount() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await auth.logout();
-    } catch (reason) {
-      setError(reason);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <section className="desktop-setup desktop">
-      <span className="desktop-symbol" aria-hidden="true">
-        <Icon name="monitor" />
-      </span>
-      <ErrorNotice error={error} />
-      <DesktopStorage key={user.id} busy={busy} onOpen={() => void open()} />
-      {opened && (
-        <p role="status">
-          Your browser was asked to open Orbit. If nothing happened, check
-          that the desktop app is installed, then try again.
-        </p>
-      )}
-      <Button
-        variant="ghost"
-        onClick={() => void anotherAccount()}
-        disabled={busy}
-      >
-        Use a different account
-      </Button>
-    </section>
-  );
+  // Keyed so a different account or a new request starts from a clean state.
+  return <DesktopConnect key={`${user.id} ${location.search}`} state={params.state} codeChallenge={params.codeChallenge} />;
 }
 /** Session storage key the desktop app's WebView sets before load; never put in a URL. */
 const EMBED_VERIFIER_KEY = "orbit.embedVerifier";

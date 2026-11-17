@@ -35,14 +35,14 @@ it("follows system appearance, persists a manual choice and restores system trac
   auth.dispose();
 });
 
-it("changes workspace appearance through the account menu", async () => {
+it("changes appearance through the account menu", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => json({ orgs: [], workspaces: [] })));
   const auth = new AuthStore(localStorage, null);
   auth.accept(session);
   const view = render(<MemoryRouter><AuthContext value={auth}><App /></AuthContext></MemoryRouter>);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Your workspace" }));
-  await user.click(screen.getByRole("menuitem", { name: "Light" }));
+  await user.click(screen.getByRole("button", { name: "Account menu" }));
+  await user.click(await screen.findByRole("menuitem", { name: /Light/ }));
   expect(document.documentElement.dataset.theme).toBe("light");
   expect(localStorage.getItem("orbit.theme")).toBe("light");
   view.unmount();

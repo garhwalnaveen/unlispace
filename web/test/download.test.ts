@@ -34,6 +34,15 @@ describe("downloads", () => {
     expect(fetcher.mock.calls.map(([hash]) => hash)).toEqual([a.h, b.h, a.h]);
     expect(progress.mock.calls.map(([bytes]) => bytes)).toEqual([0, 5, 11, 16]);
   });
+  it("stops fetching once the download is cancelled", async () => {
+    const part = await shard("abc");
+    const stop = new AbortController();
+    const fetcher = vi.fn(async () => { stop.abort(); return part.bytes; });
+    await expect(
+      assembleFile({ ...empty, size: 6, shards: [part, part] }, fetcher, vi.fn(), stop.signal),
+    ).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it("saves empty files without fetching shards", async () => {
     const fetcher = vi.fn();
     const blob = await assembleFile(empty, fetcher, vi.fn());

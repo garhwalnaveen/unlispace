@@ -48,7 +48,8 @@ struct WorkspaceView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             VStack(spacing: 0) {
-                StatusBanner(model: model)
+                // The Drives page explains a lost connection itself, with the same button.
+                StatusBanner(model: model, showsConnection: navigation.page != .drives)
                 page
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -57,6 +58,8 @@ struct WorkspaceView: View {
         .windowTitle(navigation.page.title)
         .background { pageShortcuts }
         .sheet(isPresented: $navigation.showingNewDrive) { NewDriveSheet(directory: model.workspaces) }
+        .sheet(item: $navigation.driveEdit) { DriveNameSheet(model: model, edit: $0) }
+        .task(id: model.workspaces.loadKey) { await model.workspaces.load() }
         .onChange(of: navigation.page, initial: true) { _, page in if page == .ai { hasOpenedAI = true } }
         .frame(minWidth: 680, minHeight: 440)
     }
@@ -117,10 +120,8 @@ struct WorkspaceSidebar: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
                 Divider()
-                Label(model.statusTitle, systemImage: model.statusSymbol)
-                    .font(.caption).foregroundStyle(.secondary)
+                HeadlineLabel(headline: model.headline, lines: 2)
                     .padding(.horizontal, 12).padding(.top, 4)
-                    .accessibilityLabel("Status: \(model.statusTitle)")
                 Button(action: openAccount) {
                     Label(model.session.account?.email ?? "Not signed in", systemImage: "person.crop.circle")
                         .lineLimit(1).truncationMode(.middle)
@@ -136,14 +137,17 @@ struct WorkspaceSidebar: View {
 /// Everything the user should know before looking at a page: connection state, errors, and conflicts.
 struct StatusBanner: View {
     var model: AppModel
+    var showsConnection = true
     @Environment(AppWindows.self) private var windows: AppWindows?
 
     var body: some View {
         let messages = model.messages
         VStack(spacing: 0) {
-            if !model.engine.isConnected {
+            if Self.showsConnection(model) && showsConnection {
                 InlineMessage(kind: .warning, text: Self.engineText(model.engine.install)) {
-                    Button("Set Up…") { windows?.showSetup() }
+                    if let action = model.headline.action {
+                        Button(action.title) { action.perform(model: model, windows: windows) }
+                    }
                 }
             }
             if let notice = messages.notice { InlineMessage(text: notice) }
@@ -162,28 +166,31 @@ struct StatusBanner: View {
             if let copy = messages.fileCopy {
                 InlineMessage(text: copy, dismiss: { messages.fileCopy = nil })
             }
-            if Self.hasContent(model) { Divider() }
+            if Self.hasContent(model, showsConnection: showsConnection) { Divider() }
         }
     }
 
-    static func hasContent(_ model: AppModel) -> Bool {
+    /// A lost connection matters only to someone signed in; signed out, the page asks for sign-in instead.
+    static func showsConnection(_ model: AppModel) -> Bool { !model.engine.isConnected && model.session.hasCredentials }
+
+    static func hasContent(_ model: AppModel, showsConnection: Bool = true) -> Bool {
         let messages = model.messages
-        return !model.engine.isConnected || messages.notice != nil || messages.error != nil || messages.conflict != nil
+        return (showsConnection && Self.showsConnection(model)) || messages.notice != nil || messages.error != nil || messages.conflict != nil
             || messages.fileCopy != nil || model.session.canRetrySavedSignIn
             || (messages.engineMessage?.isEmpty == false)
     }
 
     static func engineText(_ install: EngineInstallState) -> String {
         switch install {
-        case .notInstalled: "This copy of Orbit has no background service. Install the full app to mount drives."
+        case .notInstalled: "This copy of Orbit can't connect drives. Install the full app."
         case .failed(let message): message
-        case .requiresApproval: "The background service needs your approval in Login Items."
-        case .notRegistered: "The background service is turned off."
-        case .enabled: "The background service is not running."
+        case .requiresApproval: "Orbit needs your approval in Login Items to keep your drives in Finder."
+        case .notRegistered: "Orbit isn't allowed to run in the background, so your drives can't appear in Finder."
+        case .enabled: "Orbit is reconnecting to your drives. Your files are safe."
         }
     }
 
     static func conflictText(_ conflict: ConflictEvent) -> String {
-        "\(conflict.path) changed in two places. Your version was saved as \(conflict.copy)."
+        "\(conflict.path) changed in two places. Both versions were kept: yours is saved as \(conflict.copy)."
     }
 }

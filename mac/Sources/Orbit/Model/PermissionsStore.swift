@@ -29,7 +29,7 @@ final class PermissionsStore {
             loginMessage = loginAccess == .needsApproval ? "Allow Orbit in System Settings › General › Login Items." : nil
         } catch {
             loginAccess = .loginItem(SMAppService.mainApp.status)
-            loginMessage = "Could not change launch at login: \(LogFormat.describe(error))"
+            loginMessage = "Could not change launch at login: \(Format.problem(error))"
         }
     }
 
@@ -42,7 +42,7 @@ final class PermissionsStore {
         do {
             feedback = try await notifications.enable() ? nil : "Notifications are off. Turn them on in System Settings › Notifications › Orbit."
         } catch {
-            feedback = "Could not turn on notifications: \(LogFormat.describe(error))"
+            feedback = "Could not turn on notifications: \(Format.problem(error))"
         }
         await refresh()
         notificationMessage = feedback
@@ -51,7 +51,7 @@ final class PermissionsStore {
     func notify(_ conflict: ConflictEvent) {
         Task {
             do { try await notifications.post(conflict) }
-            catch { notificationMessage = "Could not show a conflict notification: \(LogFormat.describe(error))" }
+            catch { notificationMessage = "Could not show a conflict notification: \(Format.problem(error))" }
         }
     }
 }
