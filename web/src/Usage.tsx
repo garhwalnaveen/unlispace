@@ -1,14 +1,20 @@
 import { Button } from "./components/ui/button";
 import { useCallback } from "react";
 import { useAuth } from "./context";
-import { formatBytes, useLoad } from "./ui";
+import { formatStorage } from "./settings/parts";
+import "./settings/settings.css";
+import { useLoad } from "./ui";
 
+/** Storage used of the workspace's quota, as one line and a bar. Over quota it reassures first, then says what to do. */
 export function UsageMeter({ usedBytes, quotaBytes }: { usedBytes: number; quotaBytes: number }) {
-  return <div className="usage-meter">
-    <p>{formatBytes(usedBytes)} of {formatBytes(quotaBytes)} used</p>
-    <meter aria-label="Organization storage usage" min={0} max={Math.max(1, quotaBytes)} value={Math.min(usedBytes, Math.max(1, quotaBytes))} />
-    <p className="muted small">Usage includes retained versions and pending uploads. Deleting a file keeps its history and may not immediately free storage.</p>
-    {usedBytes > quotaBytes && <p className="notice" role="alert">Your organization is over its storage quota. Writes are paused. Existing files remain readable. Add storage in Billing or contact support about retained data.</p>}
+  const over = usedBytes > quotaBytes;
+  const percent = quotaBytes > 0 ? Math.round((usedBytes / quotaBytes) * 100) : 0;
+  return <div className={`st-usage ${over || percent >= 90 ? "full" : ""}`}>
+    <p className="st-usage-line"><strong>{formatStorage(usedBytes)} of {formatStorage(quotaBytes)} used</strong><span>{usedBytes > 0 && percent === 0 ? "Less than 1%" : `${percent}%`}</span></p>
+    <meter aria-label="Workspace storage usage" min={0} max={Math.max(1, quotaBytes)} value={Math.min(usedBytes, Math.max(1, quotaBytes))} />
+    {over
+      ? <p className="notice" role="alert">Your files are safe and readable. This workspace is over its storage, so uploads and changes are paused until you add storage or free some up.</p>
+      : <p className="st-help">Earlier versions of your files count too, so deleting a file may not free space straight away.</p>}
   </div>;
 }
 export function OrgUsage({ orgId }: { orgId: string }) {

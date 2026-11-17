@@ -36,6 +36,8 @@ The data plane must allow the web origin and Authorization headers in CORS, incl
 | Variable       | Default                 | Meaning                                                  |
 | -------------- | ----------------------- | -------------------------------------------------------- |
 | `VITE_API_URL` | `http://127.0.0.1:8788` | Control-plane API base, fixed at build time. No secrets. |
+| `VITE_S3_URL` | derived | Public URL of the S3 gateway, shown in access-key snippets. Without it the URL is derived only for `unlispace-api.<domain>` (→ `unlispace-s3.<domain>`) and the local stack (8788 → 8789); any other host shows a placeholder. |
+| `VITE_MAC_APP_DOWNLOAD_URL` | `https://orbitfs.io/download/Orbit.dmg` | Where “Download for Mac” points. The default is a placeholder until the DMG is hosted. |
 
 The data endpoint is taken from `POST /drives/{id}/token`, never inferred from the API base.
 
@@ -71,31 +73,30 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
 - `/desktop?state&code_challenge`: preserves the desktop return location through either login
   flow, mints a PKCE-bound code on an explicit button press, then opens `uls://auth/callback`.
   “Use another account” revokes the current session before returning to login.
-- Signed-in `/`: drive count, searchable drives grouped by workspace, trial days,
-  create, rename, exact-name confirmation for delete. The header keeps horizontal navigation visible,
-  with Billing and Team links and direct sign-out; at narrow widths, navigation scrolls horizontally.
-  Search supports `/` to focus and combines with Ready/Needs setup filters. Plan-limit errors explain that
-  additional drives require Teams; each organization links to Billing.
-- `/drives/:id/*`: root/folder listing, cursor-based Load more, breadcrumbs and file details.
-  The toolbar filters **loaded items only** and sorts them by name, modification date or size, keeping
-  folders first. An active filter does not hide Load more; no-match copy explains that additional pages
-  may contain matches. A permission badge distinguishes read-only from writable drives.
-  Version history has its own cursor pagination and is a panel (`?panel=versions`) backed by the data plane's `/versions` endpoint.
-  Current and historical file downloads assemble shards in manifest order, checking sizes and
-  SHA-256; progress reports received bytes. Files above 512 MiB direct users to the desktop app.
-  Finder links preserve the drive id and path. Writable drives support file selection and drag-and-drop.
-  Uploads use FastCDC 2020 normalization level 1 (256 KiB / 2 MiB / 16 MiB), verified against both
-  Rust golden vectors. The uploader reads at most 16 MiB for chunking, hashes with WebCrypto,
-  probes `/shards/missing` in batches of 1000 hashes, and PUTs missing shards with three workers.
-  Progress counts prepared bytes, then uploaded or deduplicated bytes; shard PUT progress updates
-  after each successful PUT. Repeated hashes are uploaded once. Empty files commit an empty manifest.
-  The server's current stat supplies `ifVersion` for overwrites; absent paths use `ifAbsent`.
-  A 412 shows a conflict message without an unguarded retry. Failed transfers never commit.
-  New uploads create versions for matching names, as explained beside the file picker.
-  Read-only drive members do not see upload controls.
-- `/settings`: profile, display-name editing, server-revoked sign-out and access-key navigation.
-- `/settings/access-keys`: list metadata, create with organization/access/drive allowlist, reveal a
-  secret once, copy POSIX-quoted AWS environment variables, and explicitly confirm transitive revoke.
+- Signed-in pages share a left sidebar: workspace switcher, the workspace's drives (with a menu for
+  Open in Finder, Rename, Make a copy, Delete), Ask AI, Settings, a “Get started” list, plan notice,
+  storage used and the account menu (appearance, sign out). Below 860 px it becomes a drawer.
+- Signed-in `/`: opens the last used drive (`orbit.lastDrive`), or `/welcome` for a new account, or an
+  empty state that offers to create the first drive (owners/admins).
+- `/welcome`: asks how the person will use Orbit (Mac, agent or S3 tool, browser) and walks through
+  that one step; every step can be skipped. Unfinished steps stay on the sidebar's “Get started” list,
+  whose progress is kept in `localStorage` (`orbit.onboarding`).
+- `/drives/:id/*`: the file browser. Search across the drive, sortable Name/Size/Modified columns,
+  multi-select with Download/Move/Delete, a row menu (Download, Rename, Move to…, Version history,
+  Delete), New folder, and drop-anywhere uploads tracked in a tray with Keep both / Replace on name
+  conflicts. A file opens a details panel (`?file=`) with a preview for small images, text and PDFs and
+  its version history with Restore. “Deleted files” in the drive menu brings deleted items back.
+  Read-only members and expired trials see a “View only” state with no write actions.
+  Downloads assemble shards in manifest order, checking sizes and SHA-256; files above 512 MiB direct
+  users to the desktop app. Uploads use FastCDC 2020 normalization level 1 (256 KiB / 2 MiB / 16 MiB),
+  verified against both Rust golden vectors, probe `/shards/missing` in batches of 1000 hashes, and PUT
+  missing shards with three workers. The server's current stat supplies `ifVersion` for overwrites;
+  absent paths use `ifAbsent`. A 412 shows a conflict message without an unguarded retry. Failed
+  transfers never commit.
+- Settings is one area with its own sub-navigation: Account, Access keys, Members, Plan and billing.
+- `/settings`: profile, display-name editing, appearance and server-revoked sign-out.
+- `/settings/access-keys`: list metadata, create from a dialog (name, access, drives), reveal a
+  secret once with POSIX-quoted environment, AWS CLI and rclone snippets, and explicitly confirm transitive revoke.
   The secret disappears on close/navigation and is never written to browser storage.
 - `/orgs/:id/billing`: current plan, trial days, used/quota bytes, seats, storage add-ons, monthly or
   annual checkout, paginated invoices, and the Dodo customer portal. Management controls and invoice
@@ -162,12 +163,10 @@ The Button defaults to the outline variant; use `variant="default"` for the prim
 `src/styles.css` owns the shared neutral light/dark tokens and page layout. Avoid restyling controls
 there. Lucide provides the icons; the shared `Modal` connects existing screen state to Radix.
 
-The public Orbit landing page uses an ivory and forest-green palette, editorial typography,
-locally served nature photography, and an interactive example workspace. The three-step workflow
-story updates its sticky illustration as each step enters the viewport, using IntersectionObserver.
-Section reveals and a subtle hero depth effect enhance native scrolling without intercepting it.
-Reduced-motion preferences disable animation, transitions, and smooth scrolling. Content stays
-visible when IntersectionObserver is unavailable. Every FAQ expands to a complete answer.
+The public landing page follows the visual patterns of [Liveblocks’ homepage](https://liveblocks.io/):
+black surfaces, a centered sans-serif hero, white primary buttons, compact navigation menus, and
+subtle bordered product panels. This is an independent implementation: the public Liveblocks
+repository contains SDKs, examples and starter-kit marketing components, not its production homepage.
 `src/landing.css` owns the public design tokens, responsive layout and component styling;
 `src/Landing.tsx` reuses the installed Button and DropdownMenu components. The signed-in app uses
 its own neutral light/dark canvas, top navigation, and existing shadcn controls. The homepage

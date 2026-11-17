@@ -1,5 +1,7 @@
 import type { Ctx } from "./ctx";
+import { HOUR } from "./ctx";
 import { HttpError, json, readJson, str } from "./http";
+import { enforce } from "./ratelimit";
 import { PLACEMENTS } from "./env";
 import { mintDriveToken, type Authed } from "./session";
 import { newDriveId, provisionDrive } from "./users";
@@ -8,6 +10,9 @@ import { accessSummaries, computeEntitlements, entitledDriveAccess, storageUsage
 import { canManage, roleAccess, type Role } from "./roles";
 
 export type { Role };
+
+/** Team workspaces have no drive-count cap; this bounds how fast one workspace can allocate storage authorities. */
+const DRIVE_CREATES_PER_ORG = 60;
 
 export interface DriveRow {
 	alias: string | null;
@@ -148,6 +153,7 @@ export async function createDrive(ctx: Ctx, a: Authed, orgId: string): Promise<R
 	const placement = body.placement ?? null;
 	if (placement !== null && !(PLACEMENTS as readonly unknown[]).includes(placement)) throw new HttpError(400, "bad_request", `placement must be one of ${PLACEMENTS.join(", ")}`);
 
+	await enforce(ctx, `drives:org:${orgId}`, DRIVE_CREATES_PER_ORG, HOUR);
 	const id = newDriveId();
 	const alias = await chooseAlias(ctx, orgId, name, id, body.alias);
 	await aliasWrite(async () => {

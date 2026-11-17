@@ -721,7 +721,7 @@ async fn manifest(State(s): State<Shared>, Path(id): Path<String>, Query(q): Que
         };
         let Some(v) = v else { return Ok(err(StatusCode::NOT_FOUND, "no_such_path")) };
         let mut body = json!({
-            "path": v.path, "versionId": v.id, "size": v.size, "contentType": v.ctype,
+            "path": q.path, "versionId": v.id, "size": v.size, "contentType": v.ctype,
             "mtimeMs": v.mtime, "shards": v.manifest, "xattrs": v.xattrs,
         });
         if s.stats.block_urls_enabled.load(Ordering::SeqCst) {

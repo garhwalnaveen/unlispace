@@ -14,15 +14,15 @@ export function ErrorNotice({ error }: { error: unknown }) {
 export function Loading({ children = "Loading…" }: { children?: ReactNode }) {
   return (
     <div className="loading-state muted" role="status">
-      <LoaderCircle className="loading-spinner" size={18} aria-hidden="true" />
+      <LoaderCircle className="animate-spin" size={18} aria-hidden="true" />
       <span>{children}</span>
     </div>
   );
 }
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 4);
-  return `${(bytes / 1024 ** unit).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${["B", "KiB", "MiB", "GiB", "TiB"][unit]}`;
+  if (bytes < 1000) return `${bytes} B`;
+  const unit = Math.min(Math.floor(Math.log10(bytes) / 3), 4);
+  return `${(bytes / 1000 ** unit).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${["B", "KB", "MB", "GB", "TB"][unit]}`;
 }
 export function formatDate(ms: number): string {
   return new Date(ms).toLocaleString(undefined, {

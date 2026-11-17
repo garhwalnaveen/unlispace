@@ -13,11 +13,16 @@ function usePages<T>(
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
   const pending = useRef(false);
+  const shown = useRef<typeof load | null>(null);
   useEffect(() => {
     const current = ++generation.current;
     pending.current = true;
-    setItems([]);
-    setCursor(null);
+    // A reload of the same place keeps what is on screen until the fresh page arrives.
+    if (shown.current !== load) {
+      shown.current = load;
+      setItems([]);
+      setCursor(null);
+    }
     setLoading(true);
     setError(undefined);
     void load(null)
@@ -28,7 +33,11 @@ function usePages<T>(
         }
       })
       .catch((reason) => {
-        if (current === generation.current) setError(reason);
+        if (current === generation.current) {
+          setItems([]);
+          setCursor(null);
+          setError(reason);
+        }
       })
       .finally(() => {
         if (current === generation.current) {
@@ -95,4 +104,18 @@ export function useVersions(api: DriveApi, path: string) {
   );
   const page = usePages(load);
   return { ...page, versions: page.items };
+}
+/** Whole-drive name search. Idle (no request) until `query` has the three characters the data plane needs. */
+export function useSearch(api: DriveApi, query: string) {
+  const active = [...query].length >= 3;
+  const load = useCallback(
+    async (cursor: string | null) => {
+      if (!active) return { items: [], cursor: null };
+      const page = await api.search(query, cursor);
+      return { items: page.entries, cursor: page.cursor };
+    },
+    [api, query, active],
+  );
+  const page = usePages(load);
+  return { ...page, results: page.items, active };
 }

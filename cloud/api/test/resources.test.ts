@@ -188,3 +188,22 @@ describe("CORS", () => {
 		expect((await w.call("/healthz", { origin: "https://evil.example" })).headers.get("access-control-allow-origin")).toBeNull();
 	});
 });
+
+describe("rate limits", () => {
+	it("limits drive creation per workspace and Google sign-in starts per address", async () => {
+		const w = await makeWorld({ GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" });
+		const s = await signIn(w);
+		const org = ((await (await w.call("/orgs", { token: s.accessToken })).json()) as any).orgs[0];
+		await w.env.DB.prepare("UPDATE orgs SET tier = 'teams' WHERE id = ?").bind(org.id).run();
+		await w.env.DB.prepare("INSERT INTO rate_limits VALUES(?,?,60)").bind(`drives:org:${org.id}`, w.clock.t).run();
+		expect((await w.call(`/orgs/${org.id}/drives`, { json: { name: "More" }, token: s.accessToken })).status).toBe(429);
+		w.clock.t += 3_600_000;
+		const later = await signIn(w);
+		expect((await w.call(`/orgs/${org.id}/drives`, { json: { name: "More" }, token: later.accessToken })).status).toBe(201);
+
+		const start = () => w.call(`/auth/google/start?web_code_challenge=${"a".repeat(43)}`, { ip: "203.0.113.9" });
+		expect((await start()).status).toBe(302);
+		await w.env.DB.prepare("UPDATE rate_limits SET count = 60 WHERE k = 'google:ip:203.0.113.9'").run();
+		expect((await start()).status).toBe(429);
+	});
+});

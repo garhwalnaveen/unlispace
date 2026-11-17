@@ -1,7 +1,7 @@
 import type { Ctx } from "./ctx";
 import { HOUR, MIN } from "./ctx";
 import { HttpError } from "./http";
-import { hit } from "./ratelimit";
+import { clientIp, hit } from "./ratelimit";
 import { randomCode6, sha256Hex, timingSafeEqual } from "./util";
 
 export const OTP_TTL_MS = 10 * MIN;
@@ -19,9 +19,8 @@ const codeHash = (email: string, code: string) => sha256Hex(`otp:${email}:${code
 
 /** Delivery failures have the same response for every address, without account enumeration. */
 export async function otpStart(ctx: Ctx, email: string): Promise<void> {
-	const ip = ctx.req.headers.get("cf-connecting-ip") ?? "unknown";
 	const okEmail = await hit(ctx, `otp:email:${email}`, START_PER_EMAIL, HOUR);
-	const okIp = await hit(ctx, `otp:ip:${ip}`, START_PER_IP, HOUR);
+	const okIp = await hit(ctx, `otp:ip:${clientIp(ctx)}`, START_PER_IP, HOUR);
 	if (!okEmail || !okIp) throw new HttpError(429, "rate_limited");
 
 	const code = randomCode6();

@@ -28,7 +28,38 @@ import OrbitKit
         #expect(AccessStatus.engine(.requiresApproval) == .needsApproval)
         #expect(AccessStatus.engine(.failed("failed")) == .failed)
         #expect(AccessStatus.engine(.enabled) == .enabled)
-        #expect(AccessStatus.managed.label == "Managed by each app")
+        #expect(AccessStatus.managed.label == "Asked when needed")
+    }
+
+    @Test func everyPermissionHasAReasonAndItsOwnButton() {
+        let items = PermissionItem.all(engine: .notRegistered, notifications: .notRequested, login: .notEnabled)
+        #expect(items.map(\.id) == [.background, .files, .notifications, .login])
+        #expect(items.map(\.optional) == [false, false, true, true])
+        #expect(items.allSatisfy { !$0.reason.isEmpty && $0.reason.hasSuffix(".") })
+        #expect(items.map(\.action) == ["Allow", "Open Settings…", "Allow", "Allow"])
+        #expect(items.allSatisfy { !$0.granted })
+        // The words the default UI never uses for the background service.
+        #expect(items.allSatisfy { item in ["daemon", "engine"].allSatisfy { !"\(item.title) \(item.reason)".lowercased().contains($0) } })
+    }
+
+    @Test func permissionButtonsFollowTheLiveState() {
+        func item(_ id: PermissionItem.ID, engine: EngineInstallState = .enabled, notifications: AccessStatus = .enabled,
+                  login: AccessStatus = .enabled) -> PermissionItem {
+            PermissionItem.all(engine: engine, notifications: notifications, login: login).first { $0.id == id }!
+        }
+        #expect(item(.background).granted && item(.background).action == "Manage…")
+        #expect(item(.background, engine: .requiresApproval).action == "Approve…")
+        #expect(item(.background, engine: .failed("no")).action == "Allow")
+        // A copy without the background service has nothing to allow.
+        #expect(item(.background, engine: .notInstalled).action == nil)
+        #expect(item(.notifications, notifications: .quiet).granted)
+        #expect(item(.notifications, notifications: .denied).action == "Open Settings…")
+        #expect(item(.notifications, notifications: .unavailable).action == nil)
+        #expect(item(.notifications, notifications: .checking).action == nil)
+        #expect(item(.login, login: .needsApproval).action == "Approve…")
+        #expect(!item(.login, login: .needsApproval).granted)
+        // macOS grants file access per app, so Orbit never claims it as granted.
+        #expect(!item(.files).granted && item(.files).status == .managed)
     }
 
     @Test func unbundledStatusReadDoesNotInvokeNotificationCenter() async {
@@ -37,21 +68,22 @@ import OrbitKit
     }
 
     @Test func refreshClearsFeedbackThatNoLongerMatchesTheAuthorization() async {
-        let model = AppModel()
-        model.notificationAccess = .enabled
-        model.notificationMessage = "Previously enabled"
-        model.permissionMessage = "Previous login action"
-        await model.refreshPermissions()
-        #expect(model.notificationAccess == .unavailable)
-        #expect(model.notificationMessage == nil)
-        #expect(model.permissionMessage == nil)
-        #expect(model.loginAccess != .checking)
+        let permissions = PermissionsStore()
+        permissions.notificationAccess = .enabled
+        permissions.notificationMessage = "Previously enabled"
+        permissions.loginAccess = .checking
+        permissions.loginMessage = "Previous login action"
+        await permissions.refresh()
+        #expect(permissions.notificationAccess == .unavailable)
+        #expect(permissions.notificationMessage == nil)
+        #expect(permissions.loginMessage == nil)
+        #expect(permissions.loginAccess != .checking)
     }
 
-    @Test func modelStartsWithUnknownPermissionStates() {
-        let model = AppModel()
-        #expect(model.notificationAccess == .checking)
-        #expect(model.loginAccess == .checking)
-        #expect(!model.requestingNotifications)
+    @Test func permissionsStartUnknown() {
+        let permissions = PermissionsStore()
+        #expect(permissions.notificationAccess == .checking)
+        #expect(permissions.loginAccess == .checking)
+        #expect(!permissions.requestingNotifications)
     }
 }

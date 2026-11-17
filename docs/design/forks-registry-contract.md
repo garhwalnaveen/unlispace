@@ -121,7 +121,7 @@ mintMountToken(accessKeyId, bucket): Promise<{driveId, alias, displayName, works
 Child keys appear in `GET /keys` with `parent`; revoking a key revokes descendants (exists).
 
 ### 3.4 Metering and quota
-- `scheduled` cron `"17 * * * *"` (hourly): for each live drive, `DATA_PLANE.driveStats` →
+- `scheduled` cron `"*/15 * * * *"`: for the 500 least recently measured live drives, `DATA_PLANE.driveStats` →
   upsert `drive_usage`. Bounded batch per run (≤ 500 drives, oldest `measured_at` first).
 - Org `usedBytes` = sum of `own_bytes` over live drives; `GET /orgs/{id}/billing` reports it.
 - Over quota (`usedBytes > quotaBytes`) or not entitled: `POST /drives/{id}/token` with write →

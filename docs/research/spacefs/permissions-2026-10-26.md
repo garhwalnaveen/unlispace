@@ -61,7 +61,7 @@ those features.
 
 Sources:
 - Installed bundle: `/Applications/Space/Space.app/Contents/Info.plist` and signing entitlements.
-- Earlier direct UI inspection in this conversation; `docs/design/space-desktop-comparison.md`.
+- Direct inspection of the installed Space app UI.
 - Local agent allowlist; values and credentials intentionally omitted.
 - https://spacefs.com/privacy/
 - https://support.apple.com/guide/mac-help/allow-accessibility-apps-to-access-your-mac-mh43185/mac
