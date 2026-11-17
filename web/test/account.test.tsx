@@ -45,10 +45,10 @@ it("switches appearance between System, Light and Dark and remembers it", async 
   const user = userEvent.setup();
   renderApp("/settings");
   const group = within(await main().findByRole("radiogroup", { name: "Appearance" }));
-  expect(group.getByRole("radio", { name: /Dark/ })).toBeChecked();
-  await user.click(group.getByRole("radio", { name: /Light/ }));
-  expect(document.documentElement.dataset.theme).toBe("light");
-  expect(localStorage.getItem("orbit.theme")).toBe("light");
+  expect(group.getByRole("radio", { name: /Light/ })).toBeChecked();
+  await user.click(group.getByRole("radio", { name: /Dark/ }));
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(localStorage.getItem("orbit.theme")).toBe("dark");
   await user.click(group.getByRole("radio", { name: /System/ }));
   expect(localStorage.getItem("orbit.theme")).toBe("system");
   expect(group.getByRole("radio", { name: /System/ })).toBeChecked();
