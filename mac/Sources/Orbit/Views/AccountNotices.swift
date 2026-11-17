@@ -1,7 +1,8 @@
 import SwiftUI
 import OrbitKit
 
-/// Plan problems that stop uploads, one line per affected workspace.
+/// Plan and storage problems, one line per affected workspace.
+/// Each line says the files are safe before it says what to do.
 struct PlanNotices: View {
     var directory: WorkspaceDirectory
 
@@ -9,9 +10,9 @@ struct PlanNotices: View {
         let notices = Self.notices(access: directory.access, workspaces: directory.workspaces)
         VStack(spacing: 0) {
             ForEach(notices) { notice in
-                InlineMessage(kind: .warning, text: notice.text) {
-                    if let url = directory.config?.page(orgId: notice.id, section: "billing") {
-                        Link("Billing", destination: url)
+                InlineMessage(kind: notice.waiting ? .info : .warning, text: notice.text) {
+                    if !notice.waiting, let url = directory.config?.page(orgId: notice.id, section: "billing") {
+                        Link("Manage Plan on the Web", destination: url)
                     }
                 }
             }
@@ -23,6 +24,8 @@ struct PlanNotices: View {
     struct Notice: Identifiable, Equatable {
         var id: String
         var text: String
+        /// Nothing for the user to do: storage is still being prepared.
+        var waiting = false
     }
 
     /// Uses `/me/access` when the server has it and falls back to trial dates from the workspace list.
@@ -30,51 +33,36 @@ struct PlanNotices: View {
         if let access {
             return access.compactMap { workspace in
                 if workspace.state == "expired" {
-                    return Notice(id: workspace.id, text: "\(workspace.name): the trial has ended. Choose a plan to keep uploading.")
+                    return Notice(id: workspace.id, text: "\(workspace.name): Your files are safe. The trial has ended, so new changes are paused. Choose a plan to keep saving.")
                 }
-                if !workspace.storageReady { return Notice(id: workspace.id, text: "\(workspace.name): storage is being set up.") }
+                if !workspace.storageReady {
+                    return Notice(id: workspace.id, text: "\(workspace.name): Storage is being set up. Your drive appears when it is ready.", waiting: true)
+                }
                 if workspace.writable == false {
-                    return Notice(id: workspace.id, text: "\(workspace.name): uploads are turned off. Check the plan.")
+                    return Notice(id: workspace.id, text: "\(workspace.name): Your files are safe. Saving changes is paused. Check the plan to continue.")
+                }
+                if let quota = workspace.quotaBytes, quota > 0, let used = workspace.usedBytes,
+                   Double(used) / Double(quota) >= MenuHeadline.almostFull {
+                    return Notice(id: workspace.id, text: "\(workspace.name): Your files are safe. \(Format.bytes(used)) of \(Format.bytes(quota)) is used. Free up space or add storage before it runs out.")
                 }
                 return nil
             }
         }
         return workspaces.compactMap { workspace in
             if workspace.trialPending == true {
-                return Notice(id: workspace.id, text: "\(workspace.name): storage is being set up.")
+                return Notice(id: workspace.id, text: "\(workspace.name): Storage is being set up. Your drive appears when it is ready.", waiting: true)
             }
             if let end = workspace.trialEndDate, end <= now {
-                return Notice(id: workspace.id, text: "\(workspace.name): the trial end date has passed. Check the plan.")
+                return Notice(id: workspace.id, text: "\(workspace.name): Your files are safe. The trial has ended, so new changes may be paused. Check the plan.")
             }
             return nil
         }
     }
 }
 
-/// A three-step checklist shown until the account's first file has uploaded, or the user dismisses it.
-struct FirstFileChecklist: View {
-    var model: AppModel
-
-    var body: some View {
-        let progress = model.activation.progress
-        if model.isAccountLive, progress.showsChecklist,
-           Self.canAddFile(access: model.workspaces.access, drives: model.drives.drives, mounts: model.drives.mounts) {
-            Section {
-                step("Open a drive in Finder", done: progress.finderOpened)
-                step("Add a file to it", done: progress.fileAdded)
-                step("Wait for the upload to finish", done: progress.cloudSaveConfirmed)
-            } header: {
-                HStack {
-                    Text("Add your first file")
-                    Spacer()
-                    Button("Dismiss") { model.activation.record { $0.dismissed = true } }
-                        .buttonStyle(.link).font(.caption)
-                }
-            }
-        }
-    }
-
-    /// False when every workspace is known to reject uploads or every drive is mounted read-only.
+extension GetStarted {
+    /// False when every workspace is known to reject uploads or every drive is view-only,
+    /// so the list never asks for a first file that cannot be added.
     static func canAddFile(access: [MeAccess.Workspace]?, drives: [DriveInfo], mounts: [DaemonMount]?) -> Bool {
         if let access, !access.isEmpty, access.allSatisfy({ $0.state == "expired" || $0.writable == false }) { return false }
         if !drives.isEmpty, let mounts {
@@ -82,11 +70,5 @@ struct FirstFileChecklist: View {
             if drives.allSatisfy({ readOnly.contains($0.driveId) }) { return false }
         }
         return true
-    }
-
-    private func step(_ title: String, done: Bool) -> some View {
-        Label(title, systemImage: done ? "checkmark.circle.fill" : "circle")
-            .foregroundStyle(done ? .primary : .secondary)
-            .accessibilityLabel("\(title): \(done ? "done" : "not done")")
     }
 }

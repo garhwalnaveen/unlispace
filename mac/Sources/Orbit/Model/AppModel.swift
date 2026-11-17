@@ -20,14 +20,21 @@ final class AppModel: EngineLinkDelegate {
     let updates = UpdateController()
 
     private(set) var status: AppStatus = .signedOut
+    /// First-run setup was finished (not merely opened). Until then the menu offers to continue it.
+    var setupCompleted: Bool { didSet { defaults.set(setupCompleted, forKey: Preference.setupCompleted) } }
 
     @ObservationIgnored private let prompts: any UserPrompts
+    @ObservationIgnored private let defaults: UserDefaults
+    /// Opens a web page in the browser. Tests replace it so nothing leaves the process.
+    @ObservationIgnored var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
     @ObservationIgnored private var reconcileTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard, engine: EngineLink = EngineLink(),
          prompts: any UserPrompts = AppKitPrompts(), keychain: Keychain = Keychain()) {
         self.engine = engine
         self.prompts = prompts
+        self.defaults = defaults
+        setupCompleted = defaults.bool(forKey: Preference.setupCompleted)
         session = SessionStore(engine: engine, messages: messages, defaults: defaults, keychain: keychain)
         activation = ActivationStore(defaults: defaults)
         drives = DriveStore(engine: engine, session: session, messages: messages, activation: activation, prompts: prompts)
@@ -55,13 +62,8 @@ final class AppModel: EngineLinkDelegate {
     var isAccountLive: Bool { engine.isConnected && session.isSignedIn && !session.sessionPending }
 
     var statusSymbol: String { status.symbolName }
-    var statusTitle: String {
-        if !engine.isConnected { return status.title }
-        if session.sessionPending { return "Finishing sign-in…" }
-        if !session.hasCredentials { return status.title }
-        return TransferSummary.uploadTitle(uploads: activity.uploads, transfers: activity.transfers, state: status,
-                                           available: true, recentUploads: activity.recentUploads)
-    }
+    /// The same sentence the menu-bar panel leads with, so every window agrees on the state.
+    var statusTitle: String { headline.title }
 
     // MARK: Engine snapshot
 
@@ -100,7 +102,7 @@ final class AppModel: EngineLinkDelegate {
 
     func engineRefreshFailed(_ error: Error) {
         status = .error
-        messages.setRefreshError(LogFormat.describe(error))
+        messages.setRefreshError(Format.problem(error))
         Log.app.error("refresh failed: \(LogFormat.describe(error))")
     }
 
@@ -145,7 +147,7 @@ final class AppModel: EngineLinkDelegate {
             activity.apply(transfer, countsAsUpload: ownUpload)
             if ownUpload { recordFirstUpload(transfer) }
             if transfer.status == .failed {
-                messages.report("\(transfer.direction == .upload ? "Upload" : "Download") failed: \(transfer.path)")
+                messages.report("“\(TransferSummary.fileTitle(path: transfer.path))” didn't finish \(transfer.direction == .upload ? "uploading" : "downloading").")
             }
         case .change(let change):
             let name = drives.drive(id: change.driveId)?.name ?? change.driveId
@@ -219,6 +221,32 @@ final class AppModel: EngineLinkDelegate {
         session.signIn(switchAccount: true)
     }
 
+    // MARK: Drive management
+
+    /// Asks first, saying what deleting does, then ejects the drive and deletes it.
+    func deleteDrive(_ drive: DriveInfo) {
+        guard prompts.confirm(title: "Delete “\(drive.name)”?", message: DriveManagement.deleteWarning(for: drive),
+                              action: "Delete Drive") else { return }
+        Task {
+            do {
+                try await workspaces.deleteDrive(drive)
+                messages.notice = "“\(drive.name)” was deleted."
+            } catch {
+                reportDriveChange(error, drive: drive, verb: "delete")
+            }
+        }
+    }
+
+    /// An engine that predates drive management hands the change to the web instead of failing.
+    func reportDriveChange(_ error: Error, drive: DriveInfo, verb: String) {
+        if DriveManagement.isUnsupported(error), let url = workspaces.config?.drivePage(driveId: drive.driveId) {
+            openURL(url)
+            messages.notice = "This version of Orbit can't \(verb) a drive from the Mac yet. “\(drive.name)” is open on the web so you can \(verb) it there."
+        } else {
+            messages.report(DriveManagement.message(for: error, verb: verb))
+        }
+    }
+
     // MARK: uls:// links
 
     func handle(url: URL) {
@@ -230,7 +258,7 @@ final class AppModel: EngineLinkDelegate {
                 Task { await open(driveId: driveId, path: path) }
             }
         } catch {
-            messages.report("Could not open that link: \(LogFormat.describe(error))")
+            messages.report("Could not open that link: \(Format.problem(error))")
             Log.app.error("rejected url \(LogFormat.url(url)): \(String(describing: error))")
         }
     }
@@ -263,7 +291,7 @@ final class AppModel: EngineLinkDelegate {
             NSWorkspace.shared.open(url)
             messages.error = nil
         } catch {
-            messages.report(LogFormat.describe(error))
+            messages.report(Format.problem(error))
             Log.app.error("open link failed: \(LogFormat.describe(error))")
         }
     }

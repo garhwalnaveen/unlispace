@@ -11,8 +11,7 @@ struct ActivityView: View {
         let items = model.activity.items
         VStack(spacing: 0) {
             HStack {
-                Label(model.statusTitle, systemImage: model.statusSymbol).font(.headline)
-                    .accessibilityAddTraits(.isHeader)
+                HeadlineLabel(headline: Self.summary(model), font: .headline).accessibilityAddTraits(.isHeader)
                 Spacer()
                 if !items.isEmpty {
                     Text(Format.count(items.count, "item", "items")).font(.callout).foregroundStyle(.secondary).monospacedDigit()
@@ -21,11 +20,11 @@ struct ActivityView: View {
             .padding(.horizontal, 16).padding(.vertical, 10)
             Divider()
             if !model.isLive {
-                ContentUnavailableView("No activity to show", systemImage: "arrow.up.arrow.down",
-                                       description: Text("Uploads and downloads appear here once you are signed in and connected."))
+                ContentUnavailableView("No activity yet", systemImage: "arrow.up.arrow.down",
+                                       description: Text("Uploads and downloads appear here once you are signed in and your drives are connected."))
             } else if items.isEmpty {
-                ContentUnavailableView("No transfers", systemImage: "arrow.up.arrow.down",
-                                       description: Text("Uploads and downloads appear here while they run."))
+                ContentUnavailableView("Nothing is uploading", systemImage: "arrow.up.arrow.down",
+                                       description: Text("Save or drop a file into a drive in Finder and its upload appears here with its progress."))
             } else {
                 List(items) { ActivityRow(content: .init($0)) }
                     .listStyle(.inset)
@@ -33,6 +32,18 @@ struct ActivityView: View {
             if model.isLive, let uploads = model.activity.uploads { UploadQueueFooter(uploads: uploads) }
         }
         .frame(width: compact ? 340 : nil, height: compact ? 360 : nil)
+    }
+
+    /// What this page is about: uploads and downloads. Other problems keep their place in the sidebar and menu.
+    static func summary(_ model: AppModel) -> MenuHeadline {
+        let headline = model.headline
+        switch headline.action {
+        case .showActivity: return headline
+        default: break
+        }
+        guard model.isLive else { return MenuHeadline(title: "No activity yet", tone: .neutral) }
+        return MenuHeadline(title: model.activity.items.contains { $0.transfer?.isFinished != true }
+                                ? "Waiting to sync" : "Nothing is uploading", tone: .neutral)
     }
 }
 
@@ -132,10 +143,10 @@ private struct UploadQueueFooter: View {
             Divider()
             HStack(spacing: 6) {
                 if full {
-                    Label("The upload queue is full. New files wait until space frees up.", systemImage: "exclamationmark.triangle")
+                    Label("Your files are safe. Too many are waiting to upload, so new ones wait until some finish.", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                 } else {
-                    Text("Upload queue")
+                    Text("Waiting to upload")
                 }
                 Spacer()
                 Text("\(Format.bytes(uploads.journalBytes)) of \(Format.bytes(uploads.journalCapBytes))").monospacedDigit()

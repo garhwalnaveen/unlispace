@@ -92,14 +92,14 @@ final class SessionStore {
                     messages.notice = nil
                 case .deferred:
                     setAccount(session.user)
-                    messages.notice = "Signed in. Your drives appear when the background service starts."
+                    messages.notice = "Signed in. Your drives appear once Orbit can run in the background."
                 }
                 messages.error = nil
             } catch AuthError.cancelled {
             } catch is CancellationError {
             } catch let error as URLError where error.code == .cancelled {
             } catch {
-                messages.report("Sign-in failed: \(LogFormat.describe(error))")
+                messages.report("Sign-in failed: \(Format.problem(error))")
                 Log.auth.error("sign-in failed: \(LogFormat.describe(error))")
             }
             await engine.refresh()
@@ -137,7 +137,7 @@ final class SessionStore {
                 messages.notice = nil
             }
         } catch {
-            messages.report("Could not finish sign-in: \(LogFormat.describe(error))")
+            messages.report("Could not finish sign-in: \(Format.problem(error))")
             Log.auth.error("pending auth.set failed: \(LogFormat.describe(error))")
         }
         sessionPending = handoff.hasPending
@@ -154,7 +154,7 @@ final class SessionStore {
                 canRetrySavedSignIn = false
                 await engine.refresh()
             } catch {
-                messages.report("Could not restore sign-in: \(LogFormat.describe(error))")
+                messages.report("Could not restore sign-in: \(Format.problem(error))")
             }
         }
     }
@@ -168,7 +168,7 @@ final class SessionStore {
             catch {
                 await engine.refresh()
                 if engine.isConnected && !isSignedIn { handoff.discardPending() }
-                messages.report("Could not sign out: \(LogFormat.describe(error))")
+                messages.report("Could not sign out: \(Format.problem(error))")
                 Log.auth.error("auth.signOut failed: \(LogFormat.describe(error))")
                 return false
             }

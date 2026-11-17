@@ -101,8 +101,8 @@ struct FileSearchView: View {
             if let drive, drive.mountState == .mounted, let path = drive.mountPath, let url = entry.localURL(mountPath: path) {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             } else if let drive {
-                Button("Mount") { store.mount(drive) }.disabled(store.isBusy(drive))
-                    .help("Mount \(drive.name) to show this in Finder")
+                Button("Open Drive in Finder") { store.open(drive) }.disabled(store.isBusy(drive))
+                    .help("Put \(drive.name) in Finder to show this file")
             }
         }
         .padding(.vertical, 2)
@@ -129,7 +129,7 @@ struct FileSearchView: View {
         } catch {
             guard !Task.isCancelled, key == searchKey else { return }
             cursor = nil
-            self.error = "Search failed: \(LogFormat.describe(error))"
+            self.error = "Search failed: \(Format.problem(error))"
         }
     }
 }
