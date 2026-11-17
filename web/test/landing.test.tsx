@@ -28,6 +28,17 @@ it("sends signed-in visitors back to their workspace", async () => {
   for (const link of screen.getAllByRole("link", { name: "Get early access" })) expect(link).toHaveAttribute("href", "/");
 });
 
+it("lets a keyboard visitor pause and resume ambient animation", async () => {
+  await showLanding();
+  const user = userEvent.setup();
+  const pause = screen.getByRole("button", { name: "Pause ambient animation" });
+  pause.focus();
+  await user.keyboard("{Enter}");
+  expect(screen.getByRole("button", { name: "Resume ambient animation" })).toHaveAttribute("aria-pressed", "true");
+  await user.keyboard("{Enter}");
+  expect(pause).toHaveAttribute("aria-pressed", "false");
+});
+
 it("opens product navigation, resolves its section links, and closes with Escape", async () => {
   await showLanding();
   const user = userEvent.setup();
