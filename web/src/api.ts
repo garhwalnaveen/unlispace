@@ -170,7 +170,7 @@ export class Api {
       `/drives/${encodeURIComponent(id)}`,
       jsonInit("PATCH", { name, ...(alias === undefined ? {} : { alias }) }),
     );
-  forkDrive = (id: string, name: string, alias: string) =>
+  forkDrive = (id: string, name: string, alias?: string) =>
     this.request<Drive>(`/drives/${encodeURIComponent(id)}/fork`, jsonInit("POST", { name, alias }));
   deleteDrive = (id: string, hard = false) =>
     this.request<{ ok: true }>(`/drives/${encodeURIComponent(id)}${hard ? "?hard=1" : ""}`, {

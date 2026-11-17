@@ -92,7 +92,7 @@ export function App() {
           <Route path="/drives/:id/*" element={<DriveBrowser />} />
           <Route path="/ai" element={askAI} />
           <Route element={<SettingsLayout />}>
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings" element={<Settings theme={theme} setTheme={setTheme} />} />
             <Route path="/settings/access-keys" element={<AccessKeys />} />
             <Route path="/orgs/:id/billing" element={<Billing />} />
             <Route path="/orgs/:id/team" element={<TeamPage />} />
