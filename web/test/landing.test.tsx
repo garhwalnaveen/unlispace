@@ -19,13 +19,13 @@ it("switches example drives without requesting account data and links new visito
   expect(screen.queryByText("Website explorations.fig")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Personal" }));
   expect(within(screen.getByRole("table", { name: "Example files in Personal" })).getByText("Travel plans.md")).toBeInTheDocument();
-  for (const link of screen.getAllByRole("link", { name: "Get Early Access" })) expect(link).toHaveAttribute("href", "/login");
+  for (const link of screen.getAllByRole("link", { name: "Get early access" })) expect(link).toHaveAttribute("href", "/login");
   expect(fetch).not.toHaveBeenCalled();
 });
 
 it("sends signed-in visitors back to their workspace", async () => {
   await showLanding(true);
-  for (const link of screen.getAllByRole("link", { name: "Get Early Access" })) expect(link).toHaveAttribute("href", "/");
+  for (const link of screen.getAllByRole("link", { name: "Get early access" })) expect(link).toHaveAttribute("href", "/");
 });
 
 it("opens product navigation, resolves its section links, and closes with Escape", async () => {
@@ -43,33 +43,37 @@ it("opens product navigation, resolves its section links, and closes with Escape
   expect(trigger).toHaveFocus();
 });
 
-it("shows the supplied early-access copy, proposed plans, and FAQ questions", async () => {
+it("introduces Orbit, explains early access honestly, and answers every FAQ", async () => {
   await showLanding();
-  expect(screen.getByRole("heading", { level: 1, name: "One filesystem for people and AI agents" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Your work. All in Orbit." })).toBeInTheDocument();
   for (const name of [
-    "One file. Two places. No handoff.",
-    "Your work moves. Your files stay put.",
-    "Find files. Keep context.",
-    "Built for people and processes",
-    "Control the workspace, not every transfer.",
-    "Plans that grow with your workflow",
-    "Frequently asked questions",
-    "Give your work room to move.",
+    "Big ideas deserve a little more space.",
+    "Everything in reach. Nothing in the way.",
+    "Your files. Your favorite tools.",
+    "Give AI a place on the project.",
+    "Less handoff. More headway.",
+    "Your next chapter starts here.",
+    "Good questions. Straight answers.",
   ]) expect(screen.getByRole("heading", { name })).toBeInTheDocument();
   for (const name of ["Personal", "Developers", "Teams"]) {
     const plan = screen.getByRole("article", { name });
-    expect(within(plan).getAllByRole("listitem")).toHaveLength(7);
+    expect(within(plan).getAllByRole("listitem")).toHaveLength(3);
   }
-  expect(screen.getByText("Plans are proposals. Final features, limits, availability, and pricing will be published before paid enrollment.")).toBeInTheDocument();
+  expect(screen.getByText("Orbit is in early access. Final features, limits, availability, and pricing will be shared before paid enrollment.")).toBeInTheDocument();
   expect(screen.queryByText(/7-day trial|seven-day trial|No credit card required/i)).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Building with OrbitFS? Explore the docs." })).toHaveAttribute("href", "https://orbitfs.io/docs");
-  for (const name of ["Deploying for a team? Talk to us.", "Contact us", "Contact sales"]) {
+  expect(screen.getByRole("link", { name: "Explore the docs" })).toHaveAttribute("href", "https://orbitfs.io/docs");
+  for (const name of ["Let’s talk", "Talk to us"]) {
     expect(screen.getByRole("link", { name })).toHaveAttribute("href", "https://orbitfs.io/contact");
   }
-  const faq = screen.getByRole("region", { name: "Frequently asked questions" });
-  expect(within(faq).getAllByRole("heading", { level: 3 })).toHaveLength(13);
-  await userEvent.click(within(faq).getByText("What is OrbitFS?"));
-  expect(within(faq).getByText(/Supported devices, integrations, and performance will be confirmed at launch/)).toBeVisible();
+  expect(screen.queryByText(/OrbitFS/)).not.toBeInTheDocument();
+  const faq = screen.getByRole("region", { name: "Good questions. Straight answers." });
+  const questions = faq.querySelectorAll("summary");
+  expect(questions).toHaveLength(6);
+  for (const question of questions) {
+    await userEvent.click(question);
+    expect(question.parentElement).toHaveAttribute("open");
+    expect(question.parentElement!.querySelector("p")).toBeVisible();
+  }
   for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')) {
     expect(document.querySelector(link.hash)).toBeInTheDocument();
   }

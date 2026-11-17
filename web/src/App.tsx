@@ -104,9 +104,9 @@ export function App() {
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-        <Link className="brand" to={user ? "/" : "/overview"} aria-label={marketing ? "OrbitFS home" : "Orbit home"}>
+        <Link className="brand" to={user ? "/" : "/overview"} aria-label="Orbit home">
           <OrbitMark className="brand-mark" />
-          {!workspace && <span>{marketing ? "OrbitFS" : "orbit"}</span>}
+          {!workspace && <span>{marketing ? "Orbit" : "orbit"}</span>}
         </Link>
         {workspace && <>
           <DropdownMenu>
@@ -130,7 +130,7 @@ export function App() {
         <div className="topbar-right">
           {workspace ? <><Link className="session-email" to="/settings">{user!.email}</Link><Button variant="ghost" className="session-signout" disabled={signingOut} onClick={() => void signOut()}>{signingOut ? "Signing out…" : "Sign out"}</Button></> : marketing ? (user ? <Link className="marketing-signin" to="/">Open workspace</Link> : <>
             <Link className="marketing-signin" to="/login">Sign in</Link>
-            <Button asChild variant="default"><Link to="/login">Get Early Access</Link></Button>
+            <Button asChild variant="default"><Link to="/login">Get early access</Link></Button>
           </>) : <div className="theme-switch" role="group" aria-label="Appearance">
             {(["system", "light", "dark"] as const).map((value) => (
               <Button

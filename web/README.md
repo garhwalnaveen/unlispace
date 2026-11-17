@@ -162,10 +162,12 @@ The Button defaults to the outline variant; use `variant="default"` for the prim
 `src/styles.css` owns the shared neutral light/dark tokens and page layout. Avoid restyling controls
 there. Lucide provides the icons; the shared `Modal` connects existing screen state to Radix.
 
-The public landing page follows the visual patterns of [Liveblocks’ homepage](https://liveblocks.io/):
-black surfaces, a centered sans-serif hero, white primary buttons, compact navigation menus, and
-subtle bordered product panels. This is an independent implementation: the public Liveblocks
-repository contains SDKs, examples and starter-kit marketing components, not its production homepage.
+The public Orbit landing page uses an ivory and forest-green palette, editorial typography,
+locally served nature photography, and an interactive example workspace. The three-step workflow
+story updates its sticky illustration as each step enters the viewport, using IntersectionObserver.
+Section reveals and a subtle hero depth effect enhance native scrolling without intercepting it.
+Reduced-motion preferences disable animation, transitions, and smooth scrolling. Content stays
+visible when IntersectionObserver is unavailable. Every FAQ expands to a complete answer.
 `src/landing.css` owns the public design tokens, responsive layout and component styling;
 `src/Landing.tsx` reuses the installed Button and DropdownMenu components. The signed-in app uses
 its own neutral light/dark canvas, top navigation, and existing shadcn controls. The homepage

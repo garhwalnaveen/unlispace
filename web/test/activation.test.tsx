@@ -84,7 +84,7 @@ it("shows the public landing page at the root and keeps drive routes protected",
 
 it("renders the public overview before session recovery finishes", () => {
   renderApp("/overview", authStore({ signedIn: false }));
-  expect(screen.getByRole("heading", { level: 1, name: "One filesystem for people and AI agents" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Your work. All in Orbit." })).toBeInTheDocument();
   expect(screen.queryByText("Loading your account…")).not.toBeInTheDocument();
 });
 
