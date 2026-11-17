@@ -1,118 +1,165 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
-import { deferred, drive, json, org, renderApp } from "./fixtures";
-it("shows a loading placeholder until drives are available", async () => {
-  const pending = deferred<Response>();
-  vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("/orgs") ? pending.promise : Promise.resolve(json({ workspaces: [] }))));
-  renderApp();
-  expect(screen.getByRole("heading", { name: "Your drives" })).toBeVisible();
-  expect(screen.getByRole("status")).toHaveTextContent("Loading your drives…");
-  expect(screen.queryByText("—")).not.toBeInTheDocument();
-  pending.resolve(json({ orgs: [org] }));
-  expect(await screen.findByRole("heading", { name: "Space" })).toBeInTheDocument();
-  expect(screen.getByText("1 drive")).toBeVisible();
-  expect(screen.queryByRole("status")).not.toBeInTheDocument();
-});
-it("shows the trial, explains plan limits, and requires exact drive-name confirmation before deletion", async () => {
+import { drive, json, org, renderApp } from "./fixtures";
+
+const teams = { ...org, tier: "teams", trialEndsAt: null, drives: [{ ...drive, alias: "space" }] };
+/**
+ * The shell on the Account page, so the sidebar is the only thing under test.
+ * `handle` answers drive writes; anything else a drive page asks for gets a harmless reply.
+ */
+function backend(handle: (url: string, init: RequestInit) => Response | undefined, orgs: () => unknown[] = () => [teams]) {
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-    if (init?.method === "POST") return json({ error: "plan_limit" }, 403);
-    if (init?.method === "DELETE") return json({ ok: true });
-    if (url.endsWith("/orgs")) return json({ orgs: [org] });
-    throw new Error(`Unexpected call: ${url}`);
+    if (init?.method && init.method !== "GET" && !url.endsWith("/token")) { const answer = handle(url, init); if (answer) return answer; }
+    if (url.endsWith("/orgs")) return json({ orgs: orgs() });
+    if (url.endsWith("/me/access")) return json({ workspaces: [] });
+    if (url.endsWith("/me")) return json({ email: "you@example.com", displayName: null });
+    if (url.endsWith("/token")) return json({ token: "read", expiresAt: Date.now() + 900_000, endpoint: "https://data.example", driveId: drive.id });
+    if (url.includes("/list?")) return json({ entries: [], cursor: null });
+    return json(drive);
   });
   vi.stubGlobal("fetch", fetcher);
+  return fetcher;
+}
+const writes = (fetcher: ReturnType<typeof vi.fn>) => fetcher.mock.calls.filter(([url, init]) => init?.method && init.method !== "GET" && !url.endsWith("/token")).map(([url, init]) => `${init.method} ${new URL(url).pathname}${new URL(url).search}`);
+async function openMenu(user: ReturnType<typeof userEvent.setup>, item: RegExp) {
+  await user.click(await screen.findByRole("button", { name: "Options for Space" }));
+  await user.click(screen.getByRole("menuitem", { name: item }));
+  return within(screen.getByRole("dialog"));
+}
+
+it("creates a drive from the sidebar and explains a plan limit without closing the dialog", async () => {
+  let allowed = false;
+  const created = { ...drive, id: "d-new", name: "Another drive" };
+  const fetcher = backend((_url, init) => {
+    expect(JSON.parse(String(init.body))).toEqual({ name: "Another drive" });
+    return allowed ? json(created, 201) : json({ error: "plan_limit" }, 403);
+  });
   const user = userEvent.setup();
-  renderApp();
-  expect(await screen.findByText(/1 trial day remaining/)).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: /New drive/ }));
-  await user.type(screen.getByLabelText("Drive name"), "Another drive");
-  await user.click(screen.getByRole("button", { name: "Save drive" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Individual plan includes one drive",
-  );
-  await user.click(screen.getByRole("button", { name: "Cancel" }));
-  await user.click(screen.getByText("Drive options"));
-  await user.click(screen.getByRole("button", { name: "Delete Space" }));
-  const deletion = screen.getByRole("button", { name: "Delete drive" });
-  expect(deletion).toBeDisabled();
-  await user.type(screen.getByLabelText("Type “Space” to confirm"), "space");
-  expect(deletion).toBeDisabled();
-  await user.clear(screen.getByLabelText("Type “Space” to confirm"));
-  await user.type(screen.getByLabelText("Type “Space” to confirm"), "Space");
-  await user.click(deletion);
-  await waitFor(() =>
-    expect(
-      fetcher.mock.calls.some(([, init]) => init?.method === "DELETE"),
-    ).toBe(true),
-  );
+  renderApp("/settings");
+  await user.click(await screen.findByRole("button", { name: "New drive" }));
+  const dialog = within(screen.getByRole("dialog", { name: "New drive" }));
+  expect(dialog.getByText(/A drive holds files for My Space/)).toBeInTheDocument();
+  expect(dialog.getByRole("button", { name: "Create drive" })).toBeDisabled();
+  expect(dialog.queryByText("Advanced")).not.toBeInTheDocument();
+  await user.type(dialog.getByLabelText("Drive name"), "Another drive");
+  await user.click(dialog.getByRole("button", { name: "Create drive" }));
+  expect(await dialog.findByRole("alert")).toHaveTextContent("Individual plan includes one drive");
+  expect(dialog.getByLabelText("Drive name")).toHaveValue("Another drive");
+  allowed = true;
+  await user.click(dialog.getByRole("button", { name: "Create drive" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(writes(fetcher)).toEqual(["POST /orgs/o_test/drives", "POST /orgs/o_test/drives"]);
 });
-const aliasedOrg = { ...org, trialEndsAt: null, drives: [{ ...drive, alias: "space", usageBytes: 1024 }] };
-const overQuota = { orgId: aliasedOrg.id, usedBytes: 2048, quotaBytes: 1024, plan: "individual", status: "active", state: "paid", writable: false, seats: 1, storageAddons: 0, trialEndsAt: null };
-it("forks with name and alias and shows lineage, fork point and drive usage on home", async () => {
-  let forked = false;
-  const child = { ...drive, id: "d-child", name: "Branch", alias: "branch", usageBytes: 0, forkOf: { driveId: drive.id, forkPoint: 1000 }, forks: [] };
-  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.endsWith("/billing")) return json(overQuota);
-    if (url.endsWith("/fork")) { expect(JSON.parse(String(init?.body))).toEqual({ name: "Branch", alias: "branch" }); forked = true; return json(child, 201); }
-    return json({ orgs: [{ ...aliasedOrg, drives: forked ? [{ ...aliasedOrg.drives[0], forks: [child.id] }, child] : aliasedOrg.drives }] });
+
+it("renames from the drive menu, keeping the bucket name under Advanced and conflicts editable", async () => {
+  let taken = true;
+  const fetcher = backend((_url, init) => {
+    if (init.method !== "PATCH") return undefined;
+    return taken ? json({ error: "alias_taken" }, 409) : json({ ...drive, ...JSON.parse(String(init.body)) });
   });
-  vi.stubGlobal("fetch", fetcher); renderApp(); const user = userEvent.setup();
-  expect(await screen.findByText(/Last measured drive bytes: 1 KiB/)).toBeInTheDocument();
-  expect(screen.queryByRole("meter", { name: "Workspace storage usage" })).not.toBeInTheDocument();
-  await user.click(screen.getByText("Drive options"));
-  await user.click(screen.getByRole("button", { name: "Fork Space" }));
-  await user.type(screen.getByLabelText("Drive name"), "Branch");
-  await user.type(screen.getByLabelText("Drive alias"), "branch");
-  await user.click(screen.getByRole("button", { name: "Fork drive" }));
-  const branch = (await screen.findByRole("heading", { name: "Branch" })).closest("article")!;
-  expect(screen.getByText(/Fork point:/)).toHaveTextContent("1970");
-  await user.click(within(branch).getByText("Lineage"));
-  expect(within(branch).getByRole("link", { name: drive.id })).toHaveAttribute("href", `/drives/${drive.id}/`);
-  expect(within(branch).getByText(/Forked from/)).toHaveTextContent("1970");
+  const user = userEvent.setup();
+  renderApp("/settings");
+  const dialog = await openMenu(user, /Rename/);
+  expect(dialog.getByLabelText("Drive name")).toHaveValue("Space");
+  expect(dialog.getByLabelText("Drive name")).toHaveFocus();
+  // Plain words by default: the technical name only appears once Advanced is opened.
+  expect(dialog.getByText("Advanced").closest("details")).not.toHaveAttribute("open");
+  await user.clear(dialog.getByLabelText("Drive name"));
+  await user.type(dialog.getByLabelText("Drive name"), "Archive");
+  await user.click(dialog.getByText("Advanced"));
+  const bucket = dialog.getByLabelText("Bucket name for S3 tools");
+  expect(bucket).toHaveValue("space");
+  await user.clear(bucket); await user.type(bucket, "taken");
+  await user.click(dialog.getByRole("button", { name: "Save" }));
+  expect(await dialog.findByRole("alert")).toHaveTextContent("Another drive already uses that bucket name");
+  expect(bucket).toHaveValue("taken");
+  expect(JSON.parse(String(fetcher.mock.calls.filter(([, init]) => init?.method === "PATCH").pop()![1]!.body))).toEqual({ name: "Archive", alias: "taken" });
+  taken = false;
+  await user.clear(bucket); await user.type(bucket, "archive");
+  await user.click(dialog.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(writes(fetcher)).toEqual(["PATCH /drives/d-test", "PATCH /drives/d-test"]);
 });
-it("keeps alias conflicts editable and protects hard delete with typed confirmation and fork errors", async () => {
-  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.endsWith("/billing")) return json(overQuota);
-    if (init?.method === "PATCH") { expect(JSON.parse(String(init.body)).alias).toBe("taken"); return json({ error: "alias_taken" }, 409); }
-    if (init?.method === "DELETE") { expect(url).toMatch(/\/drives\/d-test\?hard=1$/); return json({ error: "drive_has_forks" }, 409); }
-    return json({ orgs: [aliasedOrg] });
+
+it("makes a copy in plain words, lets Orbit pick the bucket name, and explains the copy limit", async () => {
+  let limited = true;
+  const child = { ...drive, id: "d-child", name: "Space copy", alias: "space-copy", forkOf: { driveId: drive.id, forkPoint: 1000 }, forks: [] };
+  const fetcher = backend((url, init) => {
+    if (!url.endsWith("/fork")) return undefined;
+    return limited ? json({ error: "plan_limit" }, 403) : json({ ...child, ...JSON.parse(String(init.body)) }, 201);
   });
-  vi.stubGlobal("fetch", fetcher); renderApp(); const user = userEvent.setup();
-  await user.click(await screen.findByText("Drive options"));
-  await user.click(screen.getByRole("button", { name: "Rename Space" }));
-  await user.clear(screen.getByLabelText("Drive alias")); await user.type(screen.getByLabelText("Drive alias"), "taken");
-  await user.click(screen.getByRole("button", { name: "Save drive" }));
-  expect(await screen.findByText(/That alias is already in use/)).toBeInTheDocument();
-  expect(screen.getByLabelText("Drive alias")).toHaveValue("taken");
-  await user.click(screen.getByRole("button", { name: "Cancel" }));
-  await user.click(screen.getByRole("button", { name: "Permanently delete Space" }));
-  const confirm = screen.getByRole("button", { name: "Permanently delete drive" });
+  const user = userEvent.setup();
+  renderApp("/settings");
+  const dialog = await openMenu(user, /Make a copy/);
+  expect(screen.getByRole("dialog", { name: "Make a copy of “Space”" })).toBeInTheDocument();
+  expect(dialog.getByText("The copy is ready instantly. It shares this drive's files and history up to now; from then on the two change independently.")).toBeInTheDocument();
+  expect(dialog.getByLabelText("Name for the copy")).toHaveValue("Space copy");
+  const advanced = dialog.getByText("Advanced").closest("details")!;
+  expect(advanced).not.toHaveAttribute("open");
+  // Outside Advanced the dialog never says alias, lineage, fork or fork point.
+  const plain = screen.getByRole("dialog").cloneNode(true) as HTMLElement;
+  plain.querySelector("details")!.remove();
+  expect(plain.textContent).not.toMatch(/alias|lineage|fork/i);
+  await user.click(dialog.getByRole("button", { name: "Make a copy" }));
+  expect(await dialog.findByRole("alert")).toHaveTextContent("This workspace already has 50 copies");
+  expect(JSON.parse(String(fetcher.mock.calls.filter(([url]) => url.endsWith("/fork")).pop()![1]!.body))).toEqual({ name: "Space copy" });
+  limited = false;
+  await user.click(dialog.getByText("Advanced"));
+  expect(within(advanced).getByText(/fork point/)).toBeInTheDocument();
+  await user.type(dialog.getByLabelText("Bucket name for S3 tools (optional)"), "branch");
+  await user.click(dialog.getByRole("button", { name: "Make a copy" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(JSON.parse(String(fetcher.mock.calls.filter(([url]) => url.endsWith("/fork")).pop()![1]!.body))).toEqual({ name: "Space copy", alias: "branch" });
+});
+
+it("says what deleting does and that it cannot be undone, and requires the exact drive name", async () => {
+  const fetcher = backend((_url, init) => init.method === "DELETE" ? json({ ok: true }) : undefined);
+  const user = userEvent.setup();
+  renderApp("/settings");
+  const dialog = await openMenu(user, /Delete/);
+  expect(screen.getByRole("dialog", { name: "Delete “Space”?" })).toBeInTheDocument();
+  expect(dialog.getByText(/disappear right away for everyone who uses it/)).toBeInTheDocument();
+  // The API keeps a deleted drive's data but offers no restore and no recovery period, so the dialog must not promise one.
+  expect(dialog.getByText("A deleted drive can't be brought back.")).toBeInTheDocument();
+  expect(dialog.getByText(/no recovery period/)).toBeInTheDocument();
+  expect(dialog.getByText(/Its data is not erased and still counts towards your storage/)).toBeInTheDocument();
+  const confirm = dialog.getByRole("button", { name: "Delete drive" });
   expect(confirm).toBeDisabled();
-  await user.type(screen.getByLabelText("Type “Space” to confirm"), "space"); expect(confirm).toBeDisabled();
-  expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
-  await user.clear(screen.getByLabelText("Type “Space” to confirm")); await user.type(screen.getByLabelText("Type “Space” to confirm"), "Space");
+  await user.type(dialog.getByLabelText("Type “Space” to confirm"), "space");
+  expect(confirm).toBeDisabled();
+  await user.clear(dialog.getByLabelText("Type “Space” to confirm"));
+  await user.type(dialog.getByLabelText("Type “Space” to confirm"), "Space");
+  expect(writes(fetcher)).toEqual([]);
   await user.click(confirm);
-  expect(await screen.findByText(/This drive has live forks/)).toBeInTheDocument();
+  await waitFor(() => expect(writes(fetcher)).toEqual(["DELETE /drives/d-test"]));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
-it("edits a drive alias from its page and hard-deletes successfully", async () => {
-  let alias = "space"; let deleted = false;
-  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.endsWith("/token")) return json({ token: "read", expiresAt: Date.now() + 900000, endpoint: "https://data.example", driveId: drive.id });
-    if (url.includes("/list?")) return json({ entries: [], cursor: null });
-    if (init?.method === "PATCH") { alias = JSON.parse(String(init.body)).alias; }
-    if (init?.method === "DELETE") { expect(url).toMatch(/\?hard=1$/); deleted = true; return json({ ok: true }); }
-    return json({ ...drive, alias, status: deleted ? "deleted" : "ready", usageBytes: 1024, forks: [] });
-  });
-  vi.stubGlobal("fetch", fetcher); renderApp(`/drives/${drive.id}/`); const user = userEvent.setup();
-  await user.click(await screen.findByText("Drive options"));
-  await user.click(screen.getByRole("button", { name: "Rename Space" }));
-  expect(screen.getByLabelText("Drive name")).toHaveFocus();
-  await user.clear(screen.getByLabelText("Drive alias")); await user.type(screen.getByLabelText("Drive alias"), "new-alias");
-  await user.click(screen.getByRole("button", { name: "Save drive" }));
-  expect(await screen.findByText("new-alias")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Permanently delete Space" }));
-  await user.type(screen.getByLabelText("Type “Space” to confirm"), "Space");
-  await user.click(screen.getByRole("button", { name: "Permanently delete drive" }));
-  expect(await screen.findByRole("heading", { name: "Drive unavailable" })).toBeInTheDocument();
+
+it("erases a drive's data only from Advanced, with the same confirmation, and explains when copies prevent it", async () => {
+  const fetcher = backend((_url, init) => init.method === "DELETE" ? json({ error: "drive_has_forks" }, 409) : undefined);
+  const user = userEvent.setup();
+  renderApp("/settings");
+  const dialog = await openMenu(user, /Delete/);
+  expect(dialog.getByText("Advanced").closest("details")).not.toHaveAttribute("open");
+  await user.click(dialog.getByText("Advanced"));
+  await user.click(dialog.getByRole("checkbox", { name: "Also erase this drive's data permanently" }));
+  expect(dialog.getByText("Its data is erased for good, including every earlier version.")).toBeInTheDocument();
+  const confirm = dialog.getByRole("button", { name: "Delete and erase" });
+  expect(confirm).toBeDisabled();
+  await user.type(dialog.getByLabelText("Type “Space” to confirm"), "Space");
+  await user.click(confirm);
+  expect(await dialog.findByRole("alert")).toHaveTextContent("Copies of this drive still rely on its data, so it can't be erased.");
+  expect(writes(fetcher)).toEqual(["DELETE /drives/d-test?hard=1"]);
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+});
+
+it("offers no drive management to people who cannot manage the workspace", async () => {
+  backend(() => undefined, () => [{ ...teams, role: "member" }]);
+  const user = userEvent.setup();
+  renderApp("/settings");
+  await user.click(await screen.findByRole("button", { name: "Options for Space" }));
+  expect(screen.getByRole("menuitem", { name: "Open in Finder" })).toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: /Rename|Make a copy|Delete/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "New drive" })).not.toBeInTheDocument();
 });

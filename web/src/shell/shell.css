@@ -12,7 +12,7 @@
 .side-label { display: flex; align-items: center; justify-content: space-between; min-height: 28px; margin: 8px 0 2px; padding: 0 8px; color: var(--muted-foreground); font-size: 12px; font-weight: 500; }
 .side-item-row { display: flex; align-items: center; border-radius: 6px; }
 .side-item-row .side-item { flex: 1; }
-.side-item-row .side-item, .side-item-row .side-item:hover { background: transparent; }
+.side-item-row .side-item, .side-item-row .side-item:hover, .side-item-row .side-item[aria-current="page"] { background: transparent; }
 .side-item { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 34px; padding: 0 8px; border-radius: 6px; color: var(--foreground); font-size: 14px; text-decoration: none; }
 .side-item:hover { text-decoration: none; }
 .side-item > svg { width: 16px; height: 16px; flex: none; stroke-width: 1.6; color: var(--muted-foreground); }

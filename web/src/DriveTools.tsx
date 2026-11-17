@@ -1,15 +1,32 @@
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./components/ui/dialog";
+import { Archive, EyeOff, Undo2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { ApiError, type Api, type Drive, type Org } from "./api";
-import { useAuth } from "./context";
-import { driveLink } from "./links";
-import { ErrorNotice, Modal, formatBytes, formatDate } from "./ui";
+import "./settings/settings.css";
+import { ErrorNotice } from "./ui";
 
 export type DriveAction =
   | { kind: "create"; org: Org }
   | { kind: "rename" | "delete" | "hard-delete" | "fork"; drive: Drive };
+
+const BUCKET_RULE = "3–63 lowercase letters, numbers or hyphens, starting and ending with a letter or number.";
+/** Plain wording for the failures these dialogs can hit; anything else falls back to the shared messages. */
+function driveError(kind: DriveAction["kind"], reason: unknown): unknown {
+  if (!(reason instanceof ApiError)) return reason;
+  const messages: Record<string, string> = {
+    alias_taken: "Another drive already uses that bucket name. Choose a different one.",
+    invalid_alias: `Bucket names use ${BUCKET_RULE}`,
+    drive_has_forks: "Copies of this drive still rely on its data, so it can't be erased. Delete those copies first, or delete the drive without erasing its data.",
+    fork_depth_exceeded: "This drive is already a copy of a copy, eight levels deep, which is the limit. Copy one of the earlier drives instead.",
+    slow_down: "The drive is busy right now. Try again in a moment.",
+    ...(kind === "fork" ? { plan_limit: "This workspace already has 50 copies, which is the limit. Delete a copy you no longer need, then try again." } : {}),
+  };
+  return messages[reason.code] ?? reason;
+}
+
+/** Create, rename, copy or delete a drive. Opened from the sidebar's "+" and each drive's menu. */
 export function DriveDialog({
   action,
   api,
@@ -21,136 +38,109 @@ export function DriveDialog({
   onClose: () => void;
   onDone: (drive?: Drive) => void;
 }) {
-  const [name, setName] = useState(
-    action.kind === "rename" ? action.drive.name : "",
-  );
+  const [name, setName] = useState(action.kind === "rename" ? action.drive.name : action.kind === "fork" ? `${action.drive.name} copy` : "");
   const [alias, setAlias] = useState(action.kind === "rename" ? action.drive.alias || "" : "");
   const [confirmation, setConfirmation] = useState("");
+  const [erase, setErase] = useState(action.kind === "hard-delete");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
+  const [opener] = useState(() => document.activeElement);
   const deleting = action.kind === "delete" || action.kind === "hard-delete";
+  const hadAlias = action.kind === "rename" && Boolean(action.drive.alias);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(undefined);
     try {
-      if (action.kind === "create") {
-        onDone(await api.createDrive(action.org.id, name.trim()));
-        return;
-      }
-      else if (action.kind === "rename") {
-        if (/^d-[0-9a-z]{26}$/.test(alias)) throw new Error("Drive IDs are reserved and cannot be used as aliases.");
-        await api.renameDrive(action.drive.id, name.trim(), alias || undefined);
-      }
-      else if (action.kind === "fork") {
-        if (/^d-[0-9a-z]{26}$/.test(alias)) throw new Error("Drive IDs are reserved and cannot be used as aliases.");
-        const fork = await api.forkDrive(action.drive.id, name.trim(), alias);
-        onDone(fork);
-        return;
-      }
+      if (!deleting && action.kind !== "create" && /^d-[0-9a-z]{26}$/.test(alias)) throw new Error("That bucket name looks like a drive ID, which is reserved. Choose a different one.");
+      if (action.kind === "create") return onDone(await api.createDrive(action.org.id, name.trim()));
+      if (action.kind === "fork") return onDone(await api.forkDrive(action.drive.id, name.trim(), alias || undefined));
+      if (action.kind === "rename") await api.renameDrive(action.drive.id, name.trim(), alias || undefined);
       else {
         if (confirmation !== action.drive.name) return;
-        await api.deleteDrive(action.drive.id, action.kind === "hard-delete");
+        await api.deleteDrive(action.drive.id, erase);
       }
       onDone();
     } catch (reason) {
-      setError(action.kind === "fork" && reason instanceof ApiError && reason.code === "plan_limit" ? "Your workspace has reached its limit of 50 live forks. Delete a fork before creating another." : reason);
+      setError(driveError(action.kind, reason));
     } finally {
       setBusy(false);
     }
   }
+  const title = action.kind === "create" ? "New drive"
+    : action.kind === "rename" ? "Rename drive"
+    : action.kind === "fork" ? `Make a copy of “${action.drive.name}”`
+    : `Delete “${action.drive.name}”?`;
+  const lede = action.kind === "create" ? `A drive holds files for ${action.org.name}. Open it here, in Finder with the Mac app, or from S3 tools.`
+    : action.kind === "rename" ? "Everyone sees the new name. Files and links keep working."
+    : action.kind === "fork" ? "The copy is ready instantly. It shares this drive's files and history up to now; from then on the two change independently."
+    : null;
+  const submitLabel = action.kind === "create" ? "Create drive" : action.kind === "rename" ? "Save" : action.kind === "fork" ? "Make a copy" : erase ? "Delete and erase" : "Delete drive";
+  const bucketField = !deleting && action.kind !== "create" && <div className="st-field">
+    <label htmlFor="drive-alias">Bucket name for S3 tools{action.kind === "fork" ? " (optional)" : ""}</label>
+    <Input id="drive-alias" value={alias} onChange={(event) => setAlias(event.target.value)} disabled={busy} autoComplete="off" spellCheck={false}
+      required={hadAlias} minLength={3} maxLength={63} pattern={"[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"} aria-describedby="alias-help" />
+    <p id="alias-help" className="st-help">
+      Also called the drive's alias. {BUCKET_RULE}{" "}
+      {action.kind === "fork" ? "Leave it empty and Orbit picks one from the name." : "Tools that use the old name stop finding the drive."}
+    </p>
+  </div>;
   return (
-    <Modal
-      title={
-        deleting
-          ? action.kind === "hard-delete" ? "Permanently delete drive" : "Delete drive"
-          : action.kind === "create"
-            ? "Create a drive"
-            : action.kind === "fork" ? "Fork drive…" : "Rename drive"
-      }
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
-      <form className="stack" onSubmit={submit}>
-        {deleting ? (
-          <>
-            <p>
-              {action.kind === "hard-delete" ? "Permanently deleting" : "Deleting"} <strong>{action.drive.name}</strong> removes access to
-              this drive and all of its files. {action.kind === "hard-delete" && "This permanently removes drive state and cannot be undone."}
-            </p>
-            <label htmlFor="confirmation">
-              Type “{action.drive.name}” to confirm
-            </label>
-            <Input
-              id="confirmation"
-              autoComplete="off"
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-              autoFocus
-              required
-            />
-          </>
-        ) : (
-          <>
-            <label htmlFor="drive-name">Drive name</label>
-            <Input
-              id="drive-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              autoFocus
-              required
-            />
-          </>
-        )}
-        {!deleting && action.kind !== "create" && <>
-          <label htmlFor="drive-alias">Drive alias</label>
-          <Input id="drive-alias" value={alias} onChange={(event) => setAlias(event.target.value)}
-            required={action.kind === "fork" || Boolean(action.drive.alias)} minLength={3} maxLength={63}
-            pattern={"[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]"} aria-describedby="alias-help" />
-          <p id="alias-help" className="muted small">3–63 lowercase letters, numbers or hyphens. Drive IDs are reserved.</p>
-        </>}
-        <ErrorNotice error={error} />
-        <div className="actions">
-          <Button type="button" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            variant={deleting ? "destructive" : "default"}
-            disabled={
-              busy ||
-              (deleting ? confirmation !== action.drive.name : !name.trim())
-            }
-          >
-            {busy ? "Saving…" : deleting ? action.kind === "hard-delete" ? "Permanently delete drive" : "Delete drive" : action.kind === "fork" ? "Fork drive" : "Save drive"}
-          </Button>
-        </div>
-      </form>
-    </Modal>
+    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+      <DialogContent {...(lede ? {} : { "aria-describedby": undefined })} onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        if (opener instanceof HTMLElement) opener.focus();
+      }}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {lede && <DialogDescription>{lede}</DialogDescription>}
+        </DialogHeader>
+        <form className="st-form st-dialog" onSubmit={submit}>
+          {deleting ? <>
+            <ul className="st-consequences">
+              <li><EyeOff aria-hidden="true" /><span>The drive and everything in it disappear right away for everyone who uses it: on the web, in Finder and for S3 tools.</span></li>
+              <li><Undo2 aria-hidden="true" /><span><strong>A deleted drive can't be brought back.</strong> Orbit has no restore for drives yet and no recovery period, so make a copy first if you might need the files.</span></li>
+              <li><Archive aria-hidden="true" /><span>{erase
+                ? "Its data is erased for good, including every earlier version."
+                : "Its data is not erased and still counts towards your storage. Copies made from this drive keep working."}</span></li>
+            </ul>
+            <div className="st-field">
+              <label htmlFor="confirmation">Type “{action.drive.name}” to confirm</label>
+              <Input id="confirmation" autoComplete="off" value={confirmation} disabled={busy} onChange={(event) => setConfirmation(event.target.value)} autoFocus required />
+            </div>
+            <details className="st-advanced" open={action.kind === "hard-delete" || undefined}>
+              <summary>Advanced</summary>
+              <div>
+                <label className="st-check plain">
+                  <input type="checkbox" checked={erase} disabled={busy} onChange={(event) => setErase(event.target.checked)} />
+                  Also erase this drive's data permanently
+                </label>
+                <p className="st-help">Not possible while copies (forks) of this drive exist, because they share its history.</p>
+              </div>
+            </details>
+          </> : <>
+            <div className="st-field">
+              <label htmlFor="drive-name">{action.kind === "fork" ? "Name for the copy" : "Drive name"}</label>
+              <Input id="drive-name" value={name} disabled={busy} maxLength={100} onChange={(event) => setName(event.target.value)} autoFocus required
+                onFocus={(event) => { if (action.kind !== "create") event.target.select(); }} />
+            </div>
+            {action.kind !== "create" && <details className="st-advanced">
+              <summary>Advanced</summary>
+              <div>
+                {bucketField}
+                {action.kind === "fork" && <p className="st-help">A copy is a fork: it remembers this drive and the moment it was made (its fork point), and shares stored data with it instead of duplicating it.</p>}
+              </div>
+            </details>}
+          </>}
+          <ErrorNotice error={error} />
+          <div className="st-actions end">
+            <Button type="button" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button variant={deleting ? "destructive" : "default"} disabled={busy || (deleting ? confirmation !== action.drive.name : !name.trim())}>
+              {busy ? (deleting ? "Deleting…" : "Saving…") : submitLabel}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
-}
-export function DriveTools({ drive, canManage, onDone }: { drive: Drive; canManage: boolean; onDone: (created?: Drive) => void }) {
-  const { auth } = useAuth();
-  const [action, setAction] = useState<DriveAction | null>(null);
-  return <details className="drive-tools">
-    <summary>{canManage ? "Drive options" : "Drive details"}</summary>
-    <p className="muted small">Alias: <code>{drive.alias || "Not set"}</code> · Last measured drive bytes: {formatBytes(drive.usageBytes || 0)}. Billing shows total retained and pending storage for the workspace.</p>
-    <p className="muted small">Storage region: {drive.placement || "Automatic"}</p>
-    <details><summary>Lineage</summary>
-      {drive.forkOf ? <p>Forked from <Link to={driveLink(drive.forkOf.driveId)}>{drive.forkOf.driveId}</Link> at {formatDate(drive.forkOf.forkPoint)}</p> : <p>Root drive</p>}
-      <p>Forks: {drive.forks?.length || 0}</p>
-      <ul>{drive.forks?.map((id) => <li key={id}><Link to={driveLink(id)}>{id}</Link></li>)}</ul>
-    </details>
-    {canManage && <div className="actions">
-      <Button variant="ghost" aria-label={`Rename ${drive.name}`} onClick={() => setAction({ kind: "rename", drive })}>Rename / edit alias</Button>
-      <Button variant="ghost" aria-label={`Fork ${drive.name}`} onClick={() => setAction({ kind: "fork", drive })}>Fork drive…</Button>
-      <Button variant="ghost" className="text-destructive" aria-label={`Delete ${drive.name}`} onClick={() => setAction({ kind: "delete", drive })}>Delete</Button>
-      <Button variant="ghost" className="text-destructive" aria-label={`Permanently delete ${drive.name}`} onClick={() => setAction({ kind: "hard-delete", drive })}>Permanently delete</Button>
-    </div>}
-    {action && <DriveDialog action={action} api={auth.api} onClose={() => setAction(null)} onDone={(created) => { setAction(null); onDone(created); }} />}
-  </details>;
-}
-
-export function ForkNotice({ drive }: { drive: Drive }) {
-  return <p className="notice" role="status">Created <Link to={driveLink(drive.id)}>{drive.name}</Link>{drive.forkOf && ` · Fork point: ${formatDate(drive.forkOf.forkPoint)}`}</p>;
 }

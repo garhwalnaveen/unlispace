@@ -49,7 +49,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     void Promise.all([auth.api.orgs(), access])
       .then(([list, entitlements]) => {
         if (run !== generation.current) return;
-        setOrgs(list.orgs);
+        setOrgs(Array.isArray(list?.orgs) ? list.orgs : []);
         setWorkspaces(entitlements);
         setLoaded(true);
       })

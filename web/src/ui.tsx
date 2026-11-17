@@ -20,9 +20,9 @@ export function Loading({ children = "Loading…" }: { children?: ReactNode }) {
   );
 }
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 4);
-  return `${(bytes / 1024 ** unit).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${["B", "KB", "MB", "GB", "TB"][unit]}`;
+  if (bytes < 1000) return `${bytes} B`;
+  const unit = Math.min(Math.floor(Math.log10(bytes) / 3), 4);
+  return `${(bytes / 1000 ** unit).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${["B", "KB", "MB", "GB", "TB"][unit]}`;
 }
 export function formatDate(ms: number): string {
   return new Date(ms).toLocaleString(undefined, {

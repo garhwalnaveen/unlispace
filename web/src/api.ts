@@ -98,10 +98,12 @@ export interface Manifest {
 export interface Version {
   versionId: string;
   op: string;
-  size: number;
+  /** Null for entries that carry no file content, such as a deletion. */
+  size: number | null;
   seq: number;
   ts: number;
   actor: string | null;
+  restoredFrom?: string | null;
 }
 
 export class ApiError extends Error {
@@ -170,7 +172,7 @@ export class Api {
       `/drives/${encodeURIComponent(id)}`,
       jsonInit("PATCH", { name, ...(alias === undefined ? {} : { alias }) }),
     );
-  forkDrive = (id: string, name: string, alias: string) =>
+  forkDrive = (id: string, name: string, alias?: string) =>
     this.request<Drive>(`/drives/${encodeURIComponent(id)}/fork`, jsonInit("POST", { name, alias }));
   deleteDrive = (id: string, hard = false) =>
     this.request<{ ok: true }>(`/drives/${encodeURIComponent(id)}${hard ? "?hard=1" : ""}`, {
@@ -212,6 +214,24 @@ export interface PutOperation {
   op: "put"; path: string; ifVersion?: string; ifAbsent?: boolean;
   size: number; contentType: string; mtimeMs: number; shards: { h: string; n: number }[];
 }
+/** Folder paths end with "/"; file paths do not. Both sides of a rename must agree. */
+export interface MkdirOperation { op: "mkdir"; path: string; ifAbsent?: boolean }
+export interface DeleteOperation { op: "delete"; path: string; ifVersion?: string }
+export interface RenameOperation { op: "rename"; from: string; to: string; ifVersion?: string }
+export type CommitOperation = PutOperation | MkdirOperation | DeleteOperation | RenameOperation;
+export interface CommitResult { seq: number; results: { path: string; versionId: string; size: number }[] }
+export interface SearchEntry {
+  path: string; type: "file" | "folder"; versionId: string; size: number;
+  contentType: string | null; mtimeMs: number | null; seq: number;
+}
+export interface Change { ev: number; seq: number; path: string; op: string; versionId: string | null }
+export interface TreeEntry { path: string; versionId: string; size: number; type: "file" | "folder" }
+/** The item a drive operation was refused for, when the data plane names one. */
+export type DriveApiError = ApiError & { path?: string };
+/** An item the user is looking at; its version guards the operation against concurrent changes. */
+export interface ItemRef { path: string; versionId?: string | null }
+
+const guard = (versionId?: string | null) => (versionId ? { ifVersion: versionId } : {});
 
 export class DriveApi {
   private grant: DriveToken | null = null;
@@ -246,36 +266,71 @@ export class DriveApi {
   }
   list = (path: string, cursor: string | null = null) =>
     this.json<ListPage>(
-      `list?${new URLSearchParams({ path, limit: "100", ...(cursor ? { cursor } : {}) })}`,
+      `list?${new URLSearchParams({ path, limit: "500", ...(cursor ? { cursor } : {}) })}`,
     );
   stat = (path: string) =>
     this.json<FileStat>(`stat?${new URLSearchParams({ path })}`);
+  /** Names anywhere in the drive that contain `query` (3–256 characters). */
+  search = (query: string, cursor: string | null = null) =>
+    this.json<{ entries: SearchEntry[]; cursor: string | null }>(
+      `search?${new URLSearchParams({ q: query, limit: "100", ...(cursor ? { cursor } : {}) })}`,
+    );
+  /** Oldest first. */
   versions = (path: string, cursor: string | null = null) =>
     this.json<{ versions: Version[]; cursor: string | null }>(
-      `versions?${new URLSearchParams({ path, limit: "100", ...(cursor ? { cursor } : {}) })}`,
+      `versions?${new URLSearchParams({ path, limit: "500", ...(cursor ? { cursor } : {}) })}`,
     );
   manifest = (path: string, versionId?: string) =>
     this.json<Manifest>(
       `manifest?${new URLSearchParams({ path, ...(versionId ? { versionId } : {}) })}`,
     );
+  /** The drive's activity after event `after`, oldest first; `lastEv` is the newest event id. */
+  changes = (after: number, limit = 1000) =>
+    this.json<{ changes: Change[]; lastEv: number; more: boolean }>(
+      `changes?${new URLSearchParams({ after: String(after), limit: String(limit) })}`,
+    );
+  /** Everything inside `folder` ("" or ending with "/") as it was at `ts` milliseconds. */
+  treeAt = (folder: string, ts: number, cursor: string | null = null) =>
+    this.json<{ entries: TreeEntry[]; cursor: string | null }>(
+      `tree-at?${new URLSearchParams({ path: folder, ts: String(ts), limit: "1000", ...(cursor ? { cursor } : {}) })}`,
+    );
   async shard(hash: string): Promise<ArrayBuffer> {
     if (!/^[a-f0-9]{64}$/.test(hash))
       throw new Error("Invalid shard hash in manifest.");
     const response = await this.fetch(`shards/${hash}`);
-    if (!response.ok) await readResponse(response);
+    if (!response.ok) await DriveApi.read(response);
     return response.arrayBuffer();
   }
   missing = (hashes: string[]) => this.send<{ missing: string[] }>("shards/missing", jsonInit("POST", { hashes }));
   putShard = (hash: string, body: Uint8Array<ArrayBuffer>) => this.send(`shards/${hash}`, {
     method: "PUT", body, headers: { "Content-Type": "application/octet-stream" },
   });
-  restore = (path: string, versionId: string, ifVersion: string) => this.send<{ seq: number }>("restore", jsonInit("POST", { path, versionId, ifVersion }));
-  commit = (op: PutOperation) => this.send<{ seq: number }>("commit", jsonInit("POST", { ops: [op] }));
+  /** Makes an old version current again. `ifAbsent` is for bringing back a deleted file. */
+  restore = (path: string, versionId: string, ifVersion: string | null, ifAbsent = false) =>
+    this.send<CommitResult>("restore", jsonInit("POST", { path, versionId, ...guard(ifVersion), ...(ifAbsent ? { ifAbsent: true } : {}) }));
+  /** All operations apply together or not at all. */
+  commit = (ops: CommitOperation | CommitOperation[]) =>
+    this.send<CommitResult>("commit", jsonInit("POST", { ops: Array.isArray(ops) ? ops : [ops] }));
+  /** Creates a folder; refused with 412 when something already has that name. */
+  mkdir = (path: string) => this.commit({ op: "mkdir", path: path.replace(/\/*$/, "/"), ifAbsent: true });
+  /** Renames or moves items; refused with 409 `path_conflict` when a destination is taken. */
+  move = (items: { from: string; to: string; versionId?: string | null }[]) =>
+    this.commit(items.map(({ from, to, versionId }) => ({ op: "rename" as const, from, to, ...guard(versionId) })));
+  /** Deletes files, or folders with everything inside them. Their history is kept. */
+  remove = (items: ItemRef[]) =>
+    this.commit(items.map(({ path, versionId }) => ({ op: "delete" as const, path, ...guard(versionId) })));
+  private static async read<T>(response: Response): Promise<T> {
+    if (response.ok) return response.json() as Promise<T>;
+    const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string; path?: string };
+    const error: DriveApiError = new ApiError(response.status, body.error || "request_failed", body.message);
+    if (typeof body.path === "string") error.path = body.path;
+    throw error;
+  }
   private async send<T>(path: string, init: RequestInit): Promise<T> {
-    return readResponse<T>(await this.fetch(path, init));
+    return DriveApi.read<T>(await this.fetch(path, init));
   }
   private async json<T>(path: string): Promise<T> {
-    return readResponse<T>(await this.fetch(path));
+    return DriveApi.read<T>(await this.fetch(path));
   }
 }
 

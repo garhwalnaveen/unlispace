@@ -84,6 +84,7 @@ export function App() {
       <Routes>
         <Route element={<Focused />}>
           <Route path="/welcome" element={<Welcome />} />
+          <Route path="/invites/:token" element={<AcceptInvitation />} />
         </Route>
         <Route element={<Shell theme={theme} setTheme={setTheme} />}>
           <Route path="/" element={<>{sessionError}<Home /></>} />
@@ -92,12 +93,11 @@ export function App() {
           <Route path="/drives/:id/*" element={<DriveBrowser />} />
           <Route path="/ai" element={askAI} />
           <Route element={<SettingsLayout />}>
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings" element={<Settings theme={theme} setTheme={setTheme} />} />
             <Route path="/settings/access-keys" element={<AccessKeys />} />
             <Route path="/orgs/:id/billing" element={<Billing />} />
             <Route path="/orgs/:id/team" element={<TeamPage />} />
           </Route>
-          <Route path="/invites/:token" element={<AcceptInvitation />} />
           <Route path="*" element={<section className="empty-state"><h1>Page not found</h1><p>That page could not be found.</p><Link to="/">Back to your files</Link></section>} />
         </Route>
       </Routes>
