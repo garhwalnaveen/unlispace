@@ -1,0 +1,7 @@
+{
+  "checkedAt": "2026-11-17T10:00:00.549670+00:00",
+  "worker": "unlispace-data-plane",
+  "limits": {},
+  "effectiveCpuBudgetMs": 30000,
+  "versionId": "397c83ad-807a-4f79-9260-34f9d07b2f85"
+}

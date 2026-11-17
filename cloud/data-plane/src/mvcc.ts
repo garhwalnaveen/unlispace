@@ -16,6 +16,14 @@ export function hasBranches(sql: SqlStorage): boolean {
 	return !!sql.exec("SELECT 1 FROM sqlite_master WHERE name='mv_branches'").toArray().length;
 }
 
+/** Visibility's correlated shadow lookup starts with the row key, before its branch. */
+export function ensureBranchIndexes(sql: SqlStorage): void {
+	for (const {name} of sql.exec<{name:string}>("SELECT name FROM mv_columns").toArray()) {
+		const keys = KEYS[name]!;
+		sql.exec(`CREATE INDEX IF NOT EXISTS ${store(name)}_identity ON ${store(name)}(${keys.map(table).join(",")},_branch,_rev DESC)`);
+	}
+}
+
 /** One-time migration preserves the original drive and row ids, including history cursors. */
 export function migrateBranches(sql: SqlStorage, root: string): void {
 	if (hasBranches(sql)) return;
@@ -43,6 +51,7 @@ export function migrateBranches(sql: SqlStorage, root: string): void {
 	sql.exec("INSERT INTO node_search(rowid,name) SELECT _record,name FROM mv_nodes WHERE _dead=0");
 	sql.exec("CREATE TRIGGER mv_node_search_insert AFTER INSERT ON mv_nodes WHEN new._dead=0 BEGIN INSERT INTO node_search(rowid,name) VALUES(new._record,new.name); END");
 	createViews(sql, root);
+	ensureBranchIndexes(sql);
 }
 
 function branch(sql: SqlStorage, id: string): Branch {

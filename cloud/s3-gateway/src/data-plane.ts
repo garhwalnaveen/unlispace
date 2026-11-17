@@ -47,14 +47,14 @@ export class DataPlane {
     if (!token || token.until <= Date.now()) { token = {value: await this.tokens.mint(this.principal, this.drive, access), until: Date.now() + 240_000}; this.tokenCache.set(access, token); }
     return token.value;
   }
-  private async request(rest: string, method = "GET", body?: BodyInit, params: Record<string, string> = {}, extraHeaders: Record<string,string> = {}): Promise<Response> {
+  private async request(rest: string, method = "GET", body?: BodyInit, params: Record<string, string> = {}, extraHeaders: Record<string,string> = {}, signal?: AbortSignal): Promise<Response> {
     const url = new URL(`https://data-plane.internal/v0/drives/${encodeURIComponent(this.drive)}${rest ? `/${rest}` : ""}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     const headers = new Headers({ authorization: `Bearer ${await this.token(method === "GET" ? "read" : "write")}` });
     if (typeof body === "string") headers.set("content-type", "application/json");
     if (typeof body === "string" || body instanceof Uint8Array) headers.set("content-length", String(typeof body === "string" ? utf8.encode(body).length : body.byteLength));
     for (const [name,value] of Object.entries(extraHeaders)) headers.set(name,value);
-    const response = await this.binding.fetch(new Request(url, { method, headers, body }));
+    const response = await this.binding.fetch(new Request(url, { method, headers, body, signal }));
     if (!response.ok) {
       let details: { error?: string; message?: unknown; currentVersionId?: string } = {};
       try { details = await response.json() as typeof details; } catch { /* non-JSON upstream failure */ }
@@ -205,26 +205,59 @@ export class DataPlane {
     return (await this.request("restore", "POST", JSON.stringify({ path, versionId, ...(ifVersion ? { ifVersion } : {}), ...(ifAbsent ? { ifAbsent } : {}) }))).json() as Promise<CommitResult>;
   }
   async *bytes(manifest: Manifest, start = 0, end = manifest.size): AsyncGenerator<Uint8Array> {
+    const abort = new AbortController();
     let offset = 0;
-    for await (const shard of this.refs(manifest)) {
-      if (offset >= end) break;
-      const a = Math.max(0, start - offset), b = Math.min(shard.n, end - offset);
-      offset += shard.n;
-      if (a >= b) continue;
-      const response = await this.request(`shards/${shard.h}`);
-      const reader = response.body!.getReader();
-      let position = 0;
-      try {
-        for (;;) {
-          const next = await reader.read();
-          if (next.done) break;
-          const x = Math.max(0, a - position), y = Math.min(next.value.length, b - position);
-          position += next.value.length;
-          if (x < y) yield next.value.subarray(x, y);
-          if (position >= b) break;
-        }
-        if (position < b) throw new S3Error(500, "InternalError", "Truncated shard");
-      } finally { await reader.cancel(); reader.releaseLock(); }
+    const selected = async function* (dp: DataPlane) {
+      for await (const shard of dp.refs(manifest)) {
+        if (offset >= end) break;
+        const a = Math.max(0, start - offset), b = Math.min(shard.n, end - offset);
+        offset += shard.n;
+        if (a < b) yield {shard, a, b};
+      }
+      if (offset < end) throw new S3Error(500, "InternalError", "Truncated manifest");
+    }(this);
+    type Read = {a: number; b: number; n: number; done: Promise<{response: Response} | {error: unknown}>};
+    const pending: Read[] = [];
+    const fill = async () => {
+      while (pending.length < 2) {
+        const next = await selected.next();
+        if (next.done) break;
+        const {shard, a, b} = next.value;
+        const headers: Record<string, string> = a || b !== shard.n ? {range: `bytes=${a}-${b - 1}`} : {};
+        pending.push({a, b, n: shard.n, done: this.request(`shards/${shard.h}`, "GET", undefined, {}, headers, abort.signal)
+          .then(response => ({response}), error => ({error}))});
+      }
+    };
+    try {
+      await fill();
+      while (pending.length) {
+        const read = pending.shift()!;
+        const result = await read.done;
+        if ("error" in result) throw result.error;
+        const response = result.response, reader = response.body!.getReader();
+        let position = response.status === 206 ? read.a : 0;
+        try {
+          if (response.status === 206 && response.headers.get("content-range") !== `bytes ${read.a}-${read.b - 1}/${read.n}`)
+            throw new S3Error(500, "InternalError", "Invalid shard range");
+          for (;;) {
+            const next = await reader.read();
+            if (next.done) break;
+            const x = Math.max(0, read.a - position), y = Math.min(next.value.length, read.b - position);
+            position += next.value.length;
+            if (x < y) yield next.value.subarray(x, y);
+            if (position >= read.b) break;
+          }
+          if (position < read.b) throw new S3Error(500, "InternalError", "Truncated shard");
+        } finally { await reader.cancel(); reader.releaseLock(); }
+        await fill();
+      }
+    } finally {
+      abort.abort();
+      await selected.return(undefined);
+      await Promise.all(pending.map(async read => {
+        const result = await read.done;
+        if ("response" in result) await result.response.body?.cancel().catch(() => {});
+      }));
     }
   }
 }

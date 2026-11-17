@@ -1,0 +1,883 @@
+diff --git a/cloud/api/src/control-plane.ts b/cloud/api/src/control-plane.ts
+index edef806..7f89c35 100644
+--- a/cloud/api/src/control-plane.ts
++++ b/cloud/api/src/control-plane.ts
+@@ -41,11 +41,16 @@ export class ControlPlane extends WorkerEntrypoint<AppEnv> implements ControlPla
+ 		if (!row || (k.drives !== null && !k.drives.includes(row.id))) throw new HttpError(404, "no_such_bucket");
+ 		return row;
+ 	}
+-	async #info(ctx: Ctx, k: Key, d: R.DriveRow) {
+-		const e = await entitlements(ctx, k.orgId);
+-		const writable = d.status === "ready" && e.writable && k.access !== "read";
+-		if (writable) await configureStorageQuota(ctx, k.orgId, e.quotaBytes);
+-		return { driveId: d.id, alias: d.alias, displayName: d.name, placement: d.placement, createdAt: d.created_at, access: k.access, writable: writable && await storageUsage(ctx, k.orgId) <= e.quotaBytes };
++	async #info(ctx: Ctx, k: Key, d: R.DriveRow, want: "read" | "write" = "write") {
++		let writable = false;
++		if (want === "write") {
++			const e = await entitlements(ctx, k.orgId);
++			if (d.status === "ready" && e.writable && k.access !== "read") {
++				await configureStorageQuota(ctx, k.orgId, e.quotaBytes);
++				writable = await storageUsage(ctx, k.orgId) <= e.quotaBytes;
++			}
++		}
++		return { driveId: d.id, alias: d.alias, displayName: d.name, placement: d.placement, createdAt: d.created_at, access: k.access, writable };
+ 	}
+ 	#authed(k: Key) { return { userId: k.userId, email: "", sid: k.accessKeyId }; }
+ 	#body(ctx: Ctx, body: Options, hard = false) {
+@@ -70,9 +75,10 @@ export class ControlPlane extends WorkerEntrypoint<AppEnv> implements ControlPla
+ 		const rows = (await ctx.env.DB.prepare("SELECT d.*,m.role,o.tier FROM drives d JOIN memberships m ON m.org_id=d.org_id AND m.user_id=? JOIN orgs o ON o.id=d.org_id WHERE d.org_id=? AND d.status!='deleted' ORDER BY d.created_at,d.id").bind(k.userId, k.orgId).all<R.DriveRow>()).results;
+ 		return Promise.all(rows.filter(d => k.drives === null || k.drives.includes(d.id)).map(d => this.#info(ctx, k, d)));
+ 	}
+-	async resolveBucket(id: string, bucket: string) {
++	async resolveBucket(id: string, bucket: string, want: "read" | "write" = "write") {
++		if (want !== "read" && want !== "write") throw new HttpError(400, "invalid_argument");
+ 		const k = await this.#key(id), ctx = this.#context();
+-		return this.#info(ctx, k, await this.#bucket(ctx, k, bucket));
++		return this.#info(ctx, k, await this.#bucket(ctx, k, bucket), want);
+ 	}
+ 	async createDrive(id: string, opts: { alias: string; displayName?: string; placement?: string }) {
+ 		const k = await this.#key(id), ctx = this.#context(); this.#admin(k);
+diff --git a/cloud/api/test/drive-registry.test.ts b/cloud/api/test/drive-registry.test.ts
+index 98178cd..893c235 100644
+--- a/cloud/api/test/drive-registry.test.ts
++++ b/cloud/api/test/drive-registry.test.ts
+@@ -107,6 +107,17 @@ describe("ControlPlane RPC", () => {
+ 		await cp.deleteDrive(id, "rpc-root", { hard: false });
+ 		await expect(cp.resolveBucket(id, "rpc-root")).rejects.toMatchObject({ code: "no_such_bucket" });
+ 	});
++	it("resolves reads without storage accounting while retaining scope and revocation checks", async () => {
++		const { w, cp, id, root, org } = await fixture();
++		w.dp.configureQuota = async () => { throw new Error("Storage accounting unavailable"); };
++		expect(await cp.resolveBucket(id, root, "read")).toMatchObject({driveId: root, writable: false, access: "admin"});
++		await expect(cp.resolveBucket(id, root)).rejects.toThrow("Storage accounting unavailable");
++		await expect(cp.resolveBucket(id, root, "invalid" as any)).rejects.toMatchObject({code: "invalid_argument"});
++		await w.env.DB.prepare("UPDATE access_keys SET drives='[]' WHERE id=?").bind(id).run();
++		await expect(cp.resolveBucket(id, root, "read")).rejects.toMatchObject({code: "no_such_bucket"});
++		await w.env.DB.prepare("DELETE FROM memberships WHERE org_id=?").bind(org.id).run();
++		await expect(cp.resolveBucket(id, root, "read")).rejects.toMatchObject({code: "access_denied"});
++	});
+ 	it("enforces child-key scope, workspace, access, ancestry and current membership", async () => {
+ 		const { w, s, org, root, call, cp, id } = await fixture();
+ 		for (const opts of [{ drives: [] }, { drives: null }, { drives: [root, root] }]) await expect(cp.mintChildKey(id, opts as any)).rejects.toMatchObject({ code: "invalid_argument" });
+diff --git a/cloud/data-plane/src/drive.ts b/cloud/data-plane/src/drive.ts
+index 105f4d6..4b4e63c 100644
+--- a/cloud/data-plane/src/drive.ts
++++ b/cloud/data-plane/src/drive.ts
+@@ -18,7 +18,7 @@ import { INLINE_MANIFEST_BYTES, iterateManifest, loadManifest, loadMetadata, loa
+ import { EXPORT_COLUMNS, validateExportRow, withinDeadline, type ExportHeader } from "./exports";
+ import { GC_SCHEMA, GC_INTERVAL_MS, LineageGC } from "./gc";
+ import { quotaFor } from "./quota";
+-import { hasBranches, migrateBranches, forkBranch, branchSql, branchIds } from "./mvcc";
++import { hasBranches, migrateBranches, forkBranch, branchSql, branchIds, ensureBranchIndexes } from "./mvcc";
+ 
+ type Row = Record<string, SqlStorageValue>;
+ interface VersionRow extends Row {
+@@ -112,7 +112,7 @@ class DriveStore {
+ 	constructor(private ctx: DurableObjectState, private env: Env, sql?: SqlStorage, queue = {tail: Promise.resolve() as Promise<unknown>}) {
+ 		this.queue = queue;
+ 		this.sql = sql ?? ctx.storage.sql;
+-		if (!sql && hasBranches(this.sql)) this.sql.exec("CREATE INDEX IF NOT EXISTS mv_nodes_identity ON mv_nodes(id,_branch,_rev DESC)");
++		if (!sql && hasBranches(this.sql)) ensureBranchIndexes(this.sql);
+ 		if (!sql && !hasBranches(this.sql)) this.ctx.storage.transactionSync(() => {
+ 			for (const stmt of [...SCHEMA, ...GC_SCHEMA, ...HISTORY_SCHEMA]) this.sql.exec(stmt);
+ 			migrateNodes(this.sql);
+diff --git a/cloud/data-plane/src/index.ts b/cloud/data-plane/src/index.ts
+index c01fe92..43ace88 100644
+--- a/cloud/data-plane/src/index.ts
++++ b/cloud/data-plane/src/index.ts
+@@ -178,6 +178,7 @@ async function putShard(request: Request, env: Env, stub: DriveStub, driveId: st
+ 		if (tooLarge) return err(413, "too_large");
+ 		const msg = e instanceof Error ? e.message : String(e);
+ 		if (/sha-?256|checksum|digest/i.test(msg)) return err(400, "hash_mismatch");
++		if (msg.includes("(10001)")) return err(503, "service_unavailable");
+ 		return err(400, "bad_request", `upload failed: ${msg}`);
+ 	}
+ 	finally { if (quota) await quota.finish(key, stored); }
+diff --git a/cloud/data-plane/src/mvcc.ts b/cloud/data-plane/src/mvcc.ts
+index 331b45e..b0a7716 100644
+--- a/cloud/data-plane/src/mvcc.ts
++++ b/cloud/data-plane/src/mvcc.ts
+@@ -16,6 +16,14 @@ export function hasBranches(sql: SqlStorage): boolean {
+ 	return !!sql.exec("SELECT 1 FROM sqlite_master WHERE name='mv_branches'").toArray().length;
+ }
+ 
++/** Visibility's correlated shadow lookup starts with the row key, before its branch. */
++export function ensureBranchIndexes(sql: SqlStorage): void {
++	for (const {name} of sql.exec<{name:string}>("SELECT name FROM mv_columns").toArray()) {
++		const keys = KEYS[name]!;
++		sql.exec(`CREATE INDEX IF NOT EXISTS ${store(name)}_identity ON ${store(name)}(${keys.map(table).join(",")},_branch,_rev DESC)`);
++	}
++}
++
+ /** One-time migration preserves the original drive and row ids, including history cursors. */
+ export function migrateBranches(sql: SqlStorage, root: string): void {
+ 	if (hasBranches(sql)) return;
+@@ -43,6 +51,7 @@ export function migrateBranches(sql: SqlStorage, root: string): void {
+ 	sql.exec("INSERT INTO node_search(rowid,name) SELECT _record,name FROM mv_nodes WHERE _dead=0");
+ 	sql.exec("CREATE TRIGGER mv_node_search_insert AFTER INSERT ON mv_nodes WHEN new._dead=0 BEGIN INSERT INTO node_search(rowid,name) VALUES(new._record,new.name); END");
+ 	createViews(sql, root);
++	ensureBranchIndexes(sql);
+ }
+ 
+ function branch(sql: SqlStorage, id: string): Branch {
+diff --git a/cloud/data-plane/test/mvcc.test.ts b/cloud/data-plane/test/mvcc.test.ts
+index 5e5fc6a..84f350a 100644
+--- a/cloud/data-plane/test/mvcc.test.ts
++++ b/cloud/data-plane/test/mvcc.test.ts
+@@ -9,6 +9,24 @@ const stub=(id:string)=>(env.DRIVE_AUTHORITY as DurableObjectNamespace<DriveAuth
+ const child=()=>`mvcc-${crypto.randomUUID().slice(0,8)}`;
+ const manifest=(drive:string,path:string)=>(api(`/v0/drives/${drive}/manifest?path=${encodeURIComponent(path)}`).then(r=>r.json())) as Promise<{shards:{h:string;n:number}[];versionId:string}>;
+ 
++it("uses key lookups when exporting retained shard visibility",async()=>{
++ const source=await newDrive();
++ await runInDurableObject(stub(source),(_instance,ctx)=>{
++  for(let i=0;i<1000;i++)ctx.storage.sql.exec("INSERT INTO mv_retained_shards(_branch,_rev,_dead,h,n) VALUES(?,0,0,?,4096)",source,i.toString(16).padStart(64,"0"));
++  const count=ctx.storage.sql.exec<{n:number}>("SELECT COUNT(*) AS n FROM retained_shards");
++  expect(count.one().n).toBe(1000);
++  expect(count.rowsRead).toBeLessThan(10000);
++  ctx.storage.sql.exec("DROP INDEX mv_retained_shards_identity");
++ });
++ await evictDurableObject(stub(source));
++ await stub(source).locate();
++ await runInDurableObject(stub(source),(_instance,ctx)=>{
++  const count=ctx.storage.sql.exec<{n:number}>("SELECT COUNT(*) AS n FROM retained_shards");
++  expect(count.one().n).toBe(1000);
++  expect(count.rowsRead).toBeLessThan(10000);
++ });
++});
++
+ it("keeps frozen namespace, history, shard grants and branch routing across mutations and eviction",async()=>{
+  const source=await newDrive(),fork=child(),nested=child();
+  await putFile(source,"folder/a","before");
+diff --git a/cloud/s3-gateway/node/streaming.test.mjs b/cloud/s3-gateway/node/streaming.test.mjs
+index 1cc78a5..7330479 100644
+--- a/cloud/s3-gateway/node/streaming.test.mjs
++++ b/cloud/s3-gateway/node/streaming.test.mjs
+@@ -32,6 +32,7 @@ test(`streams a signed ${testLength}-byte PUT over a real HTTP socket with bound
+     dataPlane:{async fetch(req) {
+       const path = new URL(req.url).pathname;
+       if (path.endsWith("/manifest")) return Response.json({error:"no_such_path"},{status:404});
++      if (path.endsWith("/shards/missing")) return Response.json({missing:(await req.json()).hashes});
+       if (path.includes("/shards/")) {
+         const hash = createHash("sha256"); let size=0;
+         for await (const part of req.body) {size+=part.length;hash.update(part);}
+diff --git a/cloud/s3-gateway/src/chunker.ts b/cloud/s3-gateway/src/chunker.ts
+index 2426848..144a22b 100644
+--- a/cloud/s3-gateway/src/chunker.ts
++++ b/cloud/s3-gateway/src/chunker.ts
+@@ -1,12 +1,12 @@
+ import { digest } from "./crypto";
+-import { MAX_SIZE, cut } from "../../shared/fastcdc";
++import { MIN_SIZE, MAX_SIZE, cut } from "../../shared/fastcdc";
+ 
+ export { MIN_SIZE, AVG_SIZE, MAX_SIZE, cut } from "../../shared/fastcdc";
+ export interface Shard { h: string; n: number }
+ 
+-/** One max-shard buffer regardless of the size or framing of the input stream. */
++/** Grow only when no content-defined boundary is available yet. */
+ export async function* chunkStream(source: AsyncIterable<Uint8Array>, fixed = false): AsyncGenerator<Uint8Array> {
+-  const buffer = new Uint8Array(MAX_SIZE);
++  let buffer = new Uint8Array(fixed ? MAX_SIZE : MIN_SIZE);
+   let filled = 0;
+   for await (const input of source) {
+     let offset = 0;
+@@ -14,11 +14,16 @@ export async function* chunkStream(source: AsyncIterable<Uint8Array>, fixed = fa
+       const take = Math.min(buffer.length - filled, input.length - offset);
+       buffer.set(input.subarray(offset, offset + take), filled);
+       offset += take; filled += take;
+-      if (filled === MAX_SIZE) {
++      if (filled === buffer.length) {
+         const n = fixed ? filled : cut(buffer);
+-        yield buffer.slice(0, n);
+-        buffer.copyWithin(0, n, filled);
+-        filled -= n;
++        if (filled === MAX_SIZE || (!fixed && n < filled)) {
++          yield buffer.slice(0, n);
++          buffer.copyWithin(0, n, filled);
++          filled -= n;
++        } else {
++          const bigger = new Uint8Array(Math.min(MAX_SIZE, buffer.length * 2));
++          bigger.set(buffer); buffer = bigger;
++        }
+       }
+     }
+   }
+@@ -31,10 +36,23 @@ export async function* chunkStream(source: AsyncIterable<Uint8Array>, fixed = fa
+ }
+ export async function chunkManifest(source: AsyncIterable<Uint8Array>, store: (shard: Shard, bytes: Uint8Array) => Promise<void>, fixed = false): Promise<Shard[]> {
+   const shards: Shard[] = [];
+-  for await (const bytes of chunkStream(source, fixed)) {
+-    const shard = { h: await digest(bytes), n: bytes.length };
+-    await store(shard, bytes);
+-    shards.push(shard);
+-  }
++  const pending: { n: number; done: Promise<void> }[] = [];
++  let buffered = 0, failed = false, failure: unknown;
++  const drain = async () => {
++    const upload = pending.shift()!;
++    await upload.done; buffered -= upload.n;
++    if (failed) throw failure;
++  };
++  try {
++    for await (const bytes of chunkStream(source, fixed)) {
++      while (pending.length && (pending.length >= 4 || buffered + bytes.length > MAX_SIZE)) await drain();
++      if (failed) throw failure;
++      const shard = { h: await digest(bytes), n: bytes.length };
++      pending.push({ n: bytes.length, done: store(shard, bytes).catch(error => { if (!failed) failure = error; failed = true; }) });
++      buffered += bytes.length;
++      shards.push(shard);
++    }
++    while (pending.length) await drain();
++  } finally { await Promise.all(pending.map(upload => upload.done)); }
+   return shards;
+ }
+diff --git a/cloud/s3-gateway/src/data-plane.ts b/cloud/s3-gateway/src/data-plane.ts
+index 1a9de3b..993238d 100644
+--- a/cloud/s3-gateway/src/data-plane.ts
++++ b/cloud/s3-gateway/src/data-plane.ts
+@@ -47,14 +47,14 @@ export class DataPlane {
+     if (!token || token.until <= Date.now()) { token = {value: await this.tokens.mint(this.principal, this.drive, access), until: Date.now() + 240_000}; this.tokenCache.set(access, token); }
+     return token.value;
+   }
+-  private async request(rest: string, method = "GET", body?: BodyInit, params: Record<string, string> = {}, extraHeaders: Record<string,string> = {}): Promise<Response> {
++  private async request(rest: string, method = "GET", body?: BodyInit, params: Record<string, string> = {}, extraHeaders: Record<string,string> = {}, signal?: AbortSignal): Promise<Response> {
+     const url = new URL(`https://data-plane.internal/v0/drives/${encodeURIComponent(this.drive)}${rest ? `/${rest}` : ""}`);
+     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+     const headers = new Headers({ authorization: `Bearer ${await this.token(method === "GET" ? "read" : "write")}` });
+     if (typeof body === "string") headers.set("content-type", "application/json");
+     if (typeof body === "string" || body instanceof Uint8Array) headers.set("content-length", String(typeof body === "string" ? utf8.encode(body).length : body.byteLength));
+     for (const [name,value] of Object.entries(extraHeaders)) headers.set(name,value);
+-    const response = await this.binding.fetch(new Request(url, { method, headers, body }));
++    const response = await this.binding.fetch(new Request(url, { method, headers, body, signal }));
+     if (!response.ok) {
+       let details: { error?: string; message?: unknown; currentVersionId?: string } = {};
+       try { details = await response.json() as typeof details; } catch { /* non-JSON upstream failure */ }
+@@ -205,26 +205,59 @@ export class DataPlane {
+     return (await this.request("restore", "POST", JSON.stringify({ path, versionId, ...(ifVersion ? { ifVersion } : {}), ...(ifAbsent ? { ifAbsent } : {}) }))).json() as Promise<CommitResult>;
+   }
+   async *bytes(manifest: Manifest, start = 0, end = manifest.size): AsyncGenerator<Uint8Array> {
++    const abort = new AbortController();
+     let offset = 0;
+-    for await (const shard of this.refs(manifest)) {
+-      if (offset >= end) break;
+-      const a = Math.max(0, start - offset), b = Math.min(shard.n, end - offset);
+-      offset += shard.n;
+-      if (a >= b) continue;
+-      const response = await this.request(`shards/${shard.h}`);
+-      const reader = response.body!.getReader();
+-      let position = 0;
+-      try {
+-        for (;;) {
+-          const next = await reader.read();
+-          if (next.done) break;
+-          const x = Math.max(0, a - position), y = Math.min(next.value.length, b - position);
+-          position += next.value.length;
+-          if (x < y) yield next.value.subarray(x, y);
+-          if (position >= b) break;
+-        }
+-        if (position < b) throw new S3Error(500, "InternalError", "Truncated shard");
+-      } finally { await reader.cancel(); reader.releaseLock(); }
++    const selected = async function* (dp: DataPlane) {
++      for await (const shard of dp.refs(manifest)) {
++        if (offset >= end) break;
++        const a = Math.max(0, start - offset), b = Math.min(shard.n, end - offset);
++        offset += shard.n;
++        if (a < b) yield {shard, a, b};
++      }
++      if (offset < end) throw new S3Error(500, "InternalError", "Truncated manifest");
++    }(this);
++    type Read = {a: number; b: number; n: number; done: Promise<{response: Response} | {error: unknown}>};
++    const pending: Read[] = [];
++    const fill = async () => {
++      while (pending.length < 2) {
++        const next = await selected.next();
++        if (next.done) break;
++        const {shard, a, b} = next.value;
++        const headers: Record<string, string> = a || b !== shard.n ? {range: `bytes=${a}-${b - 1}`} : {};
++        pending.push({a, b, n: shard.n, done: this.request(`shards/${shard.h}`, "GET", undefined, {}, headers, abort.signal)
++          .then(response => ({response}), error => ({error}))});
++      }
++    };
++    try {
++      await fill();
++      while (pending.length) {
++        const read = pending.shift()!;
++        const result = await read.done;
++        if ("error" in result) throw result.error;
++        const response = result.response, reader = response.body!.getReader();
++        let position = response.status === 206 ? read.a : 0;
++        try {
++          if (response.status === 206 && response.headers.get("content-range") !== `bytes ${read.a}-${read.b - 1}/${read.n}`)
++            throw new S3Error(500, "InternalError", "Invalid shard range");
++          for (;;) {
++            const next = await reader.read();
++            if (next.done) break;
++            const x = Math.max(0, read.a - position), y = Math.min(next.value.length, read.b - position);
++            position += next.value.length;
++            if (x < y) yield next.value.subarray(x, y);
++            if (position >= read.b) break;
++          }
++          if (position < read.b) throw new S3Error(500, "InternalError", "Truncated shard");
++        } finally { await reader.cancel(); reader.releaseLock(); }
++        await fill();
++      }
++    } finally {
++      abort.abort();
++      await selected.return(undefined);
++      await Promise.all(pending.map(async read => {
++        const result = await read.done;
++        if ("response" in result) await result.response.body?.cancel().catch(() => {});
++      }));
+     }
+   }
+ }
+diff --git a/cloud/s3-gateway/src/index.ts b/cloud/s3-gateway/src/index.ts
+index 7e38b2b..ad14a1a 100644
+--- a/cloud/s3-gateway/src/index.ts
++++ b/cloud/s3-gateway/src/index.ts
+@@ -66,7 +66,7 @@ function address(url: URL, host: string): { bucket: string | null; key: string }
+   return slash < 0 ? { bucket: rest || null, key: "" } : { bucket: rest.slice(0, slash), key: rest.slice(slash + 1) };
+ }
+ 
+-export async function handle(request: Request, deps: Deps): Promise<Response> {
++export async function handle(request: Request, deps: Deps, ctx?: Pick<ExecutionContext, "waitUntil">): Promise<Response> {
+   let url = new URL(request.url);
+   const storageMount = url.searchParams.has("x-s3sdk-mount");
+   const requestId = crypto.randomUUID();
+@@ -86,7 +86,9 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
+     const { bucket, key } = address(url, deps.host);
+     const q = url.searchParams, method = request.method;
+     const response = await route();
+-    await deps.resolver.recordUse?.(auth.key.keyId);
++    const tracking = deps.resolver.recordUse?.(auth.key.keyId);
++    if (tracking && ctx) ctx.waitUntil(tracking.catch(() => { console.error("Access key use tracking failed"); }));
++    else await tracking;
+     response.headers.set("x-amz-request-id", requestId);
+     protocol(response);
+     return response;
+@@ -95,7 +97,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
+       const ctxFor = (b: string): ObjectContext => ({
+         request, url, auth, key, now: deps.now, state,
+         resolveSource: async bucket => {
+-          const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
++          const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket, "read"));
+           authorize(auth.key, info.driveId, "read");
+           return new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId);
+         },
+@@ -106,7 +108,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
+         return listBuckets(deps, auth);
+       }
+       if (key === "") return bucketRoute(bucket, ctxFor(bucket));
+-      const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
++      const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket, ["GET", "HEAD", "DELETE"].includes(method) ? "read" : "write"));
+       authorize(auth.key, info.driveId, "read");
+       const c = ctxFor(info.driveId);
+       if (new TextEncoder().encode(key).length > 1024 || key.startsWith("/") || key.replace(/\/$/, "").split("/").some(p => p === "." || p === ".." || p === "")) throw new S3Error(400, "InvalidArgument");
+@@ -176,7 +178,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
+       let displayName: string | undefined;
+       try { const value = request.headers.get("x-uls-display-name"); if (value !== null) displayName = decodeURIComponent(value); }
+       catch { throw new S3Error(400, "InvalidArgument"); }
+-      const sourceInfo = source ? await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, source)) : null;
++      const sourceInfo = source ? await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, source, "read")) : null;
+       const created = source
+         ? await control(() => deps.controlPlane.forkDrive(auth.key.keyId, {source, alias: bucket}))
+         : await control(() => deps.controlPlane.createDrive(auth.key.keyId, {alias: bucket, ...(displayName !== undefined ? {displayName} : {}), ...(placementHeader ? {placement: placements[placementHeader]} : {})}));
+@@ -186,7 +188,7 @@ export async function handle(request: Request, deps: Deps): Promise<Response> {
+       return new Response(null, {headers: {location: `/${bucket}`, "x-uls-drive-id": created.driveId,
+         ...(sourceInfo && "forkPoint" in created ? {"x-uls-fork-source-id": sourceInfo.driveId, "x-uls-fork-point": new Date(created.forkPoint as number).toISOString()} : {})}});
+     }
+-    const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket));
++    const info = await control(() => deps.controlPlane.resolveBucket(auth.key.keyId, bucket, "read"));
+     authorize(auth.key, info.driveId, "read");
+     c = {...c, dp: new DataPlane(deps.dataPlane, deps.tokens, auth.key, info.driveId)};
+     if (method === "DELETE" && !q.size) {
+@@ -274,13 +276,13 @@ async function objectVersions(c: ObjectContext): Promise<Response> {
+ }
+ 
+ export default {
+-  async fetch(request: Request, env: Env): Promise<Response> {
++  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+     let deps: Deps;
+     try { deps = depsFromEnv(env); }
+     catch (e) { console.error("misconfigured", e); return protocol(errorResponse(new S3Error(503, "ServiceUnavailable", "Gateway is not configured"), crypto.randomUUID())); }
+     const internal = await handleIngressBridge(request, deps, env.ULS_INGRESS_SECRET);
+     if (internal) { internal.headers.set("cache-control","no-store"); return internal; }
+-    return handle(request, deps);
++    return handle(request, deps, ctx);
+   },
+ } satisfies ExportedHandler<Env>;
+ export type { Access };
+diff --git a/cloud/s3-gateway/src/listing.ts b/cloud/s3-gateway/src/listing.ts
+index a1058f9..19e6186 100644
+--- a/cloud/s3-gateway/src/listing.ts
++++ b/cloud/s3-gateway/src/listing.ts
+@@ -79,6 +79,16 @@ export async function listObjects(c: ObjectContext, bucket: string): Promise<Res
+   const k = keyText(encode);
+   let body = tag("Name", bucket) + tag("Prefix", k(prefix));
+   const contents: string[] = [], common: string[] = [];
++  const batch: Listed[] = [];
++  const flush = async () => {
++    // shortcut: one manifest lookup per file, store validators in listings if bounded parallel reads remain slow.
++    const rows = await Promise.allSettled(batch.map(async item => {
++      const e = item.entry!;
++      return `<Contents>${tag("Key", k(item.key))}${tag("LastModified", iso(e.mtimeMs))}${tag("ETag", await etag(e.type === "folder" ? {...e, shards:[]} : await c.dp.manifest(item.key, e.versionId)))}${tag("Size", e.type === "folder" ? 0 : e.size)}${tag("StorageClass", "STANDARD")}</Contents>`;
++    }));
++    for (const row of rows) { if (row.status === "rejected") throw row.reason; contents.push(row.value); }
++    batch.length = 0;
++  };
+   let count = 0, truncated = false, last: Listed | null = null;
+   if (max > 0) {
+     for await (const item of walkKeys(c, prefix, delimiter, after)) {
+@@ -86,11 +96,12 @@ export async function listObjects(c: ObjectContext, bucket: string): Promise<Res
+       count++; last = item;
+       if (item.prefix) common.push(`<CommonPrefixes>${tag("Prefix", k(item.key))}</CommonPrefixes>`);
+       else {
+-        const e = item.entry!;
+-        contents.push(`<Contents>${tag("Key", k(item.key))}${tag("LastModified", iso(e.mtimeMs))}${tag("ETag", await etag(e.type === "folder" ? {...e, shards:[]} : await c.dp.manifest(item.key)))}${tag("Size", e.type === "folder" ? 0 : e.size)}${tag("StorageClass", "STANDARD")}</Contents>`);
++        batch.push(item);
++        if (batch.length === 8) await flush();
+       }
+     }
+   }
++  if (batch.length) await flush();
+   const next = truncated && last ? b64(`${last.prefix ? "p" : "k"}:${last.key}`) : null;
+   if (delimiter) body += tag("Delimiter", delimiter);
+   body += tag("MaxKeys", max);
+diff --git a/cloud/s3-gateway/src/objects.ts b/cloud/s3-gateway/src/objects.ts
+index 034e5eb..cb679b4 100644
+--- a/cloud/s3-gateway/src/objects.ts
++++ b/cloud/s3-gateway/src/objects.ts
+@@ -101,10 +101,17 @@ export async function getObject(c: ObjectContext): Promise<Response> {
+   }
+   if (c.request.method === "HEAD") return new Response(null, { status, headers });
+   const iterator = c.dp.bytes(manifest, start, end);
+-  return new Response(new ReadableStream<Uint8Array>({
++  const body = new ReadableStream<Uint8Array>({
+     async pull(controller) { try { const next = await iterator.next(); if (next.done) controller.close(); else controller.enqueue(next.value); } catch (e) { controller.error(e); } },
+     async cancel() { await iterator.return(undefined); },
+-  }), { status, headers });
++  });
++  if (typeof FixedLengthStream !== "undefined") {
++    // Workers derive Content-Length from the stream, rather than the header alone.
++    const fixed = new FixedLengthStream(end - start);
++    void body.pipeTo(fixed.writable).catch(() => {});
++    return new Response(fixed.readable, { status, headers });
++  }
++  return new Response(body, { status, headers });
+ }
+ export async function putObject(c: ObjectContext): Promise<Response> {
+   const current = await optionalHead(c.dp, c.key);
+diff --git a/cloud/s3-gateway/test/fake-control-plane.ts b/cloud/s3-gateway/test/fake-control-plane.ts
+index 2ee270c..5442dcf 100644
+--- a/cloud/s3-gateway/test/fake-control-plane.ts
++++ b/cloud/s3-gateway/test/fake-control-plane.ts
+@@ -24,14 +24,14 @@ export class FakeControlPlane implements ControlPlane {
+         return [...this.buckets.values()].filter(b => !key.drives || key.drives.includes(b.driveId)).map(b => this.effective(b, key.access));
+     }
+     private effective(b: BucketInfo, access: Access): BucketInfo { return { ...b, access, writable: b.writable && access !== "read" }; }
+-    async resolveBucket(id: string, bucket: string) {
++    async resolveBucket(id: string, bucket: string, want: "read" | "write" = "write") {
+         const key = await this.resolveKey(id);
+         if (!key)
+             return fail("access_denied");
+         const b = [...this.buckets.values()].find(b => b.driveId === bucket || b.alias === bucket);
+         if (!b || key.orgId !== "org-1" || (key.drives && !key.drives.includes(b.driveId)))
+             return fail("no_such_bucket");
+-        return this.effective(b, key.access);
++        return { ...this.effective(b, key.access), writable: want === "write" && b.writable && key.access !== "read" };
+     }
+     register(driveId: string, alias = driveId, placement: string | null = null) {
+         const b: BucketInfo = { driveId, alias, displayName: alias, placement, createdAt: Date.now(), access: "admin", writable: true };
+diff --git a/cloud/s3-gateway/test/rpc-errors.test.ts b/cloud/s3-gateway/test/rpc-errors.test.ts
+index 640c4fe..99b9e51 100644
+--- a/cloud/s3-gateway/test/rpc-errors.test.ts
++++ b/cloud/s3-gateway/test/rpc-errors.test.ts
+@@ -25,6 +25,8 @@ it("preserves bounded input-validation reasons without exposing upstream auth or
+         await expect(make(status, code, "private upstream details").stat("file")).rejects.not.toHaveProperty("message", "private upstream details");
+     }
+     await expect(make(400, "bad_request", { secret: "not text" }).stat("file")).rejects.toHaveProperty("message", "InvalidArgument");
++    await expect(make(503, "service_unavailable", "private storage details").putShard({ h: "a".repeat(64), n: 1 }, new Uint8Array([1])))
++        .rejects.toMatchObject({ status: 503, code: "ServiceUnavailable", message: "ServiceUnavailable" });
+ });
+ 
+ it("reuses stored chunks and resolves concurrent R2 duplicate-upload races", async () => {
+diff --git a/cloud/shared/control-plane-contract.ts b/cloud/shared/control-plane-contract.ts
+index 9e02991..6b2ed5c 100644
+--- a/cloud/shared/control-plane-contract.ts
++++ b/cloud/shared/control-plane-contract.ts
+@@ -23,7 +23,7 @@ export interface ControlPlane {
+     } | null>;
+     recordKeyUse(id: string): Promise<void>;
+     listDrives(id: string): Promise<BucketInfo[]>;
+-    resolveBucket(id: string, bucket: string): Promise<BucketInfo>;
++    resolveBucket(id: string, bucket: string, want?: "read" | "write"): Promise<BucketInfo>;
+     createDrive(id: string, opts: {
+         alias: string;
+         displayName?: string;
+diff --git a/tests/e2e/s3-benchmark.mjs b/tests/e2e/s3-benchmark.mjs
+index 4aea726..f69b27c 100644
+--- a/tests/e2e/s3-benchmark.mjs
++++ b/tests/e2e/s3-benchmark.mjs
+@@ -5,18 +5,22 @@ import { createRequire } from 'node:module';
+ import { arch, platform, release } from 'node:os';
+ import { resolve } from 'node:path';
+ import { addAbortSignal } from 'node:stream';
++import { Agent } from 'node:https';
++import { s3Signer } from './s3-sign.mjs';
+ 
+ const require = createRequire(new URL('../../cloud/s3-gateway/package.json', import.meta.url));
+ const aws = require('@aws-sdk/client-s3');
+ const { NodeHttpHandler } = require('@smithy/node-http-handler');
+ const { S3SDKClient } = await import(new URL('../../cloud/s3-gateway/node_modules/@spacefs/s3sdk/dist/index.js', import.meta.url));
+ const KiB = 1024, MiB = 1024 * KiB;
++const REQUEST_DEADLINE_MS = 300000;
+ const sizes = [4 * KiB, MiB, 32 * MiB, 64 * MiB];
+ const label = n => n < MiB ? `${n / KiB} KiB` : `${n / MiB} MiB`;
+ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+-export function requestHandler(timeoutMs = 120000) {
++export function requestHandler(timeoutMs = REQUEST_DEADLINE_MS) {
+   const handler = new NodeHttpHandler({ connectionTimeout: 15000, requestTimeout: timeoutMs,
+-    throwOnRequestTimeout: true, socketTimeout: timeoutMs, httpsAgent: { maxSockets: 64, keepAlive: true } });
++    // An explicit agent keeps Expect: 100-continue from waiting out the entire request deadline.
++    throwOnRequestTimeout: true, socketTimeout: timeoutMs, httpsAgent: new Agent({ maxSockets: 64, keepAlive: true }) });
+   return {
+     metadata: handler.metadata,
+     async handle(request, options = {}) {
+@@ -62,6 +66,30 @@ export const median = values => {
+   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+ };
+ 
++export async function cleanupTree(config, prefix, fetcher = fetch) {
++  assert(/^orbit-benchmark-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/$/.test(prefix), 'Cleanup requires the exact generated benchmark root');
++  const mount = new URL(`/${encodeURIComponent(config.bucket)}?x-uls-mount`, config.endpoint);
++  const sign = s3Signer(new URL('../../', import.meta.url).pathname);
++  const response = await fetcher(mount, {headers:await sign(mount,{method:'GET',key:config}),signal:AbortSignal.timeout(120000)});
++  assert(response.ok, 'Cleanup token request failed');
++  const grant = await response.json(), endpoint = new URL(grant.endpoint);
++  assert(grant.canWrite && typeof grant.token === 'string' && /^d-[0-9a-z]{26}$/.test(grant.driveId));
++  assert.equal(/^d-[0-9a-z]{26}$/.test(config.bucket) ? grant.driveId : grant.alias,config.bucket);
++  assert((endpoint.protocol === 'https:' || (endpoint.protocol === 'http:' && ['localhost','127.0.0.1'].includes(endpoint.hostname))) && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash);
++  const base = new URL(`/v0/drives/${grant.driveId}/`, endpoint);
++  const stat = new URL('stat', base); stat.searchParams.set('path',prefix);
++  const request = (url, init = {}) => fetcher(url, {...init,headers:{authorization:`Bearer ${grant.token}`,...init.headers},signal:AbortSignal.timeout(120000)});
++  const before = await request(stat);
++  if (before.status === 404) { assert.equal((await before.json()).error,'no_such_path'); return; }
++  assert(before.ok, 'Cleanup stat failed');
++  const entry = await before.json();
++  assert.equal(entry.type, 'folder');
++  const deleted = await request(new URL('commit',base),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ops:[{op:'delete',path:prefix,ifVersion:entry.versionId}],requestId:randomUUID()})});
++  assert(deleted.ok, 'Benchmark tree deletion failed'); await deleted.arrayBuffer();
++  const after = await request(stat);
++  assert.equal(after.status,404); assert.equal((await after.json()).error,'no_such_path');
++}
++
+ export function scenarios(names = []) {
+   const rows = [];
+   for (const size of sizes) for (const kind of ['get', 'put']) rows.push({ name: `${kind} ${label(size)}`, kind, size });
+@@ -127,19 +155,19 @@ async function run(configPath, output, names = []) {
+   assert(!url.username && !url.password && !url.search && !url.hash);
+   const client = new S3SDKClient({ endpoint, accessKeyId, secretAccessKey, region: config.region ?? 'us-east-1',
+     s3: { maxAttempts: 1, requestHandler: requestHandler() },
+-    fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(120000) }),
++    fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(REQUEST_DEADLINE_MS) }),
+   });
+   const prefix = `orbit-benchmark-${randomUUID()}/`, rows = [];
+   const report = { startedAt: new Date().toISOString(), endpoint, bucket, prefix,
+     host: { platform: platform(), release: release(), arch: arch(), node: process.version },
+-    method: { rounds: 2, warmups: 3, samplesPerRound: 8, concurrency: 8, maxSockets: 64, awsMaxAttempts: 1, extension503Retries: 4, requestDeadlineMs: 120000, selectedScenarios: selected.map(row => row.name),
++    method: { rounds: 2, warmups: 3, samplesPerRound: 8, concurrency: 8, maxSockets: 64, awsMaxAttempts: 1, extension503Retries: 4, requestDeadlineMs: REQUEST_DEADLINE_MS, selectedScenarios: selected.map(row => row.name),
+       figure: 'Median of round p50s; fanout rows use individual request latencies',
+       cache: 'No client object cache; server caches uncontrolled', verification: 'SHA-256 after timing; streaming digest during timing',
+       limitation: 'Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment.' }, rows };
+   const save = () => writeFile(output, JSON.stringify(report, null, 2) + '\n');
+   const put = (key, body) => client.putObject(bucket, key, body);
+   const get = async key => Buffer.from((await client.getObject(bucket, key)).body);
+-  const send = command => client.s3.send(command, { abortSignal: AbortSignal.timeout(120000) });
++  const send = command => client.s3.send(command, { abortSignal: AbortSignal.timeout(REQUEST_DEADLINE_MS) });
+   async function verify(key, expected) { verifyBytes(await get(key), expected, key); }
+   async function multipart(key, body, partSize) {
+     const { UploadId } = await send(new aws.CreateMultipartUploadCommand({ Bucket: bucket, Key: key }));
+@@ -280,11 +308,15 @@ async function run(configPath, output, names = []) {
+   } finally {
+     if (report.error?.name === 'IncompatibleGateway') report.cleanup = 'No benchmark writes attempted';
+     else try {
+-      const listing = await client.listObjects(bucket, { prefix });
+-      assert(listing.keys.every(key => key.startsWith(prefix)));
+-      await pool(listing.keys.length, 8, i => client.deleteObject(bucket, listing.keys[i]));
+-      assert.equal((await client.listObjects(bucket, { prefix })).keys.length, 0);
+-      report.cleanup = 'Live benchmark objects deleted; immutable history and retained shards may still consume quota';
++      const uploads = await send(new aws.ListMultipartUploadsCommand({Bucket:bucket,Prefix:prefix}));
++      assert(!uploads.IsTruncated, 'Too many incomplete benchmark uploads');
++      for (const upload of uploads.Uploads ?? []) {
++        assert(upload.Key?.startsWith(prefix) && upload.UploadId);
++        await send(new aws.AbortMultipartUploadCommand({Bucket:bucket,Key:upload.Key,UploadId:upload.UploadId}));
++      }
++      await cleanupTree(config,prefix);
++      assert.equal((await send(new aws.ListMultipartUploadsCommand({Bucket:bucket,Prefix:prefix}))).Uploads?.length ?? 0,0);
++      report.cleanup = 'Benchmark tree soft-deleted and verified absent; no incomplete multipart uploads; immutable history and retained shards may still consume quota';
+     } catch (error) { report.cleanup = `failed: ${error.name}`; }
+     report.finishedAt = new Date().toISOString(); await save(); client.s3.destroy();
+   }
+diff --git a/tests/e2e/s3-benchmark.test.mjs b/tests/e2e/s3-benchmark.test.mjs
+index 56f590f..6194665 100644
+--- a/tests/e2e/s3-benchmark.test.mjs
++++ b/tests/e2e/s3-benchmark.test.mjs
+@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { createHash } from 'node:crypto';
+ import { test } from 'node:test';
+-import { edited, errorDetails, median, pool, requestHandler, scenarios, verifyBytes } from './s3-benchmark.mjs';
++import { cleanupTree, edited, errorDetails, median, pool, requestHandler, scenarios, verifyBytes } from './s3-benchmark.mjs';
+ 
+ test('all 49 supplied scenarios have unique names and the documented sizes', () => {
+   const rows = scenarios();
+@@ -75,6 +75,26 @@ test('request deadline rejects both stalled headers and a stalled response body'
+   }
+ });
+ 
++test('uploads proceed when a server withholds 100 Continue', async () => {
++  let received = 0;
++  const server = createServer();
++  server.on('checkContinue', (request, response) => {
++    request.on('data', bytes => { received += bytes.length; });
++    request.on('end', () => { response.writeHead(200); response.end('ok'); });
++  });
++  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
++  const handler = requestHandler(500);
++  try {
++    const {response} = await handler.handle({protocol:'http:',hostname:'127.0.0.1',port:server.address().port,method:'PUT',path:'/',headers:{expect:'100-continue','content-length':'7'},body:Buffer.from('payload')});
++    assert.equal(response.statusCode, 200);
++    for await (const _chunk of response.body) {}
++    assert.equal(received, 7);
++  } finally {
++    handler.destroy(); server.closeAllConnections();
++    await new Promise(resolve => server.close(resolve));
++  }
++});
++
+ test('edit oracle preserves exact bytes at splice, write, patch and truncate boundaries', () => {
+   const source = Buffer.alloc(1024 * 1024, 7), data = Buffer.alloc(4096, 9);
+   for (const kind of ['append', 'truncate', 'write', 'patch', 'insert-start', 'insert-middle', 'delete-start', 'delete-middle']) {
+@@ -140,3 +160,20 @@ test('a write refusal stops before the 49 workloads and saves a credential-free
+     await rm(directory, { recursive: true, force: true });
+   }
+ });
++
++test('cleanup deletes only the exact generated tree and verifies absence', async () => {
++  const prefix='orbit-benchmark-12345678-1234-1234-1234-123456789abc/';
++  const config={endpoint:'https://s3.example',bucket:'d-00000000000000000000000000',accessKeyId:'TESTKEY',secretAccessKey:'test-secret'};
++  let calls=0;
++  await cleanupTree(config,prefix,async (url,init)=>{
++    calls++;
++    if(calls===1) { assert.equal(new URL(url).search,'?x-uls-mount'); return Response.json({canWrite:true,token:'test-token',driveId:config.bucket,endpoint:'https://data.example'}); }
++    assert.equal(init.headers.authorization,'Bearer test-token');
++    if(calls===2) { assert.equal(new URL(url).searchParams.get('path'),prefix); return Response.json({type:'folder',versionId:'v1'}); }
++    if(calls===3) { const body=JSON.parse(init.body); assert.deepEqual(body.ops,[{op:'delete',path:prefix,ifVersion:'v1'}]); return Response.json({seq:1}); }
++    assert.equal(new URL(url).searchParams.get('path'),prefix);
++    return Response.json({error:'no_such_path'},{status:404});
++  });
++  assert.equal(calls,4);
++  for (const unsafe of ['', 'unrelated/', `${prefix}nested/`]) await assert.rejects(cleanupTree(config,unsafe,async()=>{throw new Error('must not request');}),/exact generated/);
++});
+diff --git a/cloud/data-plane/test/transient-storage.test.ts b/cloud/data-plane/test/transient-storage.test.ts
+new file mode 100644
+index 0000000..92fde9c
+--- /dev/null
++++ b/cloud/data-plane/test/transient-storage.test.ts
+@@ -0,0 +1,25 @@
++import { env } from "cloudflare:workers";
++import { expect, it } from "vitest";
++import worker from "../src/index";
++import { api, bytes, newDrive, sha256Hex, TOKEN } from "./helpers";
++
++it.each([
++	["put: We encountered an internal connectivity issue. (10001)", 503, "service_unavailable"],
++	["checksum mismatch", 400, "hash_mismatch"],
++	["bad Content-Length", 400, "bad_request"],
++])("classifies failed shard storage: %s", async (message, status, code) => {
++	const drive = await newDrive(), data = bytes("shard"), hash = await sha256Hex(data);
++	const shards = {
++		head: env.SHARDS.head.bind(env.SHARDS),
++		async put(_key: string, body: ReadableStream) {
++			await new Response(body).arrayBuffer();
++			throw new Error(message);
++		},
++	} as unknown as R2Bucket;
++	const response = await worker.fetch(new Request(`http://example.com/v0/drives/${drive}/shards/${hash}`, {
++		method: "PUT", headers: { authorization: `Bearer ${TOKEN}`, "content-length": String(data.length) }, body: data,
++	}), { ...env, SHARDS: shards }, {} as ExecutionContext);
++	expect(response.status).toBe(status);
++	expect((await response.json() as { error: string }).error).toBe(code);
++	expect(await (await api(`/v0/drives/${drive}/shards/missing`, { json: { hashes: [hash] } })).json()).toEqual({ missing: [hash] });
++});
+diff --git a/cloud/s3-gateway/test/performance.test.ts b/cloud/s3-gateway/test/performance.test.ts
+new file mode 100644
+index 0000000..fe86829
+--- /dev/null
++++ b/cloud/s3-gateway/test/performance.test.ts
+@@ -0,0 +1,165 @@
++import { expect, it, vi } from "vitest";
++import { DataPlane, type FetchBinding, type Manifest } from "../src/data-plane";
++import { AVG_SIZE, MAX_SIZE, chunkManifest, chunkStream } from "../src/chunker";
++import { handle } from "../src/index";
++import { getObject, type ObjectContext } from "../src/objects";
++import { harness, makeBucket, rawSigned, randomBytes, records } from "./helpers";
++import { PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
++import { client } from "./helpers";
++
++const manifest: Manifest = {path:"x",versionId:"v",size:12,contentType:null,mtimeMs:0,shards:[{h:"a",n:4},{h:"b",n:4},{h:"c",n:4}]};
++const plane = (binding: FetchBinding) => new DataPlane(binding, {mint:async()=>"test"}, records[0]!, "drive");
++const collect = async (source: AsyncIterable<Uint8Array>) => { const bytes: number[] = []; for await (const part of source) bytes.push(...part); return bytes; };
++const tick = () => new Promise(resolve => setTimeout(resolve, 0));
++
++it("enforces the advertised object length even when an iterator ends early", async () => {
++  const dp = plane({fetch:async()=>{throw new Error("unexpected fetch");}});
++  dp.manifest = async()=>({...manifest,size:8,shards:[{h:"a",n:8}]});
++  const request = new Request("https://s3.test/b/x");
++  const context = {request,url:new URL(request.url),dp,key:"x"} as ObjectContext;
++  dp.bytes = async function* () { yield new Uint8Array(4); };
++  await expect((await getObject(context)).arrayBuffer()).rejects.toThrow();
++  dp.bytes = async function* () { yield new Uint8Array(8); };
++  const response = await getObject(context);
++  expect(response.headers.get("content-length")).toBe("8");
++  expect((await response.arrayBuffer()).byteLength).toBe(8);
++});
++
++it("forwards only overlapping ranges and preserves shard order with one read ahead", async () => {
++  const requested: string[] = [];
++  const dp = plane({async fetch(req) {
++    const h = new URL(req.url).pathname.split("/").at(-1)!;
++    requested.push(`${h}:${req.headers.get("range")}`);
++    const bytes = new TextEncoder().encode({a:"abcd",b:"efgh",c:"ijkl"}[h]!);
++    const range = req.headers.get("range");
++    if (!range) return new Response(bytes);
++    const [a,b] = range.slice(6).split("-").map(Number);
++    return new Response(bytes.slice(a,b!+1), {status:206,headers:{"content-range":`bytes ${a}-${b}/4`}});
++  }});
++  expect(await collect(dp.bytes(manifest, 2, 9))).toEqual([...new TextEncoder().encode("cdefghi")]);
++  expect(requested).toEqual(["a:bytes=2-3","b:null","c:bytes=0-0"]);
++});
++
++it("cancels the active body and unused read ahead without fetching the remaining file", async () => {
++  let requested = 0, cancelled = 0;
++  const dp = plane({async fetch() {
++    requested++;
++    return new Response(new ReadableStream({start(c) { c.enqueue(new Uint8Array(4)); },cancel() { cancelled++; }}));
++  }});
++  const source = dp.bytes(manifest);
++  await source.next();
++  expect(requested).toBe(2);
++  await source.return(undefined);
++  expect(cancelled).toBe(2);
++  expect(requested).toBe(2);
++});
++
++it("rejects short shards, bad range responses and short manifests", async () => {
++  await expect(collect(plane({fetch:async()=>new Response(new Uint8Array(1))}).bytes(manifest))).rejects.toThrow("Truncated shard");
++  await expect(collect(plane({fetch:async()=>new Response(new Uint8Array(2),{status:206,headers:{"content-range":"bytes 0-1/4"}})}).bytes(manifest,2,4))).rejects.toThrow("Invalid shard range");
++  await expect(collect(plane({fetch:async()=>new Response(new Uint8Array(4))}).bytes({...manifest,shards:[]}))).rejects.toThrow("Truncated manifest");
++});
++
++it("emits a stable CDC boundary before buffering a maximum shard", async () => {
++  let fed = 0;
++  async function* source() { for (let n = 0; n < 8; n++) { fed += AVG_SIZE; yield randomBytes(AVG_SIZE, n + 1); } }
++  const chunks = chunkStream(source());
++  const first = await chunks.next();
++  expect(first.value!.length).toBeLessThan(MAX_SIZE);
++  expect(fed).toBeLessThan(MAX_SIZE);
++  await chunks.return(undefined);
++});
++
++it("bounds upload bytes and waits for in-flight uploads after failure", async () => {
++  const releases: (()=>void)[] = [];
++  let active = 0, maxBytes = 0, done = false;
++  async function* source() { yield new Uint8Array(3 * MAX_SIZE); }
++  const failure = new Error("upload failed");
++  const result = chunkManifest(source(), async (_s, bytes) => {
++    active += bytes.length; maxBytes = Math.max(maxBytes, active);
++    await new Promise<void>(resolve=>releases.push(resolve));
++    active -= bytes.length;
++    throw failure;
++  }, true).catch(e => { done = true; return e; });
++  while (!releases.length) await tick();
++  expect(done).toBe(false);
++  releases.shift()!();
++  expect(await result).toBe(failure);
++  expect(active).toBe(0);
++  expect(maxBytes).toBeLessThanOrEqual(MAX_SIZE);
++});
++
++it("settles every overlapping upload before returning a failure", async () => {
++  const releases: (()=>void)[]=[];
++  let active=0, returned=false;
++  async function* source() { yield randomBytes(12*AVG_SIZE); }
++  const failed=chunkManifest(source(),async()=>{
++    active++;
++    const index=releases.length;
++    await new Promise<void>(resolve=>releases.push(resolve));
++    active--;
++    if(index===0) throw new Error("first upload failed");
++  }).catch(e=>{returned=true;return e;});
++  while(releases.length<3) await tick();
++  releases[0]!(); await tick();
++  expect(returned).toBe(false);
++  for(const release of releases) release();
++  expect((await failed).message).toBe("first upload failed");
++  expect(active).toBe(0);
++});
++
++it("overlaps chunk uploads without publishing before all uploads finish", async () => {
++  let active = 0, maxActive = 0;
++  async function* source() { yield randomBytes(12 * AVG_SIZE); }
++  const result = await chunkManifest(source(), async () => {
++    active++; maxActive = Math.max(maxActive,active); await tick(); active--;
++  });
++  expect(maxActive).toBeGreaterThan(1);
++  expect(maxActive).toBeLessThanOrEqual(4);
++  expect(active).toBe(0);
++  expect(result.reduce((n,s)=>n+s.n,0)).toBe(12*AVG_SIZE);
++});
++
++it("returns HEAD while recording key use through waitUntil", async () => {
++  const h = await harness(), b = makeBucket(h);
++  let release!: ()=>void;
++  h.deps.resolver.recordUse = vi.fn(()=>new Promise<void>(resolve=>{release=resolve;}));
++  const pending: Promise<unknown>[] = [];
++  const response = await handle(await rawSigned(h,"HEAD",`/${b}`),h.deps,{waitUntil:p=>{pending.push(p);}});
++  expect(response.status).toBe(200);
++  expect(pending.length).toBe(1);
++  release(); await Promise.all(pending);
++});
++
++it("bounds listing manifest concurrency and looks up the listed versions", async () => {
++  const h = await harness(), b = makeBucket(h), s3 = await client(h.deps);
++  for (let i=0;i<10;i++) await s3.send(new PutObjectCommand({Bucket:b,Key:`x/${i}`,Body:"hello"}));
++  const fetch = h.dp.fetch.bind(h.dp);
++  let active=0, peak=0;
++  h.deps.dataPlane={async fetch(req) {
++    const u=new URL(req.url);
++    if(!u.pathname.endsWith("/manifest")) return fetch(req);
++    expect(u.searchParams.get("versionId")).toBeTruthy();
++    active++;peak=Math.max(peak,active); await tick();
++    try { return await fetch(req); } finally {active--;}
++  }};
++  const listing=await s3.send(new ListObjectsV2Command({Bucket:b,Prefix:"x/"}));
++  expect(listing.Contents?.map(e=>e.Key)).toEqual(Array.from({length:10},(_,i)=>`x/${i}`));
++  expect(peak).toBe(8);
++  expect(active).toBe(0);
++});
++
++it("never commits an object when a pipelined chunk upload fails", async () => {
++  const h=await harness(),b=makeBucket(h),s3=await client(h.deps);
++  const fetch=h.dp.fetch.bind(h.dp);
++  let commits=0;
++  h.deps.dataPlane={async fetch(req) {
++    const path=new URL(req.url).pathname;
++    if(path.endsWith("/commit")) commits++;
++    if(req.method==="PUT" && path.includes("/shards/")) return Response.json({error:"bad_request",message:"upload refused"},{status:400});
++    return fetch(req);
++  }};
++  await expect(s3.send(new PutObjectCommand({Bucket:b,Key:"failed",Body:randomBytes(8*AVG_SIZE)}))).rejects.toMatchObject({name:"InvalidArgument"});
++  expect(commits).toBe(0);
++  expect(h.dp.drives.get(b)!.nodes.has("failed")).toBe(false);
++});

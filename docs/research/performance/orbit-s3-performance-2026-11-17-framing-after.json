@@ -1,0 +1,20 @@
+{
+  "startedAt": "2026-11-17T07:18:17.090Z",
+  "health": {
+    "status": 200,
+    "protocol": "1"
+  },
+  "range": {
+    "status": 206,
+    "contentLength": "1",
+    "contentRange": "bytes 0-0/4096",
+    "receivedBytes": 1
+  },
+  "full": {
+    "contentLength": 4096,
+    "verifiedBytes": 4096
+  },
+  "status": "passed",
+  "cleanup": "passed",
+  "finishedAt": "2026-11-17T07:18:26.904Z"
+}

@@ -1,0 +1,137 @@
+{
+  "baselineCommit": "1fc3125d77fea2569ca71d24c58465c34988e02d",
+  "baselineVersions": {
+    "api": "3850c695-7a11-47d2-a79a-0f15423b84ef",
+    "s3": "54e96eea-1211-45c4-bd8c-353fdd02410f",
+    "dataPlane": "4525e6a7-cb28-4207-b088-d69da709bcf6",
+    "web": "136c03b9-8dd0-4cbb-9288-825e1cd5a77e"
+  },
+  "optimizedVersions": {
+    "api": "9091b01f-3df7-43e8-b730-43c557206edc",
+    "s3": "d13a5239-f5c0-4797-a301-3a72f7fe4d65",
+    "dataPlane": "4525e6a7-cb28-4207-b088-d69da709bcf6",
+    "web": "136c03b9-8dd0-4cbb-9288-825e1cd5a77e"
+  },
+  "validation": {
+    "apiTests": 133,
+    "gatewayTests": 131,
+    "benchmarkHelperTests": 10,
+    "realServiceE2EChecks": 34,
+    "ingressUploadedBytes": 134217728,
+    "ingressRssGrowthBytes": 191174392,
+    "ingressRssGrowthCapBytes": 268435456,
+    "typechecks": [
+      "api",
+      "gateway",
+      "node ingress",
+      "data plane"
+    ],
+    "dataPlaneTests": 134,
+    "dataPlaneTestMaxWorkers": 1
+  },
+  "ordinaryUploadInitialBufferBytes": 262144,
+  "sourceHashes": {
+    "cloud/api/src/control-plane.ts": "29934b7c462ae69104598365c861766c429842c1889f9746802c9c73c718ee5a",
+    "cloud/api/test/drive-registry.test.ts": "6bc4311d65fd31aada68c74826ab2304196099a94fe5f396631fd72b36d208ec",
+    "cloud/shared/control-plane-contract.ts": "f0771421b2d095d40a21db7292a9db1a96558d02996f7af19cc30841ca1ece14",
+    "cloud/s3-gateway/src/index.ts": "29da4d928f9bc8c05dd613fce3a5dd113c5bd33343d86eec79afcad2915c68e5",
+    "cloud/s3-gateway/src/listing.ts": "cb19716cedb8ed34c736ee53435ccf75366703865cb2c1e1894e1e0b69730b0f",
+    "cloud/s3-gateway/src/chunker.ts": "da5300926edbd2824b9622af46028d91410fbdb43cea50a838ab8b047d285712",
+    "cloud/s3-gateway/src/data-plane.ts": "7c93690a92194cc8de7a29e82e734ed2479be72032c35aa8e821194888ad0ab4",
+    "cloud/s3-gateway/test/fake-control-plane.ts": "e236074091c3c964e5cf7bad7b3fc763d3e1ac80e483cd5469892fdc428a51d4",
+    "cloud/s3-gateway/test/performance.test.ts": "4f549fea6a02df93bcb7a96f29cd8712c9182e55e347ba98b4a322e710667f5b",
+    "cloud/s3-gateway/node/streaming.test.mjs": "ce0ceb9dacf42c7763ed0665c06f2a0838c14251ca433e78b5100bf1c5053d69",
+    "tests/e2e/s3-benchmark.mjs": "db9f232e49b4fb68f06f829d5b4e8893afc16e8de00dda9c8ef89f1de70eecff",
+    "tests/e2e/s3-benchmark.test.mjs": "6f0a775af5531903f1f85f3165124131f87be72be9bdb3db359a93933b63b928"
+  },
+  "credentialRevoked": true,
+  "followupVersions": {
+    "api": "9091b01f-3df7-43e8-b730-43c557206edc",
+    "s3": "f485c16d-5ce6-41e7-878f-a277a6670c8d",
+    "dataPlane": "7058a6df-6229-44de-a74e-e483f00e4342",
+    "web": "136c03b9-8dd0-4cbb-9288-825e1cd5a77e"
+  },
+  "finalSourceHashes": {
+    "cloud/api/src/control-plane.ts": "29934b7c462ae69104598365c861766c429842c1889f9746802c9c73c718ee5a",
+    "cloud/api/test/drive-registry.test.ts": "6bc4311d65fd31aada68c74826ab2304196099a94fe5f396631fd72b36d208ec",
+    "cloud/shared/control-plane-contract.ts": "f0771421b2d095d40a21db7292a9db1a96558d02996f7af19cc30841ca1ece14",
+    "cloud/s3-gateway/src/index.ts": "29da4d928f9bc8c05dd613fce3a5dd113c5bd33343d86eec79afcad2915c68e5",
+    "cloud/s3-gateway/src/listing.ts": "cb19716cedb8ed34c736ee53435ccf75366703865cb2c1e1894e1e0b69730b0f",
+    "cloud/s3-gateway/src/chunker.ts": "da5300926edbd2824b9622af46028d91410fbdb43cea50a838ab8b047d285712",
+    "cloud/s3-gateway/src/data-plane.ts": "7c93690a92194cc8de7a29e82e734ed2479be72032c35aa8e821194888ad0ab4",
+    "cloud/s3-gateway/test/fake-control-plane.ts": "e236074091c3c964e5cf7bad7b3fc763d3e1ac80e483cd5469892fdc428a51d4",
+    "cloud/s3-gateway/test/performance.test.ts": "227a655b5ce841a9cbe9e1cde1a46fece5668f45c1cefb3e347972df1ffae78b",
+    "cloud/s3-gateway/node/streaming.test.mjs": "ce0ceb9dacf42c7763ed0665c06f2a0838c14251ca433e78b5100bf1c5053d69",
+    "tests/e2e/s3-benchmark.mjs": "db9f232e49b4fb68f06f829d5b4e8893afc16e8de00dda9c8ef89f1de70eecff",
+    "tests/e2e/s3-benchmark.test.mjs": "6f0a775af5531903f1f85f3165124131f87be72be9bdb3db359a93933b63b928",
+    "cloud/data-plane/src/index.ts": "d018a7f248cf4c2c941451f30e747aa68494661982b4b6562311e2cb3db4108e",
+    "cloud/data-plane/test/transient-storage.test.ts": "6baa5a7a082c4097ca85bb5fee34b591438ad2c0ff8b5a5397026203293341ff",
+    "cloud/s3-gateway/src/objects.ts": "2eeeb24e89f9a55ec8effe7f158093da5474719b506c58d1c2f9e080bb6fed94",
+    "cloud/s3-gateway/test/rpc-errors.test.ts": "7be2451eb9be9f9051e1f0e5fc9c7feeaad4c258809fb3d726ddfe9f6a091337"
+  },
+  "parallelRecovery": {
+    "requestedByUser": true,
+    "maxConcurrentScenarios": 2,
+    "serialCompletedCases": 4,
+    "remainingCases": 29,
+    "streamingCheckRunsConcurrently": true,
+    "timingLimitation": "Parallel scenarios share traffic; do not compare these medians with isolated baseline timings."
+  },
+  "diagnosticTails": {
+    "startedAt": "2026-11-17T09:19:19.847023+00:00",
+    "purpose": "Investigate unusually long truncate warmup during parallel recovery; benchmark unchanged.",
+    "stopped": true
+  },
+  "cpuBudgetFollowup": {
+    "versionId": "2cbae379-5ed3-4469-99d7-b53c85ab8eeb",
+    "limits": {
+      "cpu_ms": 300000
+    },
+    "reason": "Repeated DriveAuthority alarm CPU exhaustion at the default 30-second limit",
+    "configurationOnly": true,
+    "limitations": "Snapshot/export and GC work remain per-invocation; this increases the maximum CPU budget and does not guarantee bounded maintenance cost.",
+    "outcome": "Insufficient: alarm terminated after about 186 seconds CPU; default CPU budget restored with the index fix."
+  },
+  "latestVersions": {
+    "api": "9091b01f-3df7-43e8-b730-43c557206edc",
+    "s3": "f485c16d-5ce6-41e7-878f-a277a6670c8d",
+    "dataPlane": "397c83ad-807a-4f79-9260-34f9d07b2f85",
+    "web": "136c03b9-8dd0-4cbb-9288-825e1cd5a77e"
+  },
+  "visibilityFollowup": {
+    "versionId": "397c83ad-807a-4f79-9260-34f9d07b2f85",
+    "effectiveCpuBudgetMs": 30000,
+    "checks": {
+      "dataPlaneTests": 135,
+      "realServiceChecks": 34,
+      "typecheck": "passed",
+      "deploymentDryRun": "passed"
+    },
+    "regression": "1000 retained references use fewer than 10000 rows read; eviction installs indexes on existing database"
+  },
+  "isolatedTimeoutRecheck": {
+    "source": "visibility-isolated.json",
+    "scenario": "truncate 4 KiB, end of 64 MiB",
+    "passed": true,
+    "maximumConcurrentScenarios": 1,
+    "limit": "Same deployment and benchmark settings; earlier concurrent failure retained; does not identify its cause."
+  },
+  "verifiedScenariosAcrossAttempts": 49,
+  "finalConcurrentRerun": {
+    "passed": 9,
+    "failed": 1,
+    "selectedScenarios": 10,
+    "maximumConcurrentScenarios": 2
+  },
+  "credentialRevocationEvidence": "credential-revocation.json",
+  "localCredentialCleanup": {
+    "completedAt": "2026-11-17T11:00:34.125392+00:00",
+    "credentialFilesRemoved": true,
+    "rawTailFilesRedacted": 5,
+    "publishedCredentialScan": "passed"
+  },
+  "credentialRevocationUiEvidence": {
+    "status": "Revoked label observed",
+    "screenshot": "Unavailable after browser navigation and sign-out; signed 403 evidence retained"
+  }
+}

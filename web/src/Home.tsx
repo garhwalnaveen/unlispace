@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import type { Drive } from "./api";
 import { useAuth } from "./context";
 import { driveLink, finderLink } from "./links";
-import { ErrorNotice, Icon, Loading, useLoad } from "./ui";
+import { ErrorNotice, Icon, useLoad } from "./ui";
 import { DriveDialog, DriveTools, ForkNotice, type DriveAction } from "./DriveTools";
 
 export function Home() {
@@ -37,12 +37,32 @@ export function Home() {
     <>
       <header className="drive-summary">
         <h1 className="sr-only">Your drives</h1>
-        <p><span>{driveCount ?? "—"}</span> {driveCount === 1 ? "drive" : "drives"}</p>
+        {loading && !data ? <p aria-hidden="true"><span className="drive-skeleton drive-skeleton-count" /> drives</p> : data && <p><span>{driveCount}</span> {driveCount === 1 ? "drive" : "drives"}</p>}
       </header>
       {fork && <ForkNotice drive={fork} />}
       <ErrorNotice error={error} />
       {Boolean(error) && <Button onClick={reload}>Try again</Button>}
-      {loading && <Loading>Loading drives…</Loading>}
+      {loading && !data && (
+        <div className="drives-panel drive-loading" role="status">
+          <div className="drive-searchbar">
+            <div className="drive-search"><Search size={16} aria-hidden="true" />Loading your drives…</div>
+            <div className="drive-loading-filters" aria-hidden="true"><span className="drive-skeleton" /><span className="drive-skeleton" /><span className="drive-skeleton" /></div>
+          </div>
+          <div className="org-section" aria-hidden="true">
+            <div className="section-heading">
+              <div className="drive-loading-lines"><span className="drive-skeleton" /><span className="drive-skeleton" /></div>
+              <span className="drive-skeleton drive-loading-button" />
+            </div>
+            <div className="drive-card">
+              <div className="drive-heading">
+                <span className="drive-skeleton drive-loading-icon" />
+                <div className="drive-loading-lines"><span className="drive-skeleton" /><span className="drive-skeleton" /></div>
+              </div>
+              <div className="drive-card-actions"><span className="drive-skeleton drive-loading-button" /><span className="drive-skeleton drive-loading-button" /></div>
+            </div>
+          </div>
+        </div>
+      )}
       {data?.orgs.length === 0 && (
         <div className="empty">
           <h2>No workspaces yet</h2>

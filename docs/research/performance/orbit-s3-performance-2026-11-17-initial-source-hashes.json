@@ -1,0 +1,14 @@
+{
+  "cloud/api/src/control-plane.ts": "29934b7c462ae69104598365c861766c429842c1889f9746802c9c73c718ee5a",
+  "cloud/api/test/drive-registry.test.ts": "6bc4311d65fd31aada68c74826ab2304196099a94fe5f396631fd72b36d208ec",
+  "cloud/shared/control-plane-contract.ts": "f0771421b2d095d40a21db7292a9db1a96558d02996f7af19cc30841ca1ece14",
+  "cloud/s3-gateway/src/index.ts": "29da4d928f9bc8c05dd613fce3a5dd113c5bd33343d86eec79afcad2915c68e5",
+  "cloud/s3-gateway/src/listing.ts": "cb19716cedb8ed34c736ee53435ccf75366703865cb2c1e1894e1e0b69730b0f",
+  "cloud/s3-gateway/src/chunker.ts": "da5300926edbd2824b9622af46028d91410fbdb43cea50a838ab8b047d285712",
+  "cloud/s3-gateway/src/data-plane.ts": "7c93690a92194cc8de7a29e82e734ed2479be72032c35aa8e821194888ad0ab4",
+  "cloud/s3-gateway/test/fake-control-plane.ts": "e236074091c3c964e5cf7bad7b3fc763d3e1ac80e483cd5469892fdc428a51d4",
+  "cloud/s3-gateway/test/performance.test.ts": "4f549fea6a02df93bcb7a96f29cd8712c9182e55e347ba98b4a322e710667f5b",
+  "cloud/s3-gateway/node/streaming.test.mjs": "ce0ceb9dacf42c7763ed0665c06f2a0838c14251ca433e78b5100bf1c5053d69",
+  "tests/e2e/s3-benchmark.mjs": "db9f232e49b4fb68f06f829d5b4e8893afc16e8de00dda9c8ef89f1de70eecff",
+  "tests/e2e/s3-benchmark.test.mjs": "6f0a775af5531903f1f85f3165124131f87be72be9bdb3db359a93933b63b928"
+}

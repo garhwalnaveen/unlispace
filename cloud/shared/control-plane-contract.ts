@@ -23,7 +23,7 @@ export interface ControlPlane {
     } | null>;
     recordKeyUse(id: string): Promise<void>;
     listDrives(id: string): Promise<BucketInfo[]>;
-    resolveBucket(id: string, bucket: string): Promise<BucketInfo>;
+    resolveBucket(id: string, bucket: string, want?: "read" | "write"): Promise<BucketInfo>;
     createDrive(id: string, opts: {
         alias: string;
         displayName?: string;

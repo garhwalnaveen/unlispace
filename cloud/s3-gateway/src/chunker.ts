@@ -1,12 +1,12 @@
 import { digest } from "./crypto";
-import { MAX_SIZE, cut } from "../../shared/fastcdc";
+import { MIN_SIZE, MAX_SIZE, cut } from "../../shared/fastcdc";
 
 export { MIN_SIZE, AVG_SIZE, MAX_SIZE, cut } from "../../shared/fastcdc";
 export interface Shard { h: string; n: number }
 
-/** One max-shard buffer regardless of the size or framing of the input stream. */
+/** Grow only when no content-defined boundary is available yet. */
 export async function* chunkStream(source: AsyncIterable<Uint8Array>, fixed = false): AsyncGenerator<Uint8Array> {
-  const buffer = new Uint8Array(MAX_SIZE);
+  let buffer = new Uint8Array(fixed ? MAX_SIZE : MIN_SIZE);
   let filled = 0;
   for await (const input of source) {
     let offset = 0;
@@ -14,11 +14,16 @@ export async function* chunkStream(source: AsyncIterable<Uint8Array>, fixed = fa
       const take = Math.min(buffer.length - filled, input.length - offset);
       buffer.set(input.subarray(offset, offset + take), filled);
       offset += take; filled += take;
-      if (filled === MAX_SIZE) {
+      if (filled === buffer.length) {
         const n = fixed ? filled : cut(buffer);
-        yield buffer.slice(0, n);
-        buffer.copyWithin(0, n, filled);
-        filled -= n;
+        if (filled === MAX_SIZE || (!fixed && n < filled)) {
+          yield buffer.slice(0, n);
+          buffer.copyWithin(0, n, filled);
+          filled -= n;
+        } else {
+          const bigger = new Uint8Array(Math.min(MAX_SIZE, buffer.length * 2));
+          bigger.set(buffer); buffer = bigger;
+        }
       }
     }
   }
@@ -31,10 +36,23 @@ export async function* chunkStream(source: AsyncIterable<Uint8Array>, fixed = fa
 }
 export async function chunkManifest(source: AsyncIterable<Uint8Array>, store: (shard: Shard, bytes: Uint8Array) => Promise<void>, fixed = false): Promise<Shard[]> {
   const shards: Shard[] = [];
-  for await (const bytes of chunkStream(source, fixed)) {
-    const shard = { h: await digest(bytes), n: bytes.length };
-    await store(shard, bytes);
-    shards.push(shard);
-  }
+  const pending: { n: number; done: Promise<void> }[] = [];
+  let buffered = 0, failed = false, failure: unknown;
+  const drain = async () => {
+    const upload = pending.shift()!;
+    await upload.done; buffered -= upload.n;
+    if (failed) throw failure;
+  };
+  try {
+    for await (const bytes of chunkStream(source, fixed)) {
+      while (pending.length && (pending.length >= 4 || buffered + bytes.length > MAX_SIZE)) await drain();
+      if (failed) throw failure;
+      const shard = { h: await digest(bytes), n: bytes.length };
+      pending.push({ n: bytes.length, done: store(shard, bytes).catch(error => { if (!failed) failure = error; failed = true; }) });
+      buffered += bytes.length;
+      shards.push(shard);
+    }
+    while (pending.length) await drain();
+  } finally { await Promise.all(pending.map(upload => upload.done)); }
   return shards;
 }

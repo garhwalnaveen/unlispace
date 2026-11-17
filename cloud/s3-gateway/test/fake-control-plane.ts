@@ -24,14 +24,14 @@ export class FakeControlPlane implements ControlPlane {
         return [...this.buckets.values()].filter(b => !key.drives || key.drives.includes(b.driveId)).map(b => this.effective(b, key.access));
     }
     private effective(b: BucketInfo, access: Access): BucketInfo { return { ...b, access, writable: b.writable && access !== "read" }; }
-    async resolveBucket(id: string, bucket: string) {
+    async resolveBucket(id: string, bucket: string, want: "read" | "write" = "write") {
         const key = await this.resolveKey(id);
         if (!key)
             return fail("access_denied");
         const b = [...this.buckets.values()].find(b => b.driveId === bucket || b.alias === bucket);
         if (!b || key.orgId !== "org-1" || (key.drives && !key.drives.includes(b.driveId)))
             return fail("no_such_bucket");
-        return this.effective(b, key.access);
+        return { ...this.effective(b, key.access), writable: want === "write" && b.writable && key.access !== "read" };
     }
     register(driveId: string, alias = driveId, placement: string | null = null) {
         const b: BucketInfo = { driveId, alias, displayName: alias, placement, createdAt: Date.now(), access: "admin", writable: true };

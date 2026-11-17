@@ -238,6 +238,17 @@ main.embedded .ask-ai { height: calc(100dvh - 32px); min-height: 0; }
 .drive-summary p { display: flex; align-items: baseline; gap: 3px; height: 48px; margin: 0; color: var(--muted-foreground); font-size: 14px; line-height: 48px; }
 .drive-summary p > span { font-size: 42px; font-weight: 500; letter-spacing: -1.8px; line-height: 48px; }
 .drives-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.drive-skeleton { display: block; flex: none; background: var(--border); border-radius: 4px; animation: drive-loading-pulse 1.8s ease-in-out infinite; }
+.drive-summary p > .drive-skeleton-count { width: 32px; height: 32px; align-self: center; margin-right: 5px; }
+.drive-loading .drive-search { min-height: 48px; font-size: 13px; }
+.drive-loading-filters { display: flex; align-items: center; gap: 20px; padding: 0 20px; border-left: 1px solid var(--border); }
+.drive-loading-filters .drive-skeleton { width: 48px; height: 8px; }
+.drive-loading-lines { display: grid; gap: 9px; padding-block: 3px; }
+.drive-loading-lines .drive-skeleton { width: 120px; height: 10px; }
+.drive-loading-lines .drive-skeleton + .drive-skeleton { width: 84px; height: 8px; }
+.drive-loading-button { width: 96px; height: 32px; }
+.drive-loading-icon { width: 42px; height: 42px; }
+@keyframes drive-loading-pulse { 50% { opacity: 0.5; } }
 .drive-searchbar { display: flex; min-height: 49px; border-bottom: 1px solid var(--border); }
 .drive-search { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding-inline: 20px; color: var(--muted-foreground); }
 .drive-search > svg { flex-shrink: 0; stroke-width: 1.5; }
@@ -283,6 +294,7 @@ main.embedded .ask-ai { height: calc(100dvh - 32px); min-height: 0; }
   .drive-searchbar { flex-wrap: wrap; }
   .drive-search { flex-basis: 100%; padding-inline: 16px; }
   .drive-filters { width: 100%; border-left: 0; border-top: 1px solid var(--border); }
+  .drive-loading-filters { width: 100%; height: 40px; justify-content: space-around; border-left: 0; border-top: 1px solid var(--border); }
   .drive-filters [data-slot="button"] { flex: 1; height: 40px; }
   .drive-summary p > span { font-size: 36px; }
   .drive-empty { min-height: 360px; }

@@ -1,0 +1,10 @@
+{
+  "startedAt": "2026-11-17T08:11:08.610Z",
+  "sourceReport": "recovery-serial-interrupted.json",
+  "prefix": "orbit-benchmark-4ddf6417-31cd-474f-a4bd-bad1bcd79f76/",
+  "abortedUploads": 0,
+  "treeVerifiedAbsent": true,
+  "remainingIncompleteUploads": 0,
+  "status": "passed",
+  "finishedAt": "2026-11-17T08:11:18.196Z"
+}

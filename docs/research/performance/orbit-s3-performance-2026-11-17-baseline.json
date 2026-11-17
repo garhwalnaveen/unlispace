@@ -1,0 +1,461 @@
+{
+  "startedAt": "2026-11-17T04:04:07.941Z",
+  "endpoint": "https://unlispace-s3.naveen-f3d.workers.dev",
+  "bucket": "d-01m7ks6adtss34tjfc9b3f22h9",
+  "prefix": "orbit-benchmark-c1e18950-7dcb-49e1-b813-c6cfaeade446/",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "node": "v26.12.1"
+  },
+  "method": {
+    "rounds": 2,
+    "warmups": 3,
+    "samplesPerRound": 8,
+    "concurrency": 8,
+    "maxSockets": 64,
+    "awsMaxAttempts": 1,
+    "extension503Retries": 4,
+    "requestDeadlineMs": 120000,
+    "selectedScenarios": [
+      "get 4 KiB",
+      "put 4 KiB",
+      "get 1 MiB",
+      "put 1 MiB",
+      "get 32 MiB",
+      "put 32 MiB",
+      "get 64 MiB",
+      "put 64 MiB",
+      "range 64 KiB of 64 MiB",
+      "head",
+      "list 200 keys"
+    ],
+    "figure": "Median of round p50s; fanout rows use individual request latencies",
+    "cache": "No client object cache; server caches uncontrolled",
+    "verification": "SHA-256 after timing; streaming digest during timing",
+    "limitation": "Reconstructed from the pasted scenario table; original sample count and harness unavailable. Not the original same-bucket experiment."
+  },
+  "rows": [
+    {
+      "name": "get 4 KiB",
+      "kind": "get",
+      "size": 4096,
+      "rounds": [
+        {
+          "samplesMs": [
+            2069.4735839999994,
+            2738.181666999997,
+            2739.6078750000015,
+            2841.4884999999995,
+            2884.7413330000018,
+            2976.239292000002,
+            2981.2342089999984,
+            3008.2185830000017
+          ],
+          "complete": true,
+          "p50Ms": 2863.1149165000006
+        },
+        {
+          "samplesMs": [
+            2057.454417000001,
+            2069.0862910000033,
+            2076.9128329999985,
+            2093.4595420000005,
+            2093.672290999999,
+            2094.0265839999993,
+            2101.472458,
+            2107.7313329999997
+          ],
+          "complete": true,
+          "p50Ms": 2093.5659164999997
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "fb00e4457c305d9c164d9ce5dcdbbbb099cbc61b28f926c9a7cce2ba3a819a2b",
+      "medianMs": 2478.3404165
+    },
+    {
+      "name": "put 4 KiB",
+      "kind": "put",
+      "size": 4096,
+      "rounds": [
+        {
+          "samplesMs": [
+            3941.8557500000024,
+            5079.491916999999,
+            5303.1237089999995,
+            5308.243000000002,
+            5314.737125,
+            5330.571125000002,
+            5338.571791000002,
+            5349.204749999997
+          ],
+          "complete": true,
+          "p50Ms": 5311.490062500001
+        },
+        {
+          "samplesMs": [
+            5080.537792000003,
+            5081.557207999998,
+            5085.925084000002,
+            5094.095583000002,
+            5105.716042,
+            5107.090250000008,
+            5108.380208000002,
+            5140.2698329999985
+          ],
+          "complete": true,
+          "p50Ms": 5099.905812500001
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "42cc3fb3ebe3af705dfd10d27ea1db7f65e7dfedec378f51f84317725a5c79ee",
+      "medianMs": 5205.697937500001
+    },
+    {
+      "name": "get 1 MiB",
+      "kind": "get",
+      "size": 1048576,
+      "rounds": [
+        {
+          "samplesMs": [
+            2143.0286250000063,
+            2554.1816249999974,
+            2557.5134169999947,
+            2761.167874999999,
+            2818.7579590000096,
+            2966.213334,
+            2991.211458000005,
+            3278.504667000001
+          ],
+          "complete": true,
+          "p50Ms": 2789.9629170000044
+        },
+        {
+          "samplesMs": [
+            2180.5120000000024,
+            2233.56479199999,
+            2238.737957999998,
+            2395.1923749999987,
+            2405.0904169999994,
+            2405.087375000003,
+            2418.4249580000032,
+            2420.703542000003
+          ],
+          "complete": true,
+          "p50Ms": 2400.1398750000008
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "fef55cc205eb34ccb53573def0ccebda47cbcc264b081c4855483ef09a2af1e1",
+      "medianMs": 2595.0513960000026
+    },
+    {
+      "name": "put 1 MiB",
+      "kind": "put",
+      "size": 1048576,
+      "rounds": [
+        {
+          "samplesMs": [
+            4428.802542000005,
+            4659.094333000001,
+            5118.871041999999,
+            5151.177833000009,
+            5175.734916999994,
+            5473.772125000003,
+            6216.701124999992,
+            6749.146332999997
+          ],
+          "complete": true,
+          "p50Ms": 5163.456375000002
+        },
+        {
+          "samplesMs": [
+            3785.680042000022,
+            4024.102084000013,
+            4072.476041999995,
+            4984.767374999996,
+            5194.080667000002,
+            5247.430541999987,
+            6348.851208000007,
+            6802.389583000011
+          ],
+          "complete": true,
+          "p50Ms": 5089.424020999999
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "e90a8b198007b26232f4ae0cccb4fba6baa24c121e7c4316b939fe6b96762bba",
+      "medianMs": 5126.440198
+    },
+    {
+      "name": "get 32 MiB",
+      "kind": "get",
+      "size": 33554432,
+      "rounds": [
+        {
+          "samplesMs": [
+            11476.945917000005,
+            13500.006416000018,
+            14112.771041999978,
+            20307.692333999992,
+            20395.277541000018,
+            20603.561000000016,
+            29720.828499999974,
+            31515.407582999993
+          ],
+          "complete": true,
+          "p50Ms": 20351.484937500005
+        },
+        {
+          "samplesMs": [
+            16588.668125000026,
+            17958.244666000013,
+            18274.12937499996,
+            18326.38029099995,
+            22912.509459000023,
+            24093.284915999975,
+            24722.403250000032,
+            26486.199208000035
+          ],
+          "complete": true,
+          "p50Ms": 20619.444874999986
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "53c801e3afa2b56690ecbcfc67555f3898de0edec3fc22adaf31d2609962c157",
+      "medianMs": 20485.464906249996
+    },
+    {
+      "name": "put 32 MiB",
+      "kind": "put",
+      "size": 33554432,
+      "rounds": [
+        {
+          "samplesMs": [
+            37168.55558300001,
+            43786.109375,
+            49259.70558300003,
+            49664.80725000001,
+            54471.03325000004,
+            55304.112166999956
+          ],
+          "complete": false
+        }
+      ],
+      "status": "failed",
+      "phase": "measure",
+      "fixtureSHA256": "f68637e98d59767b17765814a15d970e20b0ebfb405db190559b54a44ed78795",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "AbortError"
+          },
+          {
+            "name": "AbortError"
+          }
+        ]
+      }
+    },
+    {
+      "name": "get 64 MiB",
+      "kind": "get",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            22896.821708999923,
+            24219.940667000017,
+            34655.178916999954,
+            39970.84845799999,
+            41641.97033300006,
+            41983.63458299998,
+            46117.10704200005,
+            49528.475916999974
+          ],
+          "complete": true,
+          "p50Ms": 40806.40939550003
+        },
+        {
+          "samplesMs": [
+            34030.708041999955,
+            36360.831083000056,
+            43353.20937499998,
+            44650.53829200007,
+            48441.71520899993,
+            50542.896582999965,
+            51147.63737499993,
+            61092.64129199996
+          ],
+          "complete": true,
+          "p50Ms": 46546.1267505
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "ec82089aa4304e45371ecc440339b789947565e11aef57b762ea461c3041f104",
+      "medianMs": 43676.268073000014
+    },
+    {
+      "name": "put 64 MiB",
+      "kind": "put",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            95127.58216600004,
+            107413.74445899995,
+            110560.54204199999,
+            116038.42908299994,
+            116384.25229199999
+          ],
+          "complete": false
+        }
+      ],
+      "status": "failed",
+      "phase": "measure",
+      "fixtureSHA256": "91ae33b74db478e2bc648dc87adfd13dd0b0adeffa50c1954ca57d1a23dc3b6d",
+      "error": {
+        "name": "AggregateError",
+        "causes": [
+          {
+            "name": "AbortError"
+          },
+          {
+            "name": "AbortError"
+          },
+          {
+            "name": "AbortError"
+          }
+        ]
+      }
+    },
+    {
+      "name": "range 64 KiB of 64 MiB",
+      "kind": "range",
+      "size": 67108864,
+      "rounds": [
+        {
+          "samplesMs": [
+            2107.3235410000198,
+            2458.292625000002,
+            2464.5236670000013,
+            2474.424374999944,
+            2571.421958999941,
+            2713.96875,
+            2991.0455000000075,
+            3002.326374999946
+          ],
+          "complete": true,
+          "p50Ms": 2522.9231669999426
+        },
+        {
+          "samplesMs": [
+            2045.983583000023,
+            2050.688291999977,
+            2078.9597080000676,
+            2092.265875000041,
+            2096.20541699999,
+            2101.4469159999862,
+            2102.199958999874,
+            2104.4941249999683
+          ],
+          "complete": true,
+          "p50Ms": 2094.2356460000155
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "78eec738618e4c68d27495585763bbc3e009bb69f2f22236c7f65778157831b0",
+      "medianMs": 2308.579406499979
+    },
+    {
+      "name": "head",
+      "kind": "head",
+      "size": 4096,
+      "rounds": [
+        {
+          "samplesMs": [
+            2001.2250830000266,
+            2038.2261670001317,
+            2048.8302499998827,
+            2049.3607499999925,
+            2050.4118749999907,
+            2073.00383400009,
+            2077.5817919999827,
+            2088.1935829999857
+          ],
+          "complete": true,
+          "p50Ms": 2049.8863124999916
+        },
+        {
+          "samplesMs": [
+            2029.2466669999994,
+            2029.7186660000589,
+            2035.4909169999883,
+            2046.3015420001466,
+            2055.523791000014,
+            2063.0860000001267,
+            2446.7350000001024,
+            2451.4752499999013
+          ],
+          "complete": true,
+          "p50Ms": 2050.9126665000804
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "b96d68fb81ab7c5349d4f80ea66fc228db30ebba914efe19533979e4684e16b8",
+      "medianMs": 2050.399489500036
+    },
+    {
+      "name": "list 200 keys",
+      "kind": "list",
+      "size": 4096,
+      "rounds": [
+        {
+          "samplesMs": [
+            10720.272457999876,
+            10725.968957999954,
+            10779.042084000073,
+            10794.238249999937,
+            10810.558791000163,
+            10887.200791000156,
+            11541.435250000097,
+            11750.023917000042
+          ],
+          "complete": true,
+          "p50Ms": 10802.39852050005
+        },
+        {
+          "samplesMs": [
+            11063.559792000102,
+            11147.22108300007,
+            11204.829207999865,
+            11258.700124999974,
+            11275.67712499993,
+            11622,
+            11798.221875000047,
+            11959.402000000002
+          ],
+          "complete": true,
+          "p50Ms": 11267.188624999952
+        }
+      ],
+      "status": "passed",
+      "phase": "verify",
+      "fixtureSHA256": "dc5906742383ec203bfb2238f35a49b545b6ee5f71e85154b0ea970f2fb50c4f",
+      "medianMs": 11034.79357275
+    }
+  ],
+  "preflight": "passed",
+  "cleanup": "Benchmark tree soft-deleted and verified absent; no incomplete multipart uploads; immutable history and retained shards may still consume quota",
+  "finishedAt": "2026-11-17T04:29:44.211Z"
+}

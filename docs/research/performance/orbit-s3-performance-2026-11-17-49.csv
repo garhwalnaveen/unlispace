@@ -1,0 +1,94 @@
+scenario,attempt,status,median_ms,verified_rounds,verified_samples,maximum_measured_ms,failure_phase,error
+get 4 KiB,initial,passed,1319.8498852499993,2,16,1737.5482080000002,,
+put 4 KiB,initial,passed,4407.932979500002,2,16,4557.200792000003,,
+get 1 MiB,initial,passed,1422.954385500001,2,16,1885.3572920000006,,
+put 1 MiB,initial,passed,4936.3790522499985,2,16,8125.400916999992,,
+get 32 MiB,initial,passed,21278.088656,2,16,36514.634290999995,,
+put 32 MiB,initial,failed,,1,8,155249.112041,measure,"{""name"": ""AggregateError"", ""causes"": [{""name"": ""TimeoutError"", ""code"": ""EPIPE""}]}"
+get 64 MiB,initial,passed,38327.8234165,2,16,49506.089916000026,,
+put 64 MiB,initial,failed,,1,8,108074.76579199999,warmup,"{""name"": ""S3SDKError"", ""code"": ""InvalidArgument"", ""status"": 400, ""requestId"": ""37ea2223-dede-4512-9b4c-7ad15dc6d8f1"", ""message"": ""upload failed: put: We encountered an internal connectivity issue. Please try again. (10001)""}"
+overwrite 4 KiB,initial,passed,4573.17891675001,2,16,4684.126249999972,,
+overwrite 1 MiB,initial,passed,6254.539656499983,2,16,6906.391541999998,,
+multipart put 64 MiB × 8 MiB,initial,passed,63726.34458325,2,16,76043.27937500016,,
+stream get 64 MiB,initial,passed,41383.67966649984,2,16,51262.02958299965,,
+multipart put 256 MiB × 16 MiB,initial,failed,,0,0,290746.04445899976,verify,"{""name"": ""AggregateError"", ""causes"": [{""name"": ""ContentVerificationError"", ""receivedBytes"": 218910720, ""expectedBytes"": 268435456, ""actualSHA256"": ""2860515112bcb0378fe6c1d127cf8e16cfc75a97aa9d9d0ad6f1290b61b3f9fc"", ""expectedSHA256"": ""871a93585d886f2c621c68fc7d62848f5c920c291799d51df53d6dbc76a762a0""}]}"
+stream get 256 MiB,initial,passed,161698.72469749989,2,16,183936.11229099985,,
+range 64 KiB of 64 MiB,initial,passed,1657.7931145000039,2,16,1910.481790999882,,
+head,initial,passed,765.3830312500941,2,16,892.3629169999622,,
+list 200 keys,initial,passed,8159.0536979998,2,16,8231.541875000112,,
+rename 64 MiB,initial,failed,,0,0,,warmup,"{""name"": ""AbortError""}"
+move dir 200 × 64 KiB,initial,passed,2494.4847709999885,2,16,2991.791000000201,,
+"fanout get 1000 × 4 KiB, 32 at once",initial,passed,1790.5111562500242,2,2000,2297.058125000447,,
+"fanout put 1000 × 4 KiB, 32 at once",initial,failed,,1,1000,12352.246249999851,verify,"{""name"": ""AggregateError"", ""causes"": [{""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}, {""name"": ""TimeoutError"", ""code"": ""ETIMEDOUT""}]}"
+"fanout get 1000 × 4 KiB, 64 at once",initial,failed,,0,0,,setup,"{""name"": ""AggregateError"", ""causes"": [{""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}]}"
+"fanout put 1000 × 4 KiB, 64 at once",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"fanout get 200 × 256 KiB, 32 at once",initial,failed,,0,0,,setup,"{""name"": ""AggregateError"", ""causes"": [{""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}, {""name"": ""Error"", ""code"": ""ENOTFOUND""}]}"
+"fanout put 200 × 256 KiB, 32 at once",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+append 4 KiB to 1 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"truncate 4 KiB, end of 1 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+write at 4 KiB in 1 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+patch 16 × 4 KiB in 1 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"insert 4 KiB, start of 1 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"insert 4 KiB, middle of 1 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"delete 4 KiB, start of 1 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"delete 4 KiB, middle of 1 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+append 4 KiB to 32 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"truncate 4 KiB, end of 32 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+write at 4 KiB in 32 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+patch 16 × 4 KiB in 32 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"insert 4 KiB, start of 32 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"insert 4 KiB, middle of 32 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"delete 4 KiB, start of 32 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"delete 4 KiB, middle of 32 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+append 4 KiB to 64 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"truncate 4 KiB, end of 64 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+write at 4 KiB in 64 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+patch 16 × 4 KiB in 64 MiB,initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"insert 4 KiB, start of 64 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"insert 4 KiB, middle of 64 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"delete 4 KiB, start of 64 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+"delete 4 KiB, middle of 64 MiB",initial,failed,,0,0,,warmup,"{""name"": ""Error"", ""code"": ""ENOTFOUND""}"
+put 32 MiB,recovery-serial,passed,50109.14056249999,2,16,61738.04879199999,,
+put 64 MiB,recovery-serial,passed,116264.45934350001,2,16,121904.94062500005,,
+multipart put 256 MiB × 16 MiB,recovery-serial,passed,220428.74282299995,2,16,225194.720125,,
+rename 64 MiB,recovery-serial,passed,2944.0963542500976,2,16,3425.987875000108,,
+"fanout put 1000 × 4 KiB, 32 at once",recovery-parallel,passed,14005.186781249999,2,2000,16672.950624999998,,
+"fanout get 1000 × 4 KiB, 64 at once",recovery-parallel,passed,7460.054364499985,2,2000,27555.314958999865,,
+"fanout put 1000 × 4 KiB, 64 at once",recovery-parallel,passed,29387.133270749997,2,2000,37145.47737500002,,
+"fanout get 200 × 256 KiB, 32 at once",recovery-parallel,passed,7906.843218749971,2,400,26579.367124999873,,
+"fanout put 200 × 256 KiB, 32 at once",recovery-parallel,passed,15354.446437499952,2,400,18177.838082999922,,
+append 4 KiB to 1 MiB,recovery-parallel,passed,6742.37416649994,2,16,17820.046916999854,,
+"truncate 4 KiB, end of 1 MiB",recovery-parallel,passed,6868.64990650001,2,16,10211.045374999754,,
+write at 4 KiB in 1 MiB,recovery-parallel,passed,16580.218603749992,2,16,16900.968000000343,,
+patch 16 × 4 KiB in 1 MiB,recovery-parallel,passed,15387.32166700007,2,16,16005.789125000127,,
+"insert 4 KiB, start of 1 MiB",recovery-parallel,passed,4345.721468749805,2,16,6980.623916999903,,
+"insert 4 KiB, middle of 1 MiB",recovery-parallel,passed,4459.15317725006,2,16,5078.057791000232,,
+"delete 4 KiB, start of 1 MiB",recovery-parallel,passed,4893.051437499933,2,16,5836.644917000085,,
+"delete 4 KiB, middle of 1 MiB",recovery-parallel,passed,4945.85783324996,2,16,5124.237749999855,,
+append 4 KiB to 32 MiB,recovery-parallel,passed,4750.437468499993,2,16,5496.39274999965,,
+"truncate 4 KiB, end of 32 MiB",recovery-parallel,failed,,1,8,5385.343708000146,verify,"{""name"": ""AggregateError"", ""causes"": [{""name"": ""AbortError"", ""code"": ""ABORT_ERR""}, {""name"": ""AbortError"", ""code"": ""ABORT_ERR""}, {""name"": ""AbortError"", ""code"": ""ABORT_ERR""}, {""name"": ""AbortError"", ""code"": ""ABORT_ERR""}, {""name"": ""AbortError"", ""code"": ""ABORT_ERR""}, {""name"": ""AbortError"", ""code"": ""ABORT_ERR""}, {""name"": ""AbortError"", ""code"": ""ABORT_ERR""}]}"
+write at 4 KiB in 32 MiB,recovery-parallel,passed,5931.278635250172,2,16,5987.994749999605,,
+patch 16 × 4 KiB in 32 MiB,recovery-parallel,failed,,0,0,,warmup,"{""name"": ""S3SDKError"", ""code"": ""ServiceUnavailable"", ""status"": 500, ""requestId"": ""846d118b-377a-45ef-9356-2d948b9d9dbc""}"
+"insert 4 KiB, start of 32 MiB",recovery-parallel,passed,4430.802156249876,2,16,5001.803041999694,,
+"insert 4 KiB, middle of 32 MiB",recovery-parallel,failed,,0,0,,warmup,"{""name"": ""Error"", ""status"": 502}"
+"delete 4 KiB, start of 32 MiB",recovery-parallel,passed,5110.26946874999,2,16,5366.197708999738,,
+"delete 4 KiB, middle of 32 MiB",recovery-parallel,failed,,0,0,,warmup,"{""name"": ""S3SDKError"", ""code"": ""ServiceUnavailable"", ""status"": 503, ""requestId"": ""9612fc4f-6b07-48c3-b87f-0d3b3fd18560""}"
+append 4 KiB to 64 MiB,recovery-parallel,passed,5219.959031249979,2,16,6623.01812500041,,
+"truncate 4 KiB, end of 64 MiB",recovery-parallel,interrupted,,0,0,,warmup,"{""name"": ""InterruptedForCpuBudgetDeployment""}"
+write at 4 KiB in 64 MiB,recovery-parallel,passed,6220.508187250001,2,16,6651.970917000435,,
+patch 16 × 4 KiB in 64 MiB,recovery-parallel,not_run,,0,0,,not_started,
+"insert 4 KiB, start of 64 MiB",recovery-parallel,failed,,1,8,5209.622417000122,warmup,"{""name"": ""S3SDKError"", ""code"": ""ServiceUnavailable"", ""status"": 503, ""requestId"": ""59a7a23f-3788-498c-b20c-5fc47d0f5de7""}"
+"insert 4 KiB, middle of 64 MiB",recovery-parallel,not_run,,0,0,,not_started,
+"delete 4 KiB, start of 64 MiB",recovery-parallel,failed,,0,0,,warmup,"{""name"": ""S3SDKError"", ""code"": ""ServiceUnavailable"", ""status"": 503, ""requestId"": ""688af4e3-8b2f-44f6-85ff-34d7ea6377cc""}"
+"delete 4 KiB, middle of 64 MiB",recovery-parallel,not_run,,0,0,,not_started,
+"truncate 4 KiB, end of 32 MiB",index-fix,passed,3805.1893647499965,2,16,4107.9457500000135,,
+"insert 4 KiB, middle of 32 MiB",index-fix,passed,5200.934000000008,2,16,6622.8592499999795,,
+"truncate 4 KiB, end of 64 MiB",index-fix,failed,,0,0,,warmup,"{""name"": ""AbortError""}"
+"insert 4 KiB, start of 64 MiB",index-fix,passed,3143.5677397499094,2,16,3451.252457999857,,
+"delete 4 KiB, start of 64 MiB",index-fix,passed,3685.8396772500128,2,16,4236.900915999897,,
+patch 16 × 4 KiB in 32 MiB,index-fix,passed,21892.73768775,2,16,25778.789542000013,,
+"delete 4 KiB, middle of 32 MiB",index-fix,passed,4230.811666999973,2,16,4475.007207999937,,
+patch 16 × 4 KiB in 64 MiB,index-fix,passed,20582.02469749996,2,16,21181.644625000074,,
+"insert 4 KiB, middle of 64 MiB",index-fix,passed,4627.812542000029,2,16,5152.080374999903,,
+"delete 4 KiB, middle of 64 MiB",index-fix,passed,4159.400468250038,2,16,4492.695707999868,,
+"truncate 4 KiB, end of 64 MiB",index-fix-isolated,passed,3606.3671560000003,2,16,3956.4478339999914,,
