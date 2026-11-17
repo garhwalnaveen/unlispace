@@ -6,6 +6,7 @@ import { App } from "../src/App";
 import { AuthStore } from "../src/auth";
 import { AuthContext } from "../src/context";
 import type { Drive } from "../src/api";
+import { filesFixture, filesRoute } from "./files-fixture";
 import "../src/styles.css";
 
 if (!import.meta.env.DEV) throw new Error("The design fixture is only available in development.");
@@ -59,6 +60,8 @@ window.fetch = async (input, init) => {
   if (view === "error") return response({ error: "request_failed", message: "We couldn’t load your workspace. Check your connection and try again." }, 503);
   const settings = settingsFixture(path, init);
   if (settings) return settings;
+  const files = await filesFixture(view, url, init);
+  if (files) return files;
   if (path === "/orgs") return response({ orgs: [org] });
   if (path === "/me/access") return response({ user, workspaces: [{ ...org, state: "paid", trialPending: false, writable: true, storageReady: true, quotaBytes, usedBytes }] });
   if (path === "/me") return response({ ...user, displayName: "Alex Morgan", createdAt: now });
@@ -74,7 +77,7 @@ window.fetch = async (input, init) => {
 };
 const auth = new AuthStore(localStorage, null);
 auth.accept({ accessToken: "local-preview-only", refreshToken: "local-preview-only", expiresIn: 86400, user, accountCreated: false });
-const route = ["files", "folder-empty"].includes(view) ? "/drives/design/" : view === "account" ? "/settings" : settingsRoutes[view] ?? "/";
+const route = filesRoute(view) ?? settingsRoutes[view] ?? (["files", "folder-empty"].includes(view) ? "/drives/design/" : view === "account" ? "/settings" : "/");
 createRoot(document.getElementById("root")!).render(
   <MemoryRouter initialEntries={[route]}><AuthContext value={auth}><App /></AuthContext></MemoryRouter>,
 );

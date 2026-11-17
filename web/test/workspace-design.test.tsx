@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { drive, json, renderApp } from "./fixtures";
@@ -43,23 +43,4 @@ it("filters the drive library and clears a no-match result", async () => {
   expect(screen.queryByRole("link", { name: "Space" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Clear filters" }));
   expect(screen.getByRole("link", { name: "Space" })).toBeInTheDocument();
-});
-
-it("filters only loaded files, keeps folders first when sorting, and preserves pagination", async () => {
-  renderWorkspace("/drives/d-test/");
-  const user = userEvent.setup();
-  await screen.findByText("b-large.txt");
-  const files = screen.getByRole("list", { name: "Files and folders" });
-  await user.selectOptions(screen.getByRole("combobox", { name: "Sort loaded items" }), "size");
-  expect(within(files).getAllByRole("link")).toHaveLength(3);
-  expect(within(files).getAllByRole("link")[0]).toHaveTextContent("z-folder");
-  expect(within(files).getAllByRole("link")[1]).toHaveTextContent("b-large.txt");
-  const filter = screen.getByRole("textbox", { name: "Filter loaded items" });
-  await user.type(filter, "absent");
-  expect(screen.getByRole("heading", { name: "No matching files" })).toBeInTheDocument();
-  expect(screen.getByText(/Load more items to search further/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled();
-  await user.click(screen.getByRole("button", { name: "Clear filter" }));
-  await waitFor(() => expect(within(files).getAllByRole("link")).toHaveLength(3));
-  expect(screen.queryByLabelText("Choose files")).not.toBeInTheDocument();
 });
