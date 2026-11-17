@@ -64,7 +64,7 @@
 .hero-file-card { position: absolute; left: 34px; right: 34px; bottom: 93px; display: flex; align-items: center; gap: 13px; padding: 18px; border-radius: 7px; background: #f9faef; color: #273c2b; box-shadow: 0 15px 40px #071e2329; transform: rotate(-3deg); font-size: 13px; }
 .hero-file-icon { display: grid; place-items: center; width: 45px; height: 45px; background: #e6edda; border-radius: 7px; color: #67835d; }
 .hero-file-card small { display: block; margin-top: 5px; font-size: 9px; color: #6f7968; }.hero-file-card > svg { margin-left: auto; }
-.scene-bottom { position: absolute; inset: auto 28px 24px; display: flex; justify-content: space-between; align-items: end; font-size: 12px; line-height: 1.5; color: #e1ebd5; }.scene-index { font: 24px Georgia, serif; }
+.scene-bottom { position: absolute; inset: auto 28px 24px; display: flex; justify-content: space-between; align-items: end; font-size: 12px; line-height: 1.5; color: #e1ebd5; pointer-events: none; }.scene-index { font: 24px Georgia, serif; }
 .connection-strip { border-block: 1px solid var(--border); }
 .connection-strip > div { width: min(var(--landing-width), calc(100% - 88px)); min-height: 80px; margin: auto; display: flex; align-items: center; gap: 28px; font-size: 12px; }
 .connection-strip span { display: inline-flex; align-items: center; gap: 10px; }
