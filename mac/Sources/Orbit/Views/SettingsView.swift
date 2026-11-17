@@ -119,7 +119,7 @@ struct WorkspacesSection: View {
             if let error = directory.error { Text(error).foregroundStyle(.red) }
             else if !directory.workspaces.isEmpty { Text("Team and Billing open in your browser.") }
         }
-        .task { await directory.load(force: true) }
+        .task(id: directory.loadKey) { await directory.load(force: true) }
     }
 
     /// "Pro plan · Owner", plus the trial state when there is one.

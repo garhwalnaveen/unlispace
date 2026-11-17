@@ -17,7 +17,7 @@ struct PlanNotices: View {
             }
             if !notices.isEmpty { Divider() }
         }
-        .task(id: directory.isAvailable) { await directory.load() }
+        .task(id: directory.loadKey) { await directory.load() }
     }
 
     struct Notice: Identifiable, Equatable {

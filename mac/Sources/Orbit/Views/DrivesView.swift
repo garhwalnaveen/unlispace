@@ -210,7 +210,7 @@ struct NewDriveSheet: View {
         }
         .padding(20)
         .frame(width: 380)
-        .task { await directory.load() }
+        .task(id: directory.loadKey) { await directory.load() }
     }
 
     private func create() {

@@ -31,6 +31,8 @@ final class WorkspaceDirectory {
     /// True when the account's session is in the engine, so API requests can be made.
     var isAvailable: Bool { engine.isConnected && session.isSignedIn && !session.sessionPending }
     var manageable: [WorkspaceInfo] { workspaces.filter(\.canManage) }
+    /// Changes whenever a screen should load again: a different account, or the engine coming or going.
+    var loadKey: String { "\(session.account?.id ?? "")|\(isAvailable)" }
 
     func reset() {
         generation += 1
