@@ -154,7 +154,8 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
   const closeDetails = useCallback(() => {
     navigate(driveLink(drive.id, folder));
     const opened = file;
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-file="${CSS.escape(opened ?? "")}"]`)?.focus());
+    // Hand focus back to the row the panel was opened from.
+    setTimeout(() => Array.from(document.querySelectorAll<HTMLElement>("[data-file]")).find((link) => link.dataset.file === opened)?.focus(), 0);
   }, [navigate, drive.id, folder, file]);
   /** Runs a change, then shows the drive as it is now whether or not it worked. */
   async function change(work: (api: DriveApi) => Promise<unknown>) {
@@ -239,6 +240,7 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
           : filtering && search.error && search.active ? "Searching the whole drive isn’t available right now, so this shows matches in this folder only."
           : filtering && [...query.trim()].length < 3 ? "Showing matches in this folder. Type 3 or more characters to search the whole drive."
           : ""}
+        {filtering && listing.cursor ? " Only the items shown so far are checked." : ""}
       </p>
       {notice && <p className="fb-notice" role="status">{notice.text}{notice.deleted && <Button variant="ghost" size="xs" onClick={() => { setNotice(null); setDialog({ kind: "deleted" }); }}>Show deleted files</Button>}<Button variant="ghost" size="icon-xs" aria-label="Dismiss message" onClick={() => setNotice(null)}><X /></Button></p>}
 
@@ -266,7 +268,10 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
               <div className="fb-state">
                 <h2>No matches</h2>
                 <p>Nothing {wholeDrive ? `in ${driveName}` : "in this folder"} has “{query.trim()}” in its name.</p>
-                <div className="fb-state-actions"><Button onClick={() => setQuery("")}>Clear search</Button></div>
+                <div className="fb-state-actions">
+                  <Button onClick={() => setQuery("")}>Clear search</Button>
+                  {!wholeDrive && listing.cursor && <Button disabled={listing.loading} onClick={() => void listing.loadMore()}>{listing.loading ? "Loading…" : "Check more of this folder"}</Button>}
+                </div>
               </div>
             ) : !rows.length ? (
               <div className="fb-state fb-empty">

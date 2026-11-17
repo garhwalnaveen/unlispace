@@ -80,7 +80,7 @@ export class Transfers {
     this.jobs = this.jobs.filter((job) => job.status !== "done");
     this.publish();
   }
-  /** Stops everything; used when the browser for this drive goes away. */
+  /** Stops everything and forgets it. */
   dispose() { this.jobs.forEach((job) => job.controller?.abort()); this.jobs = []; this.listeners.clear(); this.uploaded.clear(); }
 
   private find = (id: number) => this.jobs.find((job) => job.id === id);
@@ -139,6 +139,28 @@ export class Transfers {
       if (!signal.aborted) this.pump();
     }
   }
+}
+// Transfers belong to a signed-in session and a drive, not to a page: visiting Settings or another drive
+// must not abandon an upload. They live here until the tab closes or the session goes away.
+const sessions = new WeakMap<object, Map<string, { transfers: Transfers; writable: boolean }>>();
+const live = new Set<Transfers>();
+if (typeof window !== "undefined")
+  window.addEventListener("beforeunload", (event) => {
+    // Closing the tab would abandon unfinished transfers, so the browser asks first.
+    if ([...live].some((transfers) => transfers.busy)) event.preventDefault();
+  });
+/** The transfers of drive `id` for the signed-in `session`, created on first use. */
+export function driveTransfers(session: object, id: string, readApi: DriveApi, writeApi: DriveApi | null): Transfers {
+  const drives = sessions.get(session) ?? new Map<string, { transfers: Transfers; writable: boolean }>();
+  sessions.set(session, drives);
+  const known = drives.get(id);
+  // Access can change (a plan lapses, a role changes); switch over once nothing is in flight.
+  if (known && (known.writable === (writeApi !== null) || known.transfers.busy)) return known.transfers;
+  if (known) { known.transfers.dispose(); live.delete(known.transfers); }
+  const transfers = new Transfers(readApi, writeApi);
+  drives.set(id, { transfers, writable: writeApi !== null });
+  live.add(transfers);
+  return transfers;
 }
 export function useTransfers(transfers: Transfers) {
   return useSyncExternalStore(transfers.subscribe, transfers.snapshot);
