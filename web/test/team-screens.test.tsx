@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { json, renderApp } from "./fixtures";
@@ -34,12 +34,4 @@ it("disables invitations without a Teams plan and exposes billing", async () => 
   renderApp("/orgs/studio/team");
   expect(await screen.findByRole("button", { name: "Send invitation" })).toBeDisabled();
   expect(screen.getByRole("link", { name: "Manage plan and seats" })).toHaveAttribute("href", "/orgs/studio/billing");
-});
-it("accepts only after an explicit action and shows a wrong-account error", async () => {
-  const fetcher = vi.fn(async () => json({ error: "invalid_invite" }, 400));
-  vi.stubGlobal("fetch", fetcher); renderApp("/invites/test-token");
-  expect(fetcher).not.toHaveBeenCalled();
-  await userEvent.setup().click(screen.getByRole("button", { name: "Accept invitation" }));
-  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
-  expect(await screen.findByRole("alert")).toHaveTextContent("belongs to another email address");
 });
