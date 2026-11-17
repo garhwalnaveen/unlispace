@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import OrbitKit
+import OrbitTestSupport
 
 @Suite struct DistributionTests {
     @Test func freshStatusAndBothQueuesGateInstallation() {

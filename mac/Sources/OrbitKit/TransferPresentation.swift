@@ -30,24 +30,102 @@ public enum UploadLimit {
 }
 
 /// A queue entry and its matching event describe the same file activity.
-public struct TransferActivity: Sendable {
+public struct TransferActivity: Sendable, Identifiable {
     public var pending: PendingUpload?
     public var transfer: TransferInfo?
 
+    public init(pending: PendingUpload?, transfer: TransferInfo?) {
+        self.pending = pending
+        self.transfer = transfer
+    }
+
+    public var id: String {
+        if let pending { return "pending\u{0}" + pending.driveId + "\u{0}" + pending.path }
+        return "transfer\u{0}" + (transfer?.id ?? "")
+    }
+    public var path: String { pending?.path ?? transfer?.path ?? "/" }
+
+    private struct Key: Hashable { var driveId: String; var path: String }
+
+    /// Linear in the number of items: every lookup goes through a set or dictionary.
     public static func list(pending: [PendingUpload], transfers: [TransferInfo], recentUploads: [TransferInfo]) -> [TransferActivity] {
-        let allEvents = transfers + recentUploads.filter { recent in !transfers.contains { $0.id == recent.id } }
-        var events = allEvents.filter { event in
+        let live = Set(transfers.map(\.id))
+        let all = transfers + recentUploads.filter { !live.contains($0.id) }
+        let pendingDrives = Set(pending.map(\.driveId))
+        var drivesWithUploadedFile = Set<String>()
+        for event in all where event.direction == .upload && event.path != "/" && event.status == .done {
+            drivesWithUploadedFile.insert(event.driveId)
+        }
+        // A drive aggregate (`/`) is redundant once its files are listed individually.
+        let events = all.filter { event in
             guard event.direction == .upload, event.path == "/", event.status == .queued || event.status == .done else { return true }
-            if pending.contains(where: { $0.driveId == event.driveId }) { return false }
-            return event.status != .done || !allEvents.contains {
-                $0.driveId == event.driveId && $0.direction == .upload && $0.path != "/" && $0.status == .done
-            }
+            if pendingDrives.contains(event.driveId) { return false }
+            return event.status != .done || !drivesWithUploadedFile.contains(event.driveId)
         }
-        var rows = pending.map { upload in
-            let index = events.firstIndex { $0.direction == .upload && $0.driveId == upload.driveId && $0.path == upload.path }
-            return TransferActivity(pending: upload, transfer: index.map { events.remove(at: $0) })
+        var uploadsByKey: [Key: [Int]] = [:]
+        for (index, event) in events.enumerated().reversed() where event.direction == .upload {
+            uploadsByKey[Key(driveId: event.driveId, path: event.path), default: []].append(index)
         }
-        rows += events.map { TransferActivity(pending: nil, transfer: $0) }
+        var matched = Set<Int>()
+        var rows = pending.map { upload -> TransferActivity in
+            let index = uploadsByKey[Key(driveId: upload.driveId, path: upload.path)]?.popLast()
+            if let index { matched.insert(index) }
+            return TransferActivity(pending: upload, transfer: index.map { events[$0] })
+        }
+        for (index, event) in events.enumerated() where !matched.contains(index) {
+            rows.append(TransferActivity(pending: nil, transfer: event))
+        }
         return rows
+    }
+}
+
+/// An ordered collection with constant-time lookup and replacement by id.
+/// Engine events update one item at a time, so the lists they feed must not be rescanned per event.
+public struct IndexedList<Element: Identifiable>: Sendable where Element: Sendable, Element.ID: Hashable & Sendable {
+    public private(set) var elements: [Element] = []
+    private var positions: [Element.ID: Int] = [:]
+
+    public init(_ elements: [Element] = []) { replaceAll(elements) }
+
+    public var isEmpty: Bool { elements.isEmpty }
+    public var count: Int { elements.count }
+    public subscript(id: Element.ID) -> Element? { positions[id].map { elements[$0] } }
+
+    /// Keeps the first position of a repeated id and its last value.
+    public mutating func replaceAll(_ new: [Element]) {
+        elements = []
+        positions = [:]
+        elements.reserveCapacity(new.count)
+        for element in new { upsert(element) }
+    }
+
+    public mutating func upsert(_ element: Element) {
+        if let index = positions[element.id] {
+            elements[index] = element
+        } else {
+            positions[element.id] = elements.count
+            elements.append(element)
+        }
+    }
+
+    public mutating func remove(id: Element.ID) {
+        guard let index = positions.removeValue(forKey: id) else { return }
+        elements.remove(at: index)
+        for later in index..<elements.count { positions[elements[later].id] = later }
+    }
+}
+
+/// How long to wait before the next status poll.
+/// Engine events carry live changes; polling only reconciles, so it slows down when nothing is happening
+/// and backs off while the engine is unreachable.
+public enum PollSchedule {
+    public static let active: Duration = .seconds(5)
+    public static let idle: Duration = .seconds(20)
+    public static let longestRetry: Duration = .seconds(60)
+
+    public static func delay(connected: Bool, busy: Bool, failures: Int) -> Duration {
+        if connected { return busy ? active : idle }
+        let seconds = 2 << min(max(failures, 0), 5)
+        return min(.seconds(seconds), longestRetry)
     }
 }

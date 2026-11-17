@@ -4,109 +4,170 @@ import Testing
 import OrbitKit
 @testable import Orbit
 
-/// Render real SwiftUI layouts without credentials, mounting drives, or changing preferences.
+/// Renders every screen in both appearances from fixed engine snapshots. No credentials, mounts, or saved preferences.
+/// The images land in `$TMPDIR/orbit-ui-review` for visual review.
 @Suite @MainActor struct WorkspaceRenderTests {
-    @Test func desktopLayoutsRenderInBothAppearances() throws {
+    private static let drives = [
+        DriveInfo(driveId: "design", name: "Design & brand", mountState: .mounted, mountPath: "/Volumes/Design & brand"),
+        DriveInfo(driveId: "archive", name: "Archive", mountState: .unmounted),
+        DriveInfo(driveId: "work", name: "Work in progress", mountState: .mounting),
+        DriveInfo(driveId: "legal", name: "Legal", mountState: .error),
+    ]
+    private static let transfers = [
+        TransferInfo(id: "upload", driveId: "design", path: "/Brand/Style guide.pdf", direction: .upload,
+                     bytesDone: 5_200_000, bytesTotal: 10_400_000, status: .active),
+        TransferInfo(id: "download", driveId: "design", path: "/Reference/Reference images.zip", direction: .download,
+                     bytesDone: 1_000_000, bytesTotal: 0, status: .active),
+    ]
+    private static let queue = UploadsSnapshot(pending: [PendingUpload(driveId: "design", path: "/Brand/Logo.svg", bytes: 48_000)],
+                                               journalBytes: 10_448_000, journalCapBytes: 10_000_000_000)
+    private static let pins = [
+        OfflinePin(driveId: "design", path: "/", bytes: 2_400_000_000, cachedBytes: 1_200_000_000),
+        OfflinePin(driveId: "archive", path: "/2023", bytes: 800_000_000, cachedBytes: 800_000_000),
+    ]
+
+    @Test func everyScreenRendersInBothAppearances() async throws {
         _ = NSApplication.shared
         let output = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("orbit-ui-review")
+        try? FileManager.default.removeItem(at: output)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        for dark in [false, true] {
-            let model = AppModel()
-            let scheme: ColorScheme = dark ? .dark : .light
-            let suffix = dark ? "dark" : "light"
-            try render(WorkspaceView(model: model).preferredColorScheme(scheme), name: "signed-out-\(suffix)", output: output, scheme: scheme)
-            model.engineInstall = .failed("The background service is unavailable. Reopen the installed app to continue setup.")
-            try render(WorkspaceView(model: model).preferredColorScheme(scheme), name: "service-unavailable-\(suffix)", output: output, scheme: scheme)
-            model.usingMock = false
-            model.status = .idle
-            model.account = AuthUser(id: "ui-review", email: "review@example.invalid")
-            model.drives = [
-                DriveInfo(driveId: "design", name: "Design & brand", mountState: .mounted, mountPath: "/Volumes/Design & brand"),
-                DriveInfo(driveId: "archive", name: "Archive", mountState: .unmounted),
-                DriveInfo(driveId: "work", name: "Work in progress", mountState: .mounting),
-                DriveInfo(driveId: "attention", name: "Needs attention", mountState: .error),
-            ]
-            model.pins = []
-            try render(WorkspaceView(model: model).preferredColorScheme(scheme), name: "drives-\(suffix)", output: output, scheme: scheme)
-            try render(WorkspaceView(model: model).preferredColorScheme(scheme), name: "drives-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 800, height: 580))
-            try render(OnboardingView(model: AppModel(), finish: {}).preferredColorScheme(scheme), name: "setup-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 1100, height: 760))
-            model.engineInstall = .enabled
-            model.notificationAccess = .notRequested
-            model.loginAccess = .notEnabled
-            for step in OnboardingStep.allCases {
-                try render(OnboardingView(model: model, finish: {}, step: step).preferredColorScheme(scheme), name: "onboarding-\(step.label)-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 1100, height: 760))
-                try render(OnboardingView(model: model, finish: {}, step: step).preferredColorScheme(scheme), name: "onboarding-\(step.label)-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 800, height: 640))
+        var names: Set<String> = []
+
+        for scheme in [ColorScheme.light, .dark] {
+            func shot(_ name: String, size: NSSize = NSSize(width: 900, height: 600), settings: SettingsPage? = nil,
+                      _ view: some View) throws {
+                names.insert(name)
+                try render(view, to: output.appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png"),
+                           scheme: scheme, size: size, settings: settings)
             }
-            try render(MenuContent(model: model).preferredColorScheme(scheme), name: "menu-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 360, height: 680))
-            try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-empty-\(suffix)", output: output, scheme: scheme)
-            model.pins = [OfflinePin(driveId: "design", path: "/", bytes: 1000, cachedBytes: 500)]
-            try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-progress-\(suffix)", output: output, scheme: scheme)
-            try render(OfflineFilesView(model: model).preferredColorScheme(scheme), name: "offline-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 520, height: 580))
-            try render(FileSearchView(model: model).preferredColorScheme(scheme), name: "search-\(suffix)", output: output, scheme: scheme)
-            try render(FileSearchView(model: model).preferredColorScheme(scheme), name: "search-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
-            try render(WorkspaceAccountView(model: AppModel()).preferredColorScheme(scheme), name: "workspace-\(suffix)", output: output, scheme: scheme)
-            try render(AIView(model: AppModel()).preferredColorScheme(scheme), name: "ai-\(suffix)", output: output, scheme: scheme)
-            try render(SettingsView(model: model).preferredColorScheme(scheme), name: "settings-\(suffix)", output: output, scheme: scheme)
-            model.engineInstall = .enabled
-            model.notificationAccess = .denied
-            model.loginAccess = .needsApproval
-            try render(Form { PermissionsContent(model: model) }.formStyle(.grouped), name: "permissions-\(suffix)", output: output, scheme: scheme)
-            let transfer = TransferInfo(id: "upload", driveId: "design", path: "/Brand/Style guide.pdf", direction: .upload,
-                                        bytesDone: 50, bytesTotal: 100, status: .active)
-            try render(TransfersView(transfers: [transfer], embedded: true).preferredColorScheme(scheme), name: "transfers-\(suffix)", output: output, scheme: scheme)
-            try render(TransfersView(transfers: [transfer], embedded: true).preferredColorScheme(scheme), name: "transfers-compact-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
-            let failedTransfer = TransferInfo(id: "failed", driveId: "design", path: "/Brand/A long filename for an interrupted file upload.pdf", direction: .upload,
-                                              bytesDone: 20, bytesTotal: 100, status: .failed)
-            let download = TransferInfo(id: "download", driveId: "design", path: "/Reference/Reference images.zip", direction: .download,
-                                        bytesDone: 10, bytesTotal: 0, status: .active)
-            try render(TransfersView(transfers: [transfer, failedTransfer, download], embedded: true).preferredColorScheme(scheme), name: "activity-mixed-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 760))
-            try render(HStack(spacing: 10) {
-                ForEach([MountState.unmounted, .mounting, .mounted, .unmounting, .error], id: \.rawValue) { state in
-                    DriveStatusBadge(state: state)
-                }
-            }.padding(20).preferredColorScheme(scheme), name: "drive-states-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 800, height: 120))
-            let pending = PendingUpload(driveId: "design", path: "/.DS_Store", bytes: 6000)
-            let summary = TransferInfo(id: "design:upload", driveId: "design", path: "/", direction: .upload,
-                                       bytesDone: 0, bytesTotal: 6000, status: .queued)
-            try render(TransfersView(transfers: [summary], uploads: UploadsSnapshot(pending: [pending], journalBytes: 7000, journalCapBytes: 10_000_000_000), state: .syncing, embedded: true).preferredColorScheme(scheme), name: "activity-pending-\(suffix)", output: output, scheme: scheme, size: NSSize(width: 516, height: 580))
+            func workspace(_ model: AppModel, _ page: WorkspacePage) -> some View {
+                let navigation = WorkspaceNavigation()
+                navigation.page = page
+                return WorkspaceView(model: model, navigation: navigation)
+            }
+            let compact = NSSize(width: 680, height: 440)
+            let setup = NSSize(width: 560, height: 520)
+            let menu = NSSize(width: 320, height: 400)
+            let settings = NSSize(width: 560, height: 460)
+
+            let signedOut = Fixtures.offline()
+            signedOut.engine.install = .enabled
+            signedOut.engineIsUnavailable(error: nil)
+            try shot("signed-out", workspace(signedOut, .drives))
+            try shot("menu-signed-out", size: menu, MenuContent(model: signedOut))
+            try shot("setup-sign-in", size: setup, SetupView(model: signedOut, finish: {}))
+
+            let stopped = Fixtures.offline()
+            stopped.session.setAccount(Fixtures.account)
+            stopped.engine.install = .requiresApproval
+            stopped.engineIsUnavailable(error: nil)
+            try shot("service-stopped", workspace(stopped, .drives))
+            try shot("activity-unavailable", workspace(stopped, .activity))
+
+            let empty = try await Fixtures.showing(SnapshotClient())
+            try shot("drives-empty", workspace(empty, .drives))
+            try shot("activity-empty", workspace(empty, .activity))
+            try shot("offline-empty", workspace(empty, .offline))
+
+            let model = try await Fixtures.showing(SnapshotClient(drives: Self.drives, transfers: Self.transfers, queue: Self.queue,
+                                                                  pins: Self.pins, state: .syncing))
+            model.engine.install = .enabled
+            model.permissions.notificationAccess = .notRequested
+            model.permissions.loginAccess = .notEnabled
+            try shot("drives", workspace(model, .drives))
+            try shot("drives-compact", size: compact, workspace(model, .drives))
+            try shot("activity", workspace(model, .activity))
+            try shot("activity-compact", size: compact, workspace(model, .activity))
+            try shot("offline", workspace(model, .offline))
+            try shot("search", workspace(model, .search))
+            try shot("menu", size: menu, MenuContent(model: model))
+            for step in SetupStep.allCases.dropFirst() {
+                try shot("setup-\(step.title.lowercased())", size: setup, SetupView(model: model, finish: {}, step: step))
+            }
+            for page in SettingsPage.allCases {
+                try shot("settings-\(page.rawValue.lowercased())", size: settings, settings: page, SettingsView(model: model))
+            }
+
+            let failing = try await Fixtures.showing(SnapshotClient(drives: Self.drives))
+            failing.apply(.transfer(TransferInfo(id: "failed", driveId: "design", path: "/Brand/Interrupted upload.pdf",
+                                                 direction: .upload, bytesDone: 20, bytesTotal: 100, status: .failed)))
+            failing.messages.notice = "Signed in. Your drives appear when the background service starts."
+            failing.messages.conflict = try JSONDecoder().decode(ConflictEvent.self, from: Data(#"{"driveId":"design","path":"/Brand/Plan.md","copy":"Plan (conflicted copy).md"}"#.utf8))
+            try shot("messages", workspace(failing, .activity))
+
+            let many = (1...60).map { DriveInfo(driveId: "d\($0)", name: "Project \($0)", mountState: $0 % 7 == 0 ? .mounted : .unmounted,
+                                                mountPath: $0 % 7 == 0 ? "/Volumes/Project \($0)" : nil) }
+            try shot("drives-many", workspace(try await Fixtures.showing(SnapshotClient(drives: many)), .drives))
         }
-        for name in ["signed-out", "service-unavailable", "drives", "settings", "permissions", "transfers", "offline-empty", "offline-progress", "search", "workspace", "ai", "setup", "menu", "drives-compact", "offline-compact", "activity-mixed", "drive-states"] {
+
+        for name in names {
             let light = try Data(contentsOf: output.appendingPathComponent("\(name)-light.png"))
             let dark = try Data(contentsOf: output.appendingPathComponent("\(name)-dark.png"))
-            #expect(light != dark, "Light and dark fixtures must have different appearances")
+            #expect(light != dark, "\(name) must differ between light and dark")
         }
     }
 
-    private func render(_ view: some View, name: String, output: URL, scheme: ColorScheme, size: NSSize = NSSize(width: 1000, height: 680)) throws {
-        let previousAppearance = NSApplication.shared.appearance
-        NSApplication.shared.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        defer { NSApplication.shared.appearance = previousAppearance }
-        let defaults = try #require(UserDefaults(suiteName: "workspace-render-tests"))
-        defaults.set("system", forKey: "appearance")
-        defer { defaults.removePersistentDomain(forName: "workspace-render-tests") }
-        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading).appStyle().environment(\.colorScheme, scheme).defaultAppStorage(defaults))
-        host.sizingOptions = []
-        host.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        host.frame = NSRect(origin: .zero, size: size)
-        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    /// Hosts the view in a real titled window so the toolbar and tab bar are part of the image.
+    /// By default the window is drawn off screen, which works headless but cannot draw the translucent sidebar.
+    /// With `ORBIT_UI_CAPTURE=screen` the window is shown and captured as the user sees it.
+    private func render(_ view: some View, to file: URL, scheme: ColorScheme, size: NSSize, settings: SettingsPage?) throws {
+        let onScreen = ProcessInfo.processInfo.environment["ORBIT_UI_CAPTURE"] == "screen"
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let previous = NSApplication.shared.appearance
+        NSApplication.shared.appearance = appearance
+        defer { NSApplication.shared.appearance = previous }
+        let (defaults, cleanup) = Fixtures.defaults()
+        defer { cleanup() }
+        if let settings { defaults.set(settings.rawValue, forKey: Preference.settingsPage) }
+
+        let controller = NSHostingController(rootView: view.defaultAppStorage(defaults))
+        controller.sizingOptions = []
+        let window = NSWindow(contentViewController: controller)
+        // The Settings scene supplies its own window; a plain titled window is the closest stand-in.
+        window.styleMask = settings == nil ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView] : [.titled, .closable]
+        window.toolbarStyle = .unified
+        window.title = settings?.rawValue ?? ""
         window.isReleasedWhenClosed = false
-        window.appearance = host.appearance
-        window.contentView = host
+        window.appearance = appearance
         window.setContentSize(size)
-        window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
-        window.orderFront(nil)
+        if onScreen {
+            NSApplication.shared.setActivationPolicy(.accessory)
+            window.setFrameTopLeftPoint(NSPoint(x: 60, y: (NSScreen.main?.visibleFrame.maxY ?? 800) - 20))
+            window.orderFrontRegardless()
+            window.makeKey()
+        } else {
+            window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+            window.orderFront(nil)
+        }
         defer { window.close() }
-        window.layoutIfNeeded()
-        host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-        host.layoutSubtreeIfNeeded()
-        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: bitmap)
-        #expect(host.bounds.size == size, "The fixture must retain its requested window size")
+        // Let `.task` loads, list layout, and the toolbar settle.
+        for _ in 0..<(onScreen ? 12 : 3) {
+            window.layoutIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        // Content taller than its window is centered and clipped, which shows as a blank or shifted page.
+        func overflows(_ view: NSView) -> Bool {
+            // A scroll view's document is meant to be taller, so stop there.
+            view.frame.height > size.height + 60 || (!(view is NSScrollView) && view.subviews.contains(where: overflows))
+        }
+        #expect(!overflows(controller.view), "\(file.lastPathComponent): content is laid out taller than its window")
+        if onScreen {
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-o", "-l\(window.windowNumber)", file.path]
+            try capture.run()
+            capture.waitUntilExit()
+            #expect(capture.terminationStatus == 0)
+            #expect(((try? Data(contentsOf: file))?.count ?? 0) > 1000)
+            return
+        }
+        let frame = try #require(window.contentView?.superview)
+        let bitmap = try #require(frame.bitmapImageRepForCachingDisplay(in: frame.bounds))
+        frame.cacheDisplay(in: frame.bounds, to: bitmap)
         #expect(bitmap.pixelsWide >= Int(size.width))
         #expect(bitmap.pixelsHigh >= Int(size.height))
         let png = try #require(bitmap.representation(using: .png, properties: [:]))
         #expect(png.count > 1000)
-        try png.write(to: output.appendingPathComponent("\(name).png"))
+        try png.write(to: file)
     }
 }

@@ -17,9 +17,10 @@ let package = Package(
         // Thin SwiftUI/AppKit shell.
         .executableTarget(name: "Orbit", dependencies: ["OrbitKit", .product(name: "Sparkle", package: "Sparkle")],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
-        .testTarget(name: "OrbitKitTests", dependencies: ["OrbitKit"]),
+        .target(name: "OrbitTestSupport", dependencies: ["OrbitKit"], path: "Tests/OrbitTestSupport"),
+        .testTarget(name: "OrbitKitTests", dependencies: ["OrbitKit", "OrbitTestSupport"]),
         .testTarget(name: "DaemonIntegrationTests", dependencies: ["OrbitKit"]),
-        .testTarget(name: "OrbitAppTests", dependencies: ["Orbit"]),
+        .testTarget(name: "OrbitAppTests", dependencies: ["Orbit", "OrbitTestSupport"]),
     ],
     swiftLanguageModes: [.v6]
 )
