@@ -34,8 +34,10 @@ export function DriveDialog({
     setBusy(true);
     setError(undefined);
     try {
-      if (action.kind === "create")
-        await api.createDrive(action.org.id, name.trim());
+      if (action.kind === "create") {
+        onDone(await api.createDrive(action.org.id, name.trim()));
+        return;
+      }
       else if (action.kind === "rename") {
         if (/^d-[0-9a-z]{26}$/.test(alias)) throw new Error("Drive IDs are reserved and cannot be used as aliases.");
         await api.renameDrive(action.drive.id, name.trim(), alias || undefined);
