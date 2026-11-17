@@ -56,7 +56,7 @@ function DriveItem({ drive, onAction }: { drive: Drive; onAction: (action: Drive
           <DropdownMenuItem asChild><a href={finderLink(drive.id, "")}>Open in Finder</a></DropdownMenuItem>
           {canManage && <>
             <DropdownMenuItem onSelect={() => onAction({ kind: "rename", drive })}>Rename…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onAction({ kind: "fork", drive })}>Make a copy (fork)…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onAction({ kind: "fork", drive })}>Make a copy…</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => onAction({ kind: "delete", drive })}>Delete drive…</DropdownMenuItem>
           </>}
