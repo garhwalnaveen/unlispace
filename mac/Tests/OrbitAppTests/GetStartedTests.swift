@@ -113,6 +113,25 @@ import OrbitKit
         #expect(action(.notInstalled) == nil)
     }
 
+    /// A view-only drive listed first must not hide a writable one from "Add a File…".
+    @Test func addAFileUsesADriveThatCanTakeOne() async throws {
+        let viewOnly = DriveInfo(driveId: "shared", name: "Shared", mountState: .mounted, mountPath: "/Volumes/Shared")
+        let writable = DriveInfo(driveId: "mine", name: "Mine", mountState: .mounted, mountPath: "/Volumes/Mine")
+        let idle = DriveInfo(driveId: "idle", name: "Idle", mountState: .unmounted)
+        let model = try await Fixtures.showing(SnapshotClient(drives: [viewOnly, writable]))
+        model.drives.apply(drives: [idle, viewOnly, writable], mounts: [
+            DaemonMount(driveId: "shared", mountpoint: "/Volumes/Shared", readOnly: true, adapter: "smb"),
+            DaemonMount(driveId: "mine", mountpoint: "/Volumes/Mine", readOnly: false, adapter: "smb"),
+        ], pins: [])
+        #expect(!model.drives.canAddFile(to: viewOnly) && model.drives.canAddFile(to: writable))
+        #expect(GetStarted.firstFileDrive(model.drives.drives, canAddFile: model.drives.canAddFile)?.driveId == "mine")
+
+        // No drive can take a file: fall back to one in Finder, then to any drive, to open it.
+        #expect(GetStarted.firstFileDrive([idle, viewOnly], canAddFile: { _ in false })?.driveId == "shared")
+        #expect(GetStarted.firstFileDrive([idle], canAddFile: { _ in false })?.driveId == "idle")
+        #expect(GetStarted.firstFileDrive([], canAddFile: { _ in true }) == nil)
+    }
+
     @Test func aStepTheHeadlineAlreadyOffersGetsNoSecondButton() {
         #expect(GetStarted.isCovered(.signIn, by: .continueSetup))
         #expect(GetStarted.isCovered(.signIn, by: .signIn))

@@ -67,6 +67,12 @@ enum GetStarted {
     /// The step the list offers a button for: the first one still open.
     static func next(_ steps: [GetStartedStep]) -> GetStartedStep? { steps.first { !$0.done } }
 
+    /// The drive "Add a File…" uses: one that can take a file now, wherever it is in the list.
+    /// Only when none can (all view-only, or none in Finder yet) does it fall back to a drive to open.
+    static func firstFileDrive(_ drives: [DriveInfo], canAddFile: (DriveInfo) -> Bool) -> DriveInfo? {
+        drives.first(where: canAddFile) ?? drives.first { $0.mountState == .mounted } ?? drives.first
+    }
+
     /// True when the headline above the list already offers this step's button, so it is not shown twice.
     static func isCovered(_ step: GetStartedStep.ID, by action: MenuHeadline.Action?) -> Bool {
         switch (step, action) {
@@ -115,7 +121,7 @@ extension AppModel {
         case .finder:
             if let drive = drives.drives.first(where: { $0.mountState == .mounted }) ?? drives.drives.first { drives.open(drive) }
         case .firstFile:
-            guard let drive = drives.drives.first(where: { $0.mountState == .mounted }) ?? drives.drives.first else { return }
+            guard let drive = GetStarted.firstFileDrive(drives.drives, canAddFile: drives.canAddFile) else { return }
             if drives.canAddFile(to: drive) { drives.addFile(to: drive) } else { drives.open(drive) }
         case .alerts: act(on: .notifications)
         }
