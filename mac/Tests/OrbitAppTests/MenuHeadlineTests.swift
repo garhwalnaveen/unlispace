@@ -144,5 +144,20 @@ import OrbitKit
                                            direction: .upload, bytesDone: 20, bytesTotal: 100, status: .failed)))
         #expect(model.headline.title == "An upload didn't finish")
         #expect(model.headline.detail?.contains("Interrupted.pdf") == true)
+        #expect(ActivityView.summary(model).title == "An upload didn't finish")
+    }
+
+    /// The Activity page reports transfers even when the menu leads with a different problem.
+    @Test func theActivityPageSummarizesTransfersOnly() async throws {
+        let transfer = TransferInfo(id: "up", driveId: "design", path: "/a.pdf", direction: .upload,
+                                    bytesDone: 1, bytesTotal: 2, status: .active)
+        let model = try await Fixtures.showing(SnapshotClient(drives: [Self.finder, Self.broken], transfers: [transfer]))
+        #expect(model.headline.title == "A drive needs attention")
+        #expect(ActivityView.summary(model).title == "Syncing 1 file")
+        let quiet = try await Fixtures.showing(SnapshotClient(drives: [Self.finder]))
+        #expect(ActivityView.summary(quiet).title == "Nothing is uploading")
+        let offline = Fixtures.offline()
+        offline.engineIsUnavailable(error: nil)
+        #expect(ActivityView.summary(offline).title == "No activity yet")
     }
 }
