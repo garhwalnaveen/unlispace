@@ -1,6 +1,7 @@
 import Foundation
+import OrbitKit
 
-/// In-memory daemon used when the real socket is absent. Mounting is simulated.
+/// In-memory daemon for tests. The app never substitutes it for a missing engine.
 public actor MockDaemonClient: DaemonClient {
     private var drives = [
         DriveInfo(driveId: "demo", name: "Demo Drive", mountState: .unmounted),
@@ -105,6 +106,8 @@ public actor MockDaemonClient: DaemonClient {
             continuation.onTermination = { _ in Task { await self.remove(key) } }
         }
     }
+
+    public var subscriberCount: Int { subscribers.count }
 
     private func add(_ k: UUID, _ c: AsyncStream<DaemonEvent>.Continuation) { subscribers[k] = c }
     private func remove(_ k: UUID) { subscribers.removeValue(forKey: k) }

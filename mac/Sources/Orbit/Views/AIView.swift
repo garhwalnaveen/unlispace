@@ -2,9 +2,8 @@ import SwiftUI
 import WebKit
 import OrbitKit
 
-/// Ask AI is the web app's shadcn chat (managed Kimi models), embedded so both clients share one UI.
-/// The app signs the page in as the current user with a one-time handoff and a PKCE verifier that
-/// never appears in a URL.
+/// Ask AI is the web app's chat page, embedded so both clients share one implementation.
+/// The page is signed in as the current user with a one-time handoff; its PKCE verifier never appears in a URL.
 struct AIView: View {
     var model: AppModel
     @State private var page: URL?
@@ -16,40 +15,34 @@ struct AIView: View {
         Group {
             if let page, let verifier {
                 EmbeddedWebView(url: page, verifier: verifier)
-                    .frame(minHeight: 520)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(AppDesign.border))
             } else if let error {
                 ContentUnavailableView {
                     Label("Ask AI is unavailable", systemImage: "sparkles")
                 } description: { Text(error) } actions: {
-                    Button("Try again") { Task { await load() } }
+                    Button("Try Again") { Task { await load() } }
                 }
-            } else if !model.isSignedIn || model.usingMock {
-                ContentUnavailableView("Sign in to use Ask AI", systemImage: "sparkles",
-                                       description: Text("Ask AI uses Kimi models managed by Orbit, with a free daily allowance."))
+            } else if !model.isAccountLive {
+                ContentUnavailableView("Ask AI is unavailable", systemImage: "sparkles",
+                                       description: Text("Ask AI works once you are signed in and connected."))
             } else {
-                ProgressView("Opening Ask AI…").frame(maxWidth: .infinity, minHeight: 200)
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: model.account?.id) { await load() }
+        .task(id: model.isAccountLive) { await load() }
     }
 
     private func load() async {
+        guard !loading else { return }
         page = nil; verifier = nil; error = nil
-        guard model.isSignedIn, !model.usingMock, !loading else { return }
+        guard model.isAccountLive else { return }
         loading = true
         defer { loading = false }
         do {
-            let config = try await model.workspaceRequest("/client-config").decode(ClientConfiguration.self)
-            let v = PKCE.makeVerifier()
-            let result = try await model.workspaceRequest("/auth/web-handoff", method: "POST",
-                                                          body: .object(["webChallenge": .string(PKCE.challenge(forVerifier: v))]))
-            struct Handoff: Decodable { let handoff: String }
-            guard let url = config.embedPage("ai", handoff: try result.decode(Handoff.self).handoff) else { throw URLError(.badURL) }
-            verifier = v; page = url
+            let embedded = try await model.workspaces.embeddedPage("ai")
+            verifier = embedded.verifier
+            page = embedded.url
         } catch {
-            self.error = "Could not open Ask AI. Check your connection and update the app and API server, then try again."
+            self.error = "Ask AI could not be opened. Check your internet connection and try again."
         }
     }
 }
