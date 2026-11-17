@@ -64,7 +64,8 @@ struct FileSearchView: View {
         if !model.isLive {
             ContentUnavailableView("Search unavailable", systemImage: "magnifyingglass",
                                    description: Text("Search works once you are signed in and connected."))
-        } else if !results.isEmpty {
+        } else if !results.isEmpty || cursor != nil {
+            // A page can be empty and still have a successor, so keep paging until the cursor ends.
             List {
                 ForEach(results) { entry in
                     row(entry)
