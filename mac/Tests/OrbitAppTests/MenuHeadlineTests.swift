@@ -171,6 +171,32 @@ import OrbitKit
         #expect(ActivityView.summary(model).title == "An upload didn't finish")
     }
 
+    /// A file that uploaded before and changed again: the queue entry is paired with the old finished
+    /// upload of the same path, and must still count as work in progress.
+    @Test func aFileChangedAgainAfterUploadingStillCountsAsSyncing() async throws {
+        let model = try await Fixtures.showing(SnapshotClient(drives: [Self.finder]))
+        model.apply(.transfer(TransferInfo(id: "first", driveId: "design", path: "/notes.txt", direction: .upload,
+                                           bytesDone: 100, bytesTotal: 100, status: .done)))
+        #expect(model.headline.title == "All files are up to date")
+        let queue = UploadsSnapshot(pending: [PendingUpload(driveId: "design", path: "/notes.txt", bytes: 48_000)],
+                                    journalBytes: 48_000, journalCapBytes: 10_000_000_000)
+        model.activity.apply(transfers: [], uploads: queue)
+
+        let row = try #require(model.activity.items.first)
+        #expect(model.activity.items.count == 1 && row.pending != nil && row.transfer?.status == .done)
+        #expect(row.isActive)
+        #expect(model.headline.title == "Syncing 1 file")
+        #expect(ActivityView.summary(model).title == "Syncing 1 file")
+        // The row describes the upload that is waiting, not the one that finished earlier.
+        let content = ActivityRowContent(row)
+        #expect(content.status.hasPrefix("Waiting to upload · ") && !content.failed && content.progress == .none)
+
+        // Once the queue is empty the finished upload is history again.
+        model.activity.apply(transfers: [], uploads: UploadsSnapshot(pending: [], journalBytes: 0, journalCapBytes: 10_000_000_000))
+        #expect(model.activity.items.allSatisfy { !$0.isActive })
+        #expect(ActivityView.summary(model).title == "Nothing is uploading")
+    }
+
     /// The Activity page reports transfers even when the menu leads with a different problem.
     @Test func theActivityPageSummarizesTransfersOnly() async throws {
         let transfer = TransferInfo(id: "up", driveId: "design", path: "/a.pdf", direction: .upload,

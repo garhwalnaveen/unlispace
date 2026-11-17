@@ -210,7 +210,7 @@ extension AppModel {
         input.drives = drives.drives
         input.access = workspaces.access
         input.workspaces = workspaces.workspaces
-        let active = activity.items.filter { $0.transfer?.isFinished != true }
+        let active = activity.items.filter(\.isActive)
         input.filesInFlight = active.filter { $0.path != "/" }.count
         input.changesInFlight = !active.isEmpty
         let live = activity.transfers.filter { !$0.isFinished }

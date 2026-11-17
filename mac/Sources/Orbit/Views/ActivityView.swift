@@ -41,7 +41,7 @@ struct ActivityView: View {
         if items.contains(where: { $0.transfer?.status == .failed }) {
             return MenuHeadline(title: "An upload didn't finish", tone: .attention)
         }
-        let active = items.filter { $0.transfer?.isFinished != true }
+        let active = items.filter(\.isActive)
         let files = active.filter { $0.path != "/" }.count
         if files > 0 { return MenuHeadline(title: "Syncing \(Format.count(files, "file", "files"))", tone: .busy) }
         if !active.isEmpty { return MenuHeadline(title: "Syncing changes", tone: .busy) }
