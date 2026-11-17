@@ -3,9 +3,10 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Drive } from "../src/api";
-import { MAC_APP_DOWNLOAD_URL, S3_ENDPOINT, s3Endpoint } from "../src/onboarding/config";
+import { MAC_APP_DOWNLOAD_URL } from "../src/onboarding/config";
+import { s3Endpoint, snippet as s3Snippet } from "../src/settings/s3";
+const S3_ENDPOINT = s3Endpoint()!;
 import { noteSignIn, readOnboarding, startOnboarding, writeOnboarding } from "../src/onboarding/state";
-import { s3Snippet } from "../src/onboarding/Welcome";
 import { uploadFile } from "../src/upload";
 import { deferred, drive, json, renderApp, session } from "./fixtures";
 
@@ -117,13 +118,13 @@ describe("with an agent or S3 tool", () => {
     expect(screen.getByRole("tab", { name: "Environment variables" })).toHaveAttribute("aria-selected", "true");
     expect(panel).toHaveTextContent(`export AWS_ENDPOINT_URL='${S3_ENDPOINT}'`);
     await user.click(screen.getByRole("tab", { name: "AWS CLI" }));
-    expect(panel).toHaveTextContent(`aws s3 ls 's3://team-files/' --profile orbit --endpoint-url '${S3_ENDPOINT}'`);
+    expect(panel).toHaveTextContent(`aws s3 ls 's3://team-files/' --endpoint-url '${S3_ENDPOINT}' --region auto`);
     await user.click(screen.getByRole("tab", { name: "rclone" }));
-    expect(panel).toHaveTextContent("rclone lsf 'orbit:team-files'");
+    expect(panel).toHaveTextContent("rclone ls 'orbit:team-files'");
     expect(panel).toHaveTextContent("rclone copy --ignore-checksum ./notes.txt 'orbit:team-files'");
     const copied = vi.spyOn(navigator.clipboard, "writeText");
     await user.click(screen.getByRole("button", { name: "Copy commands" }));
-    expect(copied).toHaveBeenLastCalledWith(s3Snippet("rclone", secret, "team-files"));
+    expect(copied).toHaveBeenLastCalledWith(s3Snippet("rclone", { ...secret, endpoint: S3_ENDPOINT, bucket: "team-files" }));
     await user.click(screen.getByRole("button", { name: "Copy secret access key" }));
     expect(copied).toHaveBeenLastCalledWith(secret.secretAccessKey);
     copied.mockRejectedValueOnce(new Error("blocked"));
@@ -169,7 +170,7 @@ describe("with an agent or S3 tool", () => {
   it("quotes every value so a pasted snippet cannot run something else", () => {
     const key = { accessKeyId: "ULS1ID", secretAccessKey: "a'b; rm -rf ~" };
     for (const kind of ["env", "aws", "rclone"] as const) {
-      const snippet = s3Snippet(kind, key, "bucket", "https://s3.example");
+      const snippet = s3Snippet(kind, { ...key, bucket: "bucket", endpoint: "https://s3.example" });
       expect(snippet).toContain("'a'\\''b; rm -rf ~'");
       expect(snippet).toContain("'https://s3.example'");
       expect(snippet).toContain("auto");
@@ -293,16 +294,6 @@ describe("while the first drive is being set up", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Back" })); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /On my Mac/ })); });
     expect(heading()).toHaveTextContent("Get Orbit for Mac");
-  });
-});
-
-describe("settings the snippets rely on", () => {
-  it("finds the S3 gateway next to the API, as the Wrangler configs deploy it", () => {
-    expect(s3Endpoint("https://unlispace-api.example.workers.dev", undefined)).toBe("https://unlispace-s3.example.workers.dev");
-    expect(s3Endpoint("https://api.example.com", undefined)).toBe("https://s3.example.com");
-    expect(s3Endpoint("http://127.0.0.1:8788", undefined)).toBe("http://127.0.0.1:8789");
-    expect(s3Endpoint("http://localhost:8788", undefined)).toBe("http://localhost:8789");
-    expect(s3Endpoint("https://unlispace-api.example.workers.dev", "https://files.example.com/")).toBe("https://files.example.com");
   });
 });
 

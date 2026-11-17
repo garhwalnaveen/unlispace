@@ -36,5 +36,6 @@ export function snippet(kind: SnippetKind, { accessKeyId, secretAccessKey, endpo
   const credentials = `export AWS_ACCESS_KEY_ID=${quote(accessKeyId)}\nexport AWS_SECRET_ACCESS_KEY=${quote(secretAccessKey)}`;
   if (kind === "env") return `${credentials}\nexport AWS_ENDPOINT_URL=${quote(url)}\nexport AWS_DEFAULT_REGION=${quote(S3_REGION)}`;
   if (kind === "aws") return `${credentials}\naws s3 ls ${quote(`s3://${name}/`)} --endpoint-url ${quote(url)} --region ${S3_REGION}`;
-  return `rclone config create orbit s3 provider=Other access_key_id=${quote(accessKeyId)} secret_access_key=${quote(secretAccessKey)} endpoint=${quote(url)} region=${S3_REGION} force_path_style=true\nrclone ls ${quote(`orbit:${name}`)}`;
+  // The gateway's ETag is not an MD5 of the file, so rclone's after-transfer comparison has to be turned off.
+  return `rclone config create orbit s3 provider=Other access_key_id=${quote(accessKeyId)} secret_access_key=${quote(secretAccessKey)} endpoint=${quote(url)} region=${S3_REGION} force_path_style=true\nrclone ls ${quote(`orbit:${name}`)}\nrclone copy --ignore-checksum ./notes.txt ${quote(`orbit:${name}`)}`;
 }

@@ -10,7 +10,8 @@ import { useWorkspace } from "../shell/workspace";
 import { ErrorNotice, formatBytes } from "../ui";
 import { uploadFile, type UploadProgress } from "../upload";
 import { Card, CopyButton } from "./Card";
-import { MAC_APP_DOWNLOAD_URL, MAC_APP_MINIMUM_MACOS, S3_ENDPOINT, S3_REGION } from "./config";
+import { MAC_APP_DOWNLOAD_URL, MAC_APP_MINIMUM_MACOS } from "./config";
+import { ENDPOINT_PLACEHOLDER, SNIPPET_LABELS, bucketName, s3Endpoint, snippet as s3Snippet, type SnippetKind } from "../settings/s3";
 import { writeOnboarding, type OnboardingPath } from "./state";
 
 const PATHS: { id: OnboardingPath; icon: ReactNode; title: string; detail: string }[] = [
@@ -130,33 +131,9 @@ function NeedsDrive({ children, onDone }: { children: (drive: Drive) => ReactNod
   );
 }
 
-// POSIX single quotes also make a malformed server value inert when pasted into a shell.
-const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-type Snippet = "env" | "aws" | "rclone";
-const SNIPPETS: { id: Snippet; label: string }[] = [
-  { id: "env", label: "Environment variables" },
-  { id: "aws", label: "AWS CLI" },
-  { id: "rclone", label: "rclone" },
-];
-/** Copy-paste setup for an access key. `bucket` is the name the S3 gateway resolves to the drive. */
-export function s3Snippet(kind: Snippet, key: Pick<KeySecret, "accessKeyId" | "secretAccessKey">, bucket: string, endpoint = S3_ENDPOINT): string {
-  const id = quote(key.accessKeyId), secret = quote(key.secretAccessKey), url = quote(endpoint);
-  if (kind === "env")
-    return [`export AWS_ACCESS_KEY_ID=${id}`, `export AWS_SECRET_ACCESS_KEY=${secret}`, `export AWS_ENDPOINT_URL=${url}`, `export AWS_DEFAULT_REGION=${S3_REGION}`].join("\n");
-  if (kind === "aws")
-    return [
-      `aws configure set aws_access_key_id ${id} --profile orbit`,
-      `aws configure set aws_secret_access_key ${secret} --profile orbit`,
-      `aws configure set region ${S3_REGION} --profile orbit`,
-      `aws s3 ls ${quote(`s3://${bucket}/`)} --profile orbit --endpoint-url ${url}`,
-    ].join("\n");
-  return [
-    `rclone config create orbit s3 provider=Other access_key_id=${id} secret_access_key=${secret} endpoint=${url} region=${S3_REGION}`,
-    `rclone lsf ${quote(`orbit:${bucket}`)}`,
-    // The gateway's ETag is not an MD5 of the file, so rclone's after-transfer comparison has to be turned off.
-    `rclone copy --ignore-checksum ./notes.txt ${quote(`orbit:${bucket}`)}`,
-  ].join("\n");
-}
+type Snippet = SnippetKind;
+const SNIPPETS = (Object.keys(SNIPPET_LABELS) as Snippet[]).map((id) => ({ id, label: SNIPPET_LABELS[id] }));
+const S3_ENDPOINT = s3Endpoint();
 
 function ToolsStep({ drive, onDone, onSecret }: { drive: Drive; onDone: () => void; onSecret: (shown: boolean) => void }) {
   const { auth } = useAuth();
@@ -165,7 +142,7 @@ function ToolsStep({ drive, onDone, onSecret }: { drive: Drive; onDone: () => vo
   const [error, setError] = useState<unknown>();
   const [tab, setTab] = useState<Snippet>("env");
   const readOnly = drive.access === "read";
-  const bucket = drive.alias || drive.id;
+  const bucket = bucketName(drive);
   async function create() {
     setBusy(true);
     setError(undefined);
@@ -192,10 +169,10 @@ function ToolsStep({ drive, onDone, onSecret }: { drive: Drive; onDone: () => vo
   const fields: [string, string][] = [
     ["Access key ID", secret.accessKeyId],
     ["Secret access key", secret.secretAccessKey],
-    ["Endpoint", S3_ENDPOINT],
+    ["Endpoint", S3_ENDPOINT ?? ENDPOINT_PLACEHOLDER],
     ["Bucket", bucket],
   ];
-  const snippet = s3Snippet(tab, secret, bucket);
+  const snippet = s3Snippet(tab, { ...secret, endpoint: S3_ENDPOINT, bucket });
   return (
     <Card wide icon={<KeyRound />} title="Save your secret now" lead="This is the only time the secret is shown. Copy it somewhere safe before you leave this page.">
       <dl className="ob-fields">
