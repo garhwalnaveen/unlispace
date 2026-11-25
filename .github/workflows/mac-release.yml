@@ -194,6 +194,7 @@ jobs:
       - name: Create or update the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build.outputs.version }}
           SIGNING: ${{ needs.build.outputs.signing }}
         run: |
