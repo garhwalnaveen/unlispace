@@ -128,6 +128,11 @@ in setup, on the Get started list, or in Settings › Permissions. "Open at logi
 `Orbit --engine-status | --enable-engine | --disable-engine` prints one status word and exits,
 for deployment and support tools.
 
+`bash scripts/check-installation.sh /path/to/Orbit.app` checks the bundled LaunchAgent plist
+and runs the signed helper against temporary state and a private socket. It does not register
+a background item with macOS. To check registration, enable background activity in an installed
+copy of Orbit.
+
 ## Sign-in
 The menu, the window, or Settings › Account: **Sign In…**. Flow (`docs/design/control-plane-contract.md` 5.1):
 1. `ASWebAuthenticationSession` (callback scheme `uls`) opens

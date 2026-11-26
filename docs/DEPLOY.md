@@ -73,16 +73,19 @@ returns, but an automatic read-only remount still needs implementation.
 
 `mac/scripts/release.sh` requires `ULSD_BIN`, `ULS_API_URL`, `ULS_VERSION` and
 `ULS_BUILD`, and produces a DMG and SHA-256 manifest after Swift tests, signature verification
-and an isolated LaunchAgent/RPC check. The isolated probe does not replace installed upgrade,
-Keychain and real mounted-file acceptance. Without Apple credentials it produces
+and checks of the packaged LaunchAgent declaration and signed helper RPC. The check does not
+register a background item. Before publishing, install from the signed DMG, allow background
+activity, and check that `launchctl print gui/$(id -u)/com.orbit.ulsd` shows a running job and
+the app connects to it. Installed upgrade, Keychain and mounted-file checks are separate.
+Without Apple credentials the script produces
 an ad-hoc signed, unnotarized DMG: Gatekeeper will block normal opening until the user
 explicitly allows the app in macOS settings. Automatic updates are not generated for this
 build. For a notarized release supply both `ULS_SIGN_IDENTITY` and `ULS_NOTARY_PROFILE`.
 
 The `Mac release` GitHub workflow builds the same DMG on a macOS runner for pull requests
 that touch `mac/` or `engine/`. Run it manually with a version such as `0.2.0`, or push a
-`mac-v<version>` tag, to publish the DMG and checksum as a GitHub release. Without Apple
-secrets the release is ad-hoc signed and marked as a prerelease. For a Developer ID and
+`mac-v<version>` tag, to publish the DMG and checksum as a GitHub release. Publishing requires
+Apple signing and notarization credentials. For a Developer ID and
 notarized release, configure `APPLE_CERTIFICATE_BASE64` (a base64-encoded `.p12`),
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, and either the Apple ID credentials
 `APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_SPECIFIC_PASSWORD` or the App Store Connect API
