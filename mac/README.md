@@ -164,7 +164,9 @@ records the request and sends `auth.signOut` the next time it connects.
   not exist, its nearest existing parent opens.
 
 
-## Distribution (Command Line Tools only)
+## Distribution (Command Line Tools)
+
+Install the installer layout tool with `pipx install dmgbuild==1.6.7` before building the DMG.
 
 `bash mac/scripts/release.sh` tests, bundles, signs inside-out, creates a compressed read-only
 DMG with an Applications shortcut, and verifies the mounted copy before detaching. It never

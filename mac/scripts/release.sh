@@ -13,8 +13,9 @@ python3 - <<'PYURL'
 import os, urllib.parse
 url = os.environ['ULS_API_URL']
 u = urllib.parse.urlparse(url)
-if u.scheme != 'https' or not u.hostname or u.hostname in ('localhost', '127.0.0.1') or u.username or u.password or u.query or u.fragment:
-    raise SystemExit('Release requires a valid HTTPS production API endpoint')
+host = (u.hostname or '').rstrip('.')
+if u.scheme != 'https' or not host or host in ('localhost', '127.0.0.1', '::1') or host.endswith('.workers.dev') or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
+    raise SystemExit('Release requires a public HTTPS API origin on a custom domain')
 PYURL
 bash "$ROOT/scripts/test.sh"
 bash "$ROOT/scripts/bundle.sh" "$@"

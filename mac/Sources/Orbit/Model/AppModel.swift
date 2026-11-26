@@ -61,7 +61,6 @@ final class AppModel: EngineLinkDelegate {
     /// The engine holds this account's session, so account actions (uploads, workspace requests) work.
     var isAccountLive: Bool { engine.isConnected && session.isSignedIn && !session.sessionPending }
 
-    var statusSymbol: String { status.symbolName }
     /// The same sentence the menu-bar panel leads with, so every window agrees on the state.
     var statusTitle: String { headline.title }
 

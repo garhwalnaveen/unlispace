@@ -15,6 +15,7 @@ APP="$ROOT/build/Orbit.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 cp "$BIN" "$APP/Contents/MacOS/Orbit"
+cp "$ROOT/resources/Orbit.icns" "$ROOT/resources/MenuBar.png" "$APP/Contents/Resources/"
 FRAMEWORK="$(find "$ROOT/.build/artifacts" -type d -path '*/macos-arm64_x86_64/Sparkle.framework' -print -quit)"
 if [[ -z "$FRAMEWORK" ]]; then echo "Sparkle framework missing from resolved artifacts" >&2; exit 1; fi
 mkdir -p "$APP/Contents/Frameworks"
@@ -29,6 +30,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>Orbit</string>
   <key>CFBundleDisplayName</key><string>Orbit</string>
   <key>CFBundleExecutable</key><string>Orbit</string>
+  <key>CFBundleIconFile</key><string>Orbit.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.2.0</string>

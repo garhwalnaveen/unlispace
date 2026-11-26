@@ -120,7 +120,8 @@ public final class DesktopAuth: NSObject, ASWebAuthenticationPresentationContext
         return try await withCheckedThrowingContinuation { cont in
             let id = UUID()
             callback = (id, state, url, cont)
-            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "uls") { [weak self] url, error in
+            // AuthenticationServices can complete on an XPC reply queue.
+            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "uls") { @Sendable [weak self] url, error in
                 let result: Result<URL, any Error>
                 if let url { result = .success(url) }
                 else if let e = error as? ASWebAuthenticationSessionError, e.code == .canceledLogin {

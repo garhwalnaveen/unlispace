@@ -6,7 +6,7 @@ on:
       version:
         description: Release version, without the leading v
         required: true
-        default: 0.2.0
+        default: 0.2.1
         type: string
   push:
     tags:
@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ULS_API_URL: https://unlispace-api.naveen-f3d.workers.dev
+  ULS_API_URL: https://api.orbitfs.io
 
 jobs:
   build:
@@ -51,7 +51,7 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             version="${GITHUB_REF_NAME#mac-v}"
           else
-            version="${INPUT_VERSION:-0.2.0}"
+            version="${INPUT_VERSION:-0.2.1}"
           fi
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || {
             echo "Invalid release version: $version" >&2
@@ -131,6 +131,9 @@ jobs:
           echo 'ULS_NOTARY_PROFILE=orbit-ci' >> "$GITHUB_ENV"
           echo 'mode=developer-id-notarized' >> "$GITHUB_OUTPUT"
 
+      - name: Install the DMG packaging tool
+        run: pipx install dmgbuild==1.6.7
+
       - name: Test, package and verify the release
         env:
           ULSD_BIN: ${{ github.workspace }}/engine/target/release/ulsd
@@ -161,7 +164,7 @@ jobs:
     name: Publish GitHub release
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mac-v'))
+    if: needs.build.outputs.signing == 'developer-id-notarized' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mac-v')))
     permissions:
       contents: write
     steps:
@@ -191,22 +194,19 @@ jobs:
           EOF
           cat notes.md
 
-      - name: Create or update the GitHub release
+      - name: Publish a new GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.build.outputs.version }}
-          SIGNING: ${{ needs.build.outputs.signing }}
         run: |
           set -euo pipefail
           tag="mac-v$VERSION"
           assets=("dist/Orbit-$VERSION.dmg" "dist/Orbit-$VERSION.dmg.sha256")
           if [[ -f dist/appcast.xml ]]; then assets+=(dist/appcast.xml); fi
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${assets[@]}" --clobber
-          else
-            args=(--target "$GITHUB_SHA" --title "Orbit for Mac $VERSION" --notes-file notes.md)
-            if [[ "$SIGNING" == ad-hoc-unnotarized ]]; then args+=(--prerelease); fi
-            gh release create "$tag" "${args[@]}" "${assets[@]}"
+            echo "Release $tag already exists; keeping the published assets."
+            exit 0
           fi
+          gh release create "$tag" "${assets[@]}" --target "$GITHUB_SHA" --title "Orbit for Mac $VERSION" --notes-file notes.md
           gh release view "$tag" --json url --jq .url

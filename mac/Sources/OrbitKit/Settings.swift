@@ -22,8 +22,16 @@ public struct AppSettings: Sendable {
         set { UserDefaults.standard.set(newValue, forKey: apiEndpointKey) }
     }
     public static var apiEndpoint: String {
-        let o = apiEndpointOverride.trimmingCharacters(in: .whitespaces)
-        return o.isEmpty ? defaultAPIEndpoint : o
+        resolvedAPIEndpoint(override: apiEndpointOverride, bundled: defaultAPIEndpoint)
+    }
+
+    static func resolvedAPIEndpoint(override: String, bundled: String) -> String {
+        let endpoint = override.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Public builds before Orbit's domain was configured could save this developer override.
+        if bundled == "https://api.orbitfs.io",
+           endpoint.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                == "https://unlispace-api.naveen-f3d.workers.dev" { return bundled }
+        return endpoint.isEmpty ? bundled : endpoint
     }
 
     public static var cacheCapGB: Int {

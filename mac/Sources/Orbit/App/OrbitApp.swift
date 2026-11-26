@@ -48,11 +48,19 @@ struct OrbitApp: App {
 
     init() { EngineCommand.runIfRequested() }
 
+    private static let menuBarIcon: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "MenuBar", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.size = NSSize(width: 22, height: 18)
+        image.isTemplate = true
+        return image
+    }()
+
     var body: some Scene {
         MenuBarExtra {
             MenuContent(model: delegate.model).environment(delegate.windows)
         } label: {
-            Image(systemName: delegate.model.statusSymbol)
+            (Self.menuBarIcon.map { Image(nsImage: $0) } ?? Image(systemName: delegate.model.status.symbolName))
                 .accessibilityLabel("Orbit: \(delegate.model.statusTitle)")
         }
         .menuBarExtraStyle(.window)

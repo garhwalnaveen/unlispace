@@ -20,6 +20,16 @@ import Foundation
         #expect(AppStatus.engineStopped.title != AppStatus.engineMissing.title)
     }
 
+    @Test func publicBuildReplacesOnlyTheOldPublicSignInOverride() {
+        let canonical = "https://api.orbitfs.io"
+        let legacy = "https://unlispace-api.naveen-f3d.workers.dev"
+        let local = "http://localhost:8788"
+        #expect(AppSettings.resolvedAPIEndpoint(override: legacy + "/ ", bundled: canonical) == canonical)
+        #expect(AppSettings.resolvedAPIEndpoint(override: "", bundled: canonical) == canonical)
+        #expect(AppSettings.resolvedAPIEndpoint(override: local, bundled: canonical) == local)
+        #expect(AppSettings.resolvedAPIEndpoint(override: legacy, bundled: "") == legacy)
+    }
+
     @Test func transferLine() {
         #expect(TransferSummary.line(for: []) == nil)
         let done = TransferInfo(id: "1", driveId: "a", path: "/x", direction: .upload, bytesDone: 5, bytesTotal: 5, status: .done)
