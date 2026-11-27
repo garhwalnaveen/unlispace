@@ -26,5 +26,5 @@ if [[ -n "${ULS_SIGN_IDENTITY:-}" ]]; then
 else
   echo 'Unsigned DMG: macOS Gatekeeper will require the user to allow the app.'
 fi
-shasum -a 256 "$ROOT/build/Orbit-${ULS_VERSION}.dmg" > "$ROOT/build/Orbit-${ULS_VERSION}.dmg.sha256"
+(cd "$ROOT/build" && shasum -a 256 "Orbit-${ULS_VERSION}.dmg" > "Orbit-${ULS_VERSION}.dmg.sha256")
 echo 'RELEASE PASS: installer and SHA-256 manifest created'

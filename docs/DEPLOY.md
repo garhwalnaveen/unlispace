@@ -79,6 +79,15 @@ an ad-hoc signed, unnotarized DMG: Gatekeeper will block normal opening until th
 explicitly allows the app in macOS settings. Automatic updates are not generated for this
 build. For a notarized release supply both `ULS_SIGN_IDENTITY` and `ULS_NOTARY_PROFILE`.
 
+The `Mac release` GitHub workflow builds the same DMG on a macOS runner for pull requests
+that touch `mac/` or `engine/`. Run it manually with a version such as `0.2.0`, or push a
+`mac-v<version>` tag, to publish the DMG and checksum as a GitHub release. Without Apple
+secrets the release is ad-hoc signed and marked as a prerelease. For a Developer ID and
+notarized release, configure `APPLE_CERTIFICATE_BASE64` (a base64-encoded `.p12`),
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, and either the Apple ID credentials
+`APPLE_ID`, `APPLE_TEAM_ID` and `APPLE_APP_SPECIFIC_PASSWORD` or the App Store Connect API
+credentials `APPLE_API_KEY_BASE64` and `APPLE_API_KEY_ID`, plus `APPLE_API_ISSUER` for team keys.
+
 ## Correctness rollout and recovery
 
 Ship the data plane before API/S3 clients that depend on `quotaUsage` and versioned xattrs.
