@@ -37,10 +37,13 @@ it("starts from the list, creates a scoped key in a dialog, shows its secret onc
   const create = dialog.getByRole("button", { name: "Create key" });
   expect(create).toBeDisabled();
   await user.type(dialog.getByLabelText("Name"), "Backup");
+  expect(dialog.getByRole("radio", { name: /Only selected drives/ })).toBeChecked();
+  const selectedDrive = dialog.getByRole("checkbox", { name: "Space" });
+  expect(selectedDrive).toBeChecked();
   await user.click(dialog.getByRole("radio", { name: /Read and write/ }));
-  await user.click(dialog.getByRole("radio", { name: /Only some drives/ }));
+  await user.click(selectedDrive);
   expect(create).toBeDisabled();
-  await user.click(dialog.getByRole("checkbox", { name: "Space" }));
+  await user.click(selectedDrive);
   await user.click(create);
 
   const secret = within(await screen.findByRole("dialog", { name: "Save your secret now" }));
@@ -77,9 +80,10 @@ it("starts from the list, creates a scoped key in a dialog, shows its secret onc
   await waitFor(() => expect(calls(fetcher, "DELETE")).toHaveLength(1));
 });
 
-it("keeps the dialog and its input when creation fails, and reaches all drives by default", async () => {
+it("requires a drive choice in a multi-drive workspace unless the user explicitly chooses all drives", async () => {
+  const multiDrive = { ...org, drives: [drive, { ...drive, id: "d_other", name: "Archive" }] };
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-    const known = shell(url); if (known) return known;
+    const known = shell(url, [multiDrive]); if (known) return known;
     if (init?.method === "POST") { expect(JSON.parse(String(init.body))).toMatchObject({ access: "read", drives: null }); return json({ error: "keys_not_configured" }, 503); }
     return json({ keys: [] });
   }));
@@ -87,8 +91,13 @@ it("keeps the dialog and its input when creation fails, and reaches all drives b
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "New key" }));
   await user.type(screen.getByLabelText("Name"), "Tools");
-  expect(screen.getByRole("radio", { name: /All drives/ })).toBeChecked();
-  await user.click(screen.getByRole("button", { name: "Create key" }));
+  const create = screen.getByRole("button", { name: "Create key" });
+  expect(screen.getByRole("radio", { name: /Only selected drives/ })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Space" })).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Archive" })).not.toBeChecked();
+  expect(create).toBeDisabled();
+  await user.click(screen.getByRole("radio", { name: /All drives/ }));
+  await user.click(create);
   expect(await screen.findByRole("alert")).toHaveTextContent("Access keys are not configured");
   expect(screen.getByLabelText("Name")).toHaveValue("Tools");
 });
@@ -100,8 +109,11 @@ it("offers only the access a role allows and asks for the workspace when there a
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "New key" }));
   expect(screen.getAllByRole("radio", { name: /Read only|Read and write|Full control/ })).toHaveLength(3);
+  await user.click(screen.getByRole("radio", { name: /All drives/ }));
   await user.selectOptions(screen.getByLabelText("Workspace"), "o_other");
   expect(screen.getByRole("radio", { name: /Read only/ })).toBeChecked();
+  expect(screen.getByRole("radio", { name: /Only selected drives/ })).toBeChecked();
+  expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled();
   expect(screen.queryByRole("radio", { name: /Read and write/ })).not.toBeInTheDocument();
   expect(screen.getByText(/allows read-only keys/)).toBeInTheDocument();
 });
@@ -150,8 +162,9 @@ it("derives the S3 endpoint from the deployment, names buckets as the gateway do
   expect(s3Endpoint("https://api.example.com", "https://s3.example.com/")).toBe("https://s3.example.com");
   expect(bucketName({ id: "d-test", alias: "photos" })).toBe("photos");
   expect(bucketName({ id: "d-test", alias: null })).toBe("d-test");
-  const input = { accessKeyId: "ID", secretAccessKey: "it's", endpoint: null, bucket: null };
+  const input = { accessKeyId: "ID", secretAccessKey: "it's", endpoint: null, bucket: null, access: "read" as const };
   expect(snippet("env", input)).toContain(`AWS_SECRET_ACCESS_KEY='it'\\''s'`);
   expect(snippet("aws", input)).toContain("s3://YOUR-DRIVE/");
   expect(snippet("rclone", input)).toContain("endpoint='https://YOUR-ORBIT-S3-ENDPOINT'");
+  expect(snippet("rclone", input)).not.toContain("rclone copy");
 });

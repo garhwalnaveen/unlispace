@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use uls_smb::{RunningServer, SmbBackend};
 use uls_vfs_backend::VfsBackend;
 
-use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAccess, check_drive};
+use crate::mount::{MountAdapter, MountError, MountHandle, MountRequest, NeedAccess, check_drive, mountpoint_error};
 use crate::protocol::ErrorBody;
 
 pub struct SmbAdapter;
@@ -93,13 +93,13 @@ impl MountAdapter for SmbAdapter {
         // of the dead SMB root itself can wait on the terminated helper.
         let parent = path.parent().ok_or_else(|| err("invalid SMB mountpoint"))?;
         let name = path.file_name().ok_or_else(|| err("invalid SMB mountpoint"))?;
-        std::fs::create_dir_all(parent).map_err(|_| err("cannot create SMB mountpoint parent"))?;
+        std::fs::create_dir_all(parent).map_err(|e| mountpoint_error(e, || "cannot create SMB mountpoint parent".into()))?;
         let mountpoint = std::fs::canonicalize(parent).map_err(|_| err("cannot open SMB mountpoint parent"))?.join(name);
         detach_stale_mounts(&mountpoint).await?;
         if std::fs::read_link(&mountpoint).is_ok() {
             return Err(err("SMB mountpoint must not be a symlink"));
         }
-        std::fs::create_dir_all(&mountpoint).map_err(|_| err("cannot create SMB mountpoint"))?;
+        std::fs::create_dir_all(&mountpoint).map_err(|e| mountpoint_error(e, || "cannot create SMB mountpoint".into()))?;
         Ok(())
     }
 

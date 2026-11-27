@@ -142,7 +142,9 @@ function ToolsStep({ drive, onDone, onSecret }: { drive: Drive; onDone: () => vo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [tab, setTab] = useState<Snippet>("env");
-  const readOnly = drive.access === "read";
+  const canWrite = drive.access !== "read";
+  const [allowChanges, setAllowChanges] = useState(false);
+  const readOnly = !canWrite || !allowChanges;
   const bucket = bucketName(drive);
   async function create() {
     setBusy(true);
@@ -163,6 +165,7 @@ function ToolsStep({ drive, onDone, onSecret }: { drive: Drive; onDone: () => vo
     return (
       <Card wide icon={<KeyRound />} title="Connect a tool or agent" lead={<>Create an access key for <strong>{drive.name}</strong>. Anything that speaks S3 can then {readOnly ? "read" : "read and write"} its files.</>}>
         <p className="ob-muted">The key works for this drive only. You can remove it at any time in Settings, under Access keys.</p>
+        {canWrite && <label><input type="checkbox" checked={allowChanges} disabled={busy} onChange={(event) => setAllowChanges(event.target.checked)} /> Allow uploading, changing, and deleting files</label>}
         <ErrorNotice error={error} />
         <Button variant="default" className="ob-main" disabled={busy} onClick={() => void create()}>{busy ? "Creating key…" : "Create access key"}</Button>
       </Card>

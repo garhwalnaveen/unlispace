@@ -124,11 +124,16 @@ export function AccessKeys() {
 
 function NewKeyDialog({ orgs, current, onClose, onCreated }: { orgs: Org[]; current: Org | null; onClose: () => void; onCreated: () => void }) {
   const { auth } = useAuth();
-  const [orgId, setOrgId] = useState(current?.id ?? orgs[0]?.id ?? "");
+  const initialOrg = current ?? orgs[0];
+  const onlyReadyDrive = (org?: Org) => {
+    const ready = org?.drives.filter((drive) => drive.status === "ready") ?? [];
+    return ready.length === 1 ? [ready[0].id] : [];
+  };
+  const [orgId, setOrgId] = useState(initialOrg?.id ?? "");
   const [label, setLabel] = useState("");
   const [access, setAccess] = useState<Access>("read");
-  const [scope, setScope] = useState<"all" | "some">("all");
-  const [picked, setPicked] = useState<string[]>([]);
+  const [scope, setScope] = useState<"all" | "some">("some");
+  const [picked, setPicked] = useState<string[]>(() => onlyReadyDrive(initialOrg));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const [secret, setSecret] = useState<KeySecret | null>(null);
@@ -155,7 +160,10 @@ function NewKeyDialog({ orgs, current, onClose, onCreated }: { orgs: Org[]; curr
       <form className="st-form st-dialog" onSubmit={create}>
         {orgs.length > 1 && <div className="st-field">
           <label htmlFor="key-org">Workspace</label>
-          <NativeSelect id="key-org" value={orgId} disabled={busy} onChange={(event) => { setOrgId(event.target.value); setPicked([]); setAccess("read"); }}>
+          <NativeSelect id="key-org" value={orgId} disabled={busy} onChange={(event) => {
+            const id = event.target.value;
+            setOrgId(id); setScope("some"); setPicked(onlyReadyDrive(orgs.find((item) => item.id === id))); setAccess("read");
+          }}>
             {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </NativeSelect>
         </div>}
@@ -175,8 +183,8 @@ function NewKeyDialog({ orgs, current, onClose, onCreated }: { orgs: Org[]; curr
         <fieldset className="st-fieldset" disabled={busy}>
           <legend>Drives</legend>
           <div className="st-choices">
+            <label className="st-choice"><input type="radio" name="key-scope" checked={scope === "some"} onChange={() => setScope("some")} /><span><strong>Only selected drives</strong><small>Pick which ones below.</small></span></label>
             <label className="st-choice"><input type="radio" name="key-scope" checked={scope === "all"} onChange={() => setScope("all")} /><span><strong>All drives</strong><small>Including drives added later.</small></span></label>
-            <label className="st-choice"><input type="radio" name="key-scope" checked={scope === "some"} onChange={() => setScope("some")} /><span><strong>Only some drives</strong><small>Pick which ones below.</small></span></label>
           </div>
           {scope === "some" && (ready.length
             ? <div className="st-checks" role="group" aria-label="Drives this key can reach">{ready.map((drive) => <label className="st-check" key={drive.id}>
@@ -201,7 +209,7 @@ function SecretDialog({ secret, drives, onClose }: { secret: KeySecret; drives: 
   const endpoint = s3Endpoint();
   const reachable = secret.drives === null ? drives : drives.filter((drive) => secret.drives!.includes(drive.id));
   const first = reachable[0];
-  const text = snippet(kind, { accessKeyId: secret.accessKeyId, secretAccessKey: secret.secretAccessKey, endpoint, bucket: first ? bucketName(first) : null });
+  const text = snippet(kind, { ...secret, endpoint, bucket: first ? bucketName(first) : null });
   return <Dialog open>
     <DialogContent showCloseButton={false} className="sm:max-w-xl" onEscapeKeyDown={(event) => event.preventDefault()} onInteractOutside={(event) => event.preventDefault()}>
       <DialogHeader>

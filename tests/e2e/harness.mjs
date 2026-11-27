@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { otpFromLog, uploadResult, watchHas, fixture } from './helpers.mjs';
 import { DaemonSocket, smbEnabled } from './daemon-socket.mjs';
 import { s3GatewayChecks } from './s3-gateway.mjs';
+import { s3Signer } from './s3-sign.mjs';
 import { desktopChecks } from './desktop.mjs';
 import { nativeStressChecks } from './stress.mjs';
 import { parityChecks } from './parity.mjs';
@@ -352,6 +353,29 @@ async function cloudChecks() {
     assert(drive && session, 'requires ready drive and session');
     assert.equal((await request(endpoint, `/v0/drives/${drive}`, { token: session.accessToken })).status, 401);
   });
+  await check('cloud public downloads and one-file upload requests', async () => {
+    const expiresAt = Date.now() + 3600000;
+    const download = await request(api, `/drives/${drive}/links`, {token:session.accessToken, body:{kind:'download',path:'hello.txt',expiresAt}});
+    if (download.status >= 500) await delay(1000);
+    assert.equal(download.status, 201, `download link HTTP ${download.status}: ${safe((apiWorker.stdout + apiWorker.stderr).split("\n").filter(line => line.includes("unhandled")).at(-1) ?? JSON.stringify(download.data))}`); secrets.push(download.data.token);
+    const publicPath = `/public/link`;
+    const metadata = await json(api, publicPath, {token:download.data.token});
+    assert.equal(metadata.manifest.versionId, (await dp('/manifest?path=hello.txt')).versionId);
+    assert.equal((await request(api, `/public/shards/${hash}`, {token:download.data.token})).status, 200);
+    assert.equal((await request(api, `/public/shards/${'f'.repeat(64)}`, {token:download.data.token})).status, 404);
+    assert.equal((await request(api, `/drives/${drive}/links/${download.data.id}`, {token:session.accessToken,method:'DELETE'})).status, 200);
+    assert.equal((await request(api, publicPath, {token:download.data.token})).status, 404);
+    const upload = await request(api, `/drives/${drive}/links`, {token:session.accessToken, body:{kind:'upload',path:'received.txt',expiresAt}});
+    assert.equal(upload.status, 201); secrets.push(upload.data.token);
+    const uploadPath = `/public/upload`;
+    assert.equal((await request(api, uploadPath, {method:'POST',token:upload.data.token,body:Buffer.from('received')})).status, 200);
+    assert.equal((await request(api, uploadPath, {method:'POST',token:upload.data.token,body:Buffer.from('again')})).status, 404);
+    assert.equal((await dp('/manifest?path=received.txt')).size, 8);
+    const conflict = await request(api, `/drives/${drive}/links`, {token:session.accessToken, body:{kind:'upload',path:'hello.txt',expiresAt}});
+    assert.equal(conflict.status, 201); secrets.push(conflict.data.token);
+    assert.equal((await request(api, '/public/upload', {method:'POST',token:conflict.data.token,body:Buffer.from('overwrite')})).status, 412);
+    assert.equal((await dp('/manifest?path=hello.txt')).size, body.length);
+  });
   let rotated;
   await check('cloud 14 refresh rotates', async () => {
     assert(session, 'requires session');
@@ -640,6 +664,52 @@ async function smbChecks() {
     assert(performance.now() - started < 5000, 'remote appearance exceeded 5 s');
     return `${(performance.now() - started).toFixed(1)} ms including CLI commit; bytes compared`;
   });
+  if (m3Enabled) await check('smb and S3 share live and historical file bytes', async () => {
+    assert(smbMountpoint && session, 'requires mounted daemon and signed-in session');
+    const orgId = (await json(api, '/orgs', { token: session.accessToken })).orgs.find(o => o.drives.some(d => d.id === drive)).id;
+    const minted = await request(api, '/keys', { token: session.accessToken, body: { workspaceId: orgId, drives: [drive], access: 'write', label: 'SMB interoperability test' } });
+    assert.equal(minted.status, 201, `key mint HTTP ${minted.status}: ${minted.data?.error ?? 'non-JSON'}`);
+    const key = minted.data;
+    assert(key?.accessKeyId && key.secretAccessKey);
+    secrets.push(key.accessKeyId, key.secretAccessKey);
+    const sign = s3Signer(root);
+    const path = 'smb-s3-interoperability.txt';
+    const source = join(work, path), mounted = join(smbMountpoint, path);
+    const signed = async (method, search = '', body = Buffer.alloc(0)) => {
+      const url = new URL(`/${drive}/${path}${search}`, s3);
+      const headers = { 'x-amz-content-sha256': createHash('sha256').update(body).digest('hex') };
+      if (method !== 'GET') headers['content-length'] = String(body.length);
+      const signedHeaders = await sign(url, { method, key, body, headers });
+      return fetch(url, { method, headers: signedHeaders, body: method === 'GET' ? undefined : body, signal: AbortSignal.timeout(5000), redirect: 'error' });
+    };
+    const assertMounted = () => until(async () => (await command('/usr/bin/cmp', [source, mounted], {}, 1000)).code === 0, 10000, 'S3 revision did not reach SMB');
+    try {
+      // Warm the negative lookup so this tests invalidation, not only a cold read.
+      assert.notEqual((await command('/usr/bin/stat', [mounted])).code, 0);
+      const put = await signed('PUT', '', text);
+      assert(put.ok, `S3 PUT HTTP ${put.status}: ${put.ok ? '' : (await put.text()).slice(0, 160)}`);
+      const oldVersion = put.headers.get('x-amz-version-id'); assert(oldVersion);
+      await writeFile(source, text);
+      await assertMounted();
+      await writeFile(source, replacement);
+      await copyIn(source, path);
+      await until(async () => {
+        const r = await signed('GET');
+        return r.ok && Buffer.from(await r.arrayBuffer()).equals(replacement);
+      }, 10000, 'SMB edit did not reach S3');
+      const old = await signed('GET', '?versionId=' + encodeURIComponent(oldVersion));
+      assert.equal(old.status, 200);
+      assert.deepEqual(Buffer.from(await old.arrayBuffer()), text);
+      const restored = await signed('POST', '?x-uls-restore&versionId=' + encodeURIComponent(oldVersion));
+      assert(restored.ok, `S3 restore HTTP ${restored.status}: ${restored.ok ? '' : (await restored.text()).slice(0, 160)}`);
+      await writeFile(source, text);
+      await assertMounted();
+      return 'S3 write and restore reached the live mount; SMB write reached S3; original version stayed readable';
+    } finally {
+      const revoke = await request(api, `/keys/${key.accessKeyId}`, { token: session.accessToken, method: 'DELETE' });
+      assert.equal(revoke.status, 200);
+    }
+  });
   await check('smb concurrent edits -> conflict event + both remote contents survive', async () => {
     assert(smbMountpoint, 'requires SMB mount');
     const base = await dp('/stat?path=smb-incoming.txt');
@@ -666,28 +736,37 @@ async function smbChecks() {
   });
   await check('smb offline pin survives cache pressure and data-plane outage', async () => {
     assert(smbMountpoint && control, 'requires mounted daemon');
-    const path = '/smb-safe.txt';
+    const path = '/smb-offline';
+    const file = `${path}/pinned.txt`;
+    const expected = join(work, 'offline-expected.txt');
+    await writeFile(expected, 'downloaded for offline use\n');
+    await cli(['put', drive, expected, file.slice(1)], { token: independentToken });
+    await until(() => control.events.some(event => event.event === 'change' && event.data.driveId === drive && event.data.paths.includes(file)),
+      5000, 'offline fixture commit did not reach the daemon watch');
+    await until(async () => (await control.call('uploads')).pending.length === 0, 10000, 'prior uploads did not drain');
     await control.call('drive.pin', { driveId: drive, path, pinned: true });
     const pin = (await control.call('pins.list', { driveId: drive })).pins.find(item => item.path === path);
     assert(pin && pin.bytes > 0 && pin.cachedBytes === pin.bytes, 'pin must finish prefetching');
-    const expected = join(work, 'offline-expected.txt');
-    await writeFile(expected, replacement);
     try {
       await control.call('config.set', { cacheCapBytes: 1 });
       const cached = (await control.call('pins.list', { driveId: drive })).pins.find(item => item.path === path);
       assert.equal(cached?.cachedBytes, pin.bytes, 'cache pressure evicted pinned bytes');
       signal(dpWorker, 'SIGSTOP');
       // Resume independently: a killed cmp can stay in kernel I/O until the service returns.
-      const resume = setTimeout(() => signal(dpWorker, 'SIGCONT'), 2500);
+      const resume = setTimeout(() => signal(dpWorker, 'SIGCONT'), 5500);
       try {
-        const compared = await command('/usr/bin/cmp', [expected, join(smbMountpoint, path.slice(1))], {}, 2000);
+        const mounted = join(smbMountpoint, path.slice(1));
+        const listing = await command('/bin/ls', [mounted], {}, 2000);
+        assert.equal(listing.code, 0, 'pinned directory was unavailable with data-plane processes suspended');
+        assert.equal(listing.stdout.trim(), 'pinned.txt');
+        const compared = await command('/usr/bin/cmp', [expected, join(mounted, 'pinned.txt')], {}, 2000);
         assert.equal(compared.code, 0, 'pinned mounted file was unavailable with data-plane processes suspended');
       } finally { clearTimeout(resume); signal(dpWorker, 'SIGCONT'); }
     } finally {
       await control.call('config.set', { cacheCapBytes: 20_000_000_000 });
       await control.call('drive.pin', { driveId: drive, path, pinned: false });
     }
-    return 'real prefetch; 1-byte cache cap; kernel SMB bytes matched while data-plane process group was suspended';
+    return 'prefetched an unopened folder; listing and bytes matched with a 1-byte cache cap and the data plane suspended';
   });
   await check('smb journal cap rejects upload without partial remote data', async () => {
     assert(control && smbMountpoint, 'requires mounted daemon');

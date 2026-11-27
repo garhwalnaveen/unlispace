@@ -10,6 +10,7 @@ import { droppedFiles, pickedFiles, TransferTray, type Transfers } from "../File
 import { driveLink, finderLink } from "../links";
 import { formatBytes } from "../ui";
 import { useListing, useSearch } from "../usePagination";
+import { LinkManager } from "../PublicLinks";
 import { DetailsPanel } from "./DetailsPanel";
 import { DeletedFilesDialog, DeleteDialog, MoveDialog, NameDialog, type Item } from "./dialogs";
 import { exactDate, fileError, friendlyDate, plural } from "./format";
@@ -83,10 +84,10 @@ function SkeletonRows() {
   );
 }
 
-export function FolderView({ drive, driveName, api, writeApi, transfers, folder, file, readOnly }: {
+export function FolderView({ drive, driveName, api, writeApi, transfers, folder, file, readOnly, sharingAllowed }: {
   drive: Drive; driveName: string; api: DriveApi; writeApi: DriveApi | null; transfers: Transfers;
   /** "" for the top of the drive, otherwise ends with "/". */ folder: string;
-  /** Name of the file whose details are open, from `?file=`. */ file: string | null; readOnly: ReadOnly;
+  /** Name of the file whose details are open, from `?file=`. */ file: string | null; readOnly: ReadOnly; sharingAllowed: boolean;
 }) {
   const navigate = useNavigate();
   const canWrite = writeApi !== null;
@@ -209,6 +210,7 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
           {readOnly && <span className="fb-badge" title="You can open and download files here, but not change them."><Eye aria-hidden="true" />View only</span>}
         </div>
         <div className="fb-toolbar">
+          {sharingAllowed && <LinkManager key={`${drive.id}:${folder}`} driveId={drive.id} folder={folder} canWrite={canWrite} />}
           <div className="fb-search" role="search">
             <Search aria-hidden="true" />
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${driveName}`} aria-label={`Search ${driveName}`} aria-describedby="fb-search-scope" autoComplete="off" />
@@ -334,7 +336,7 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
             {active.cursor && <Button size="sm" disabled={active.loading} onClick={() => void active.loadMore()}>{active.loading ? "Loading…" : active.error ? "Try again" : "Show more"}</Button>}
           </footer>}
         </div>
-        {file && <DetailsPanel key={file} api={api} writeApi={writeApi} transfers={transfers} driveId={drive.id} path={folder + file}
+        {file && <DetailsPanel sharingAllowed={sharingAllowed} key={file} api={api} writeApi={writeApi} transfers={transfers} driveId={drive.id} path={folder + file}
           onClose={closeDetails} onChanged={refresh} onAction={(kind, item) => setDialog(kind === "rename" ? { kind, item } : { kind, items: [item] })} />}
       </div>
 

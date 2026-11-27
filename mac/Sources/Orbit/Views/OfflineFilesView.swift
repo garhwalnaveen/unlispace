@@ -30,7 +30,7 @@ struct OfflineFilesView: View {
                 Divider()
                 if pins.isEmpty {
                     ContentUnavailableView("No offline files", systemImage: "arrow.down.circle",
-                                           description: Text("Drives you keep offline appear here. Keeping one offline downloads all of its files to this Mac, so they open without a connection."))
+                                           description: Text("Keep a drive offline to download a snapshot to this Mac. Keep the drive connected in Finder to open those files without a network connection. Download it again to include later changes."))
                 } else {
                     List(pins) { pin in OfflinePinRow(store: store, pin: pin) }
                         .listStyle(.inset).scrollContentBackground(.hidden)

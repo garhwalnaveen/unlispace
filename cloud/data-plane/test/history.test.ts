@@ -29,7 +29,10 @@ it("reads and restores old content at the renamed key, omits rename versions, an
         expect(ctx.storage.sql.exec("SELECT 1 FROM gc_marks WHERE h=?", first.shards[0].h).toArray()).toHaveLength(1);
     });
     await commit(d, [{ op: "delete", path: "b" }]);
-    expect((await api(`/v0/drives/${d}/restore`, { json: { path: "b", versionId: first.versionId } })).status).toBe(200);
+    expect((await get(d, `manifest?path=b&versionId=${first.versionId}`)).shards).toEqual(first.shards);
+    expect((await get(d, "versions?path=b")).versions[0].versionId).toBe(first.versionId);
+    expect((await api(`/v0/drives/${d}/restore`, { json: { path: "b", versionId: first.versionId, ifAbsent: true } })).status).toBe(200);
+    expect((await api(`/v0/drives/${d}/restore`, { json: { path: "b", versionId: first.versionId, ifAbsent: true } })).status).toBe(412);
     expect((await get(d, "versions?path=b")).versions[0].versionId).toBe(first.versionId);
     await commit(d, [{ op: "delete", path: "b" }]);
     await putFile(d, "b", "recreated");

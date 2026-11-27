@@ -143,7 +143,17 @@ pub enum DaemonAction { Start, Stop, Status }
 #[derive(Subcommand, serde::Serialize, serde::Deserialize)]
 pub enum KeyAction {
     List,
-    Create { #[arg(long)] name: String, #[arg(long)] org: String, #[arg(long)] drive: Vec<String>, #[arg(long, default_value = "read")] access: String },
+    Create {
+        #[arg(long)] name: String,
+        #[arg(long)] org: String,
+        /// Drive ID to allow. Repeat to allow more than one drive.
+        #[arg(long, required_unless_present = "all_drives", conflicts_with = "all_drives")]
+        drive: Vec<String>,
+        /// Allow every current and future drive in the workspace.
+        #[arg(long, default_value_t = false)]
+        all_drives: bool,
+        #[arg(long, default_value = "read")] access: String,
+    },
     Revoke { id: String },
 }
 
@@ -333,7 +343,10 @@ fn run_inner(cli: Cli) -> std::pin::Pin<Box<dyn std::future::Future<Output = Res
         Cmd::Keys {action} => {
             let (method,path,body) = match action.unwrap_or(KeyAction::List) {
                 KeyAction::List => ("GET","/keys".into(),serde_json::Value::Null),
-                KeyAction::Create {name,org,drive,access} => ("POST","/keys".into(),serde_json::json!({"label":name,"workspaceId":org,"drives":if drive.is_empty() {None} else {Some(drive)},"access":access})),
+                KeyAction::Create {name,org,drive,all_drives,access} => {
+                    if all_drives != drive.is_empty() { bail!("choose --drive <id> or --all-drives"); }
+                    ("POST","/keys".into(),serde_json::json!({"label":name,"workspaceId":org,"drives":if all_drives {None} else {Some(drive)},"access":access}))
+                }
                 KeyAction::Revoke {id} => { if !id.bytes().all(|b|b.is_ascii_alphanumeric() || b == b'_' || b == b'-') { bail!("invalid key id"); } ("DELETE",format!("/keys/{id}"),serde_json::Value::Null) },
             };
             print_value(api(method,path,body).await?,json)?;

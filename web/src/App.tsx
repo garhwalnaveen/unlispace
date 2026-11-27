@@ -1,3 +1,4 @@
+import { PublicLinkPage } from "./PublicLinks";
 import { Button } from "./components/ui/button";
 import { Suspense, lazy, useEffect } from "react";
 import {
@@ -72,6 +73,7 @@ export function App() {
         )}
       </main>
     );
+  if (location.pathname === "/share") return <main id="main" className="focused"><PublicLinkPage /></main>;
   const sessionError = Boolean(error) && <>
     <ErrorNotice error={error} />
     <Button onClick={() => void auth.retry().catch(() => {})}>Retry session</Button>

@@ -27,7 +27,7 @@ Addressing: path-style `/{bucket}/{key}` or virtual-host `{bucket}.{ULS_S3_HOST}
 | Batch patch | `POST ?x-uls-patch`, `Content-Type: application/vnd.s3sdk.patch` (S3SP body) |
 | Splice | `PUT ?x-uls-splice` + `x-uls-offset`, `x-uls-remove` (body = bytes to insert) |
 | Rename | `PUT /{bucket}/{new}?x-uls-rename` + `x-uls-source: {old}` (folders: both end in `/`) |
-| History | `GET ?x-uls-versions` (JSON, oldest first; `operation`, `restoredFrom`, `isLatest`, `etag`, `lastModified`; rename rows omitted) |
+| History | `GET ?x-uls-versions` (JSON, oldest first, including deleted keys; `operation`, `restoredFrom`, `isLatest`, `etag`, `lastModified`; rename and delete rows omitted; no version is latest while deleted) |
 | Restore | `POST ?x-uls-restore&versionId=` |
 
 Auth: header SigV4, presigned URLs, `UNSIGNED-PAYLOAD`, signed SHA-256 payload hash, `STREAMING-UNSIGNED-PAYLOAD-TRAILER`,

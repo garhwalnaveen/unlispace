@@ -76,5 +76,5 @@ export function DriveBrowser() {
       {drive.status === "deleted" ? "Its files are no longer available here." : "Orbit is still setting it up. Give it a moment, then try again."}
     </Problem>;
   if (path && !path.endsWith("/")) return <Resolve api={api} id={id} path={path} />;
-  return <FolderView key={`${id}:${path}`} drive={drive} driveName={name} api={api} writeApi={writeApi} transfers={transfers} folder={path} file={params.get("file")} readOnly={readOnly} />;
+  return <FolderView key={`${id}:${path}`} drive={drive} driveName={name} api={api} writeApi={writeApi} transfers={transfers} folder={path} file={params.get("file")} readOnly={readOnly} sharingAllowed={orgs.find(org => org.id === drive.orgId)?.tier === "individual"} />;
 }

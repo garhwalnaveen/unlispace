@@ -92,7 +92,7 @@ uls show Footage cuts/a.mov --at 2026-09-13T09:00:00Z > before.mov
 uls restore Footage cuts/ --at 2026-09-13T09:00:00Z --dry-run
 uls fork Footage Experiment
 uls keys list --json
-uls keys create --name automation --org workspace-id --access write
+uls keys create --name automation --org workspace-id --drive drive-id --access write
 uls keys revoke ACCESS_KEY_ID
 uls unmount Footage
 uls daemon stop
@@ -102,6 +102,9 @@ Names, aliases, ids and workspace/name forms match case-insensitively. Ambiguous
 workspace-qualified choices; `use` remembers a workspace default. Signed-in data commands execute
 inside the daemon's session; the CLI never reads/rotates its refresh token. The M0 `ULS_DEV_TOKEN`
 commands remain available. `ULS_SOCKET` selects an isolated daemon socket for CLI commands.
+
+Key creation defaults to read-only. Pass one or more `--drive <id>` flags, or explicitly use
+`--all-drives` to include every drive in the workspace, including drives created later.
 
 `mount` returns after the daemon owns the mount. Use `--foreground` for the standalone NFS
 process; existing `--state-dir`, `--no-mount` and nonzero `--port` also select that flow so old
