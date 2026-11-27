@@ -288,6 +288,18 @@ import OrbitTestSupport
 }
 
 @Suite @MainActor struct DistributionModelTests {
+    @Test func keepingAnUnmountedDriveOfflineMountsItFirst() async throws {
+        let mock = MockDaemonClient()
+        let model = Fixtures.connected(to: mock)
+        model.drives.setDrives(try await mock.listDrives())
+        model.drives.setPin(driveId: "demo", path: "/", pinned: true)
+        for _ in 0..<100 where model.drives.pendingActions.contains("demo") {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(try await mock.listDrives().first { $0.driveId == "demo" }?.mountState == .mounted)
+        #expect(try await mock.listPins(driveId: "demo")?.count == 1)
+    }
+
     @Test func pinEventsUpdateOnlyAnAvailableFeatureAndSignOutClearsIt() {
         let model = Fixtures.offline()
         let pin = OfflinePin(driveId: "d", path: "/", bytes: 100, cachedBytes: 20)

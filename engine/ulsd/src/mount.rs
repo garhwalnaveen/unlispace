@@ -35,6 +35,16 @@ impl std::fmt::Display for MountError {
 
 impl std::error::Error for MountError {}
 
+pub(crate) const MOUNT_DISK_FULL: &str = "Not enough local disk space to mount the drive. Free up disk space and try again.";
+
+pub(crate) fn mountpoint_error(error: std::io::Error, message: impl FnOnce() -> String) -> MountError {
+    MountError(if error.kind() == std::io::ErrorKind::StorageFull {
+        ErrorBody::internal(MOUNT_DISK_FULL)
+    } else {
+        ErrorBody::internal(message())
+    })
+}
+
 /// Fail early, and without leaking anything, if the drive or token is wrong.
 pub async fn check_drive(client: &Client, drive_id: &str) -> Result<(), MountError> {
     client.drive_info(drive_id).await.map(drop).map_err(|e| match e {
@@ -51,9 +61,10 @@ pub trait MountAdapter: Send + Sync {
     fn access(&self) -> NeedAccess;
     /// Prepare the target without probing an abandoned filesystem before its adapter can recover it.
     async fn prepare_mountpoint(&self, path: &Path) -> Result<(), MountError> {
-        std::fs::create_dir_all(path).map_err(|error| MountError(ErrorBody::internal(
-            format!("cannot create {}: {}", path.display(), error.kind())
-        )))
+        std::fs::create_dir_all(path).map_err(|error| {
+            let kind = error.kind();
+            mountpoint_error(error, || format!("cannot create {}: {}", path.display(), kind))
+        })
     }
     /// Present the drive at `req.mountpoint`. Returns once it is usable.
     async fn mount(&self, req: MountRequest) -> Result<Arc<dyn MountHandle>, MountError>;

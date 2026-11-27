@@ -15,7 +15,7 @@ use uls_client::{Client, ShardCache, WatchEvent};
 use uls_vfs::{Vfs, VfsEvent, VfsOptions};
 
 use crate::hub::AuthHub;
-use crate::mount::{MountAdapter, MountHandle, MountRequest, NeedAccess};
+use crate::mount::{MOUNT_DISK_FULL, MountAdapter, MountHandle, MountRequest, NeedAccess};
 use crate::protocol::*;
 use crate::state::{MountRecord, PersistedAuth, StateStore, PinRecord};
 use crate::watch::{self, WatchCtx};
@@ -656,6 +656,11 @@ impl Engine {
                 for shard in manifest.shards.into_iter().chain(manifest.xattrs.into_iter().flat_map(|x| x.into_values().flatten())) { shards.insert(shard.h, shard.n); }
             }
         }
+        // Do not announce a completed download before its metadata is usable offline.
+        let mounted = self.mounts().get(&id).and_then(|entry| entry.vfs.clone());
+        if let Some(vfs) = mounted {
+            vfs.warm_metadata(&path).await.map_err(|_| ErrorBody::new(code::OFFLINE,"pin metadata prefetch failed; retry to resume"))?;
+        }
         cache.set_pin(&owner, shards.keys().cloned().collect()).map_err(|_| ErrorBody::internal("cannot persist pin"))?;
         let record = PinRecord { drive_id: id.clone(), path: slashed(&path), shards: shards.clone() };
         self.store.try_update(|s| { s.pins.retain(|r| r.drive_id != id || r.path != record.path); s.pins.push(record); }).map_err(state_error)?;
@@ -665,10 +670,6 @@ impl Engine {
             client.fetch_shard_durable(&id, &hash).await.map_err(|_| ErrorBody::new(code::OFFLINE,"pin prefetch failed; retry to resume"))?;
             cached += n;
             self.emit(&Event::Pin(PinEvent {drive_id:id.clone(),path:slashed(&path),cached_bytes:cached,bytes}));
-        }
-        let mounted = self.mounts().get(&id).and_then(|entry| entry.vfs.clone());
-        if let Some(vfs) = mounted {
-            vfs.warm_metadata(&path).await.map_err(|_| ErrorBody::new(code::OFFLINE,"pin metadata prefetch failed; retry to resume"))?;
         }
         Ok(json!({}))
     }
@@ -804,7 +805,10 @@ impl Engine {
         let _journal_guard = self.journal_lock.lock().await;
         let existing = self.journals.lock().unwrap_or_else(|e|e.into_inner()).get(id).cloned();
         let vfs = match existing { Some(vfs) => vfs, None => Vfs::open_with_budget(client.clone(), id, &state_dir, VfsOptions::default(),self.budget.clone()).await
-            .map_err(|_| ErrorBody::internal("cannot open drive journal"))? };
+            .map_err(|error| match error {
+                uls_vfs::FsError::NoSpace => ErrorBody::internal(MOUNT_DISK_FULL),
+                _ => ErrorBody::internal("Cannot open the drive's local journal. Check folder access and try again."),
+            })? };
         // Cached clean metadata may predate the persisted cursor after a restart.
         vfs.apply_remote(WatchEvent::Resync { head_seq: 0, last_ev: 0 }).await;
         let known = self.capacity.lock().unwrap_or_else(|e| e.into_inner()).get(id).copied();

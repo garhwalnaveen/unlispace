@@ -176,3 +176,9 @@
 .fb-tray-text progress::-moz-progress-bar { background: var(--primary); }
 .fb-table input[type="checkbox"]:not(:checked):not(:focus-visible) { opacity: 0.55; }
 .fb-table tr:hover input[type="checkbox"] { opacity: 1; }
+
+.public-links { position: relative; }
+.public-links-panel { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(420px, 85vw); max-height: 70vh; overflow: auto; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 4px 16px rgb(0 0 0 / .12); }
+.public-links-panel h3, .public-links-panel p { margin: 0 0 10px; }
+.public-links-panel li { margin-top: 10px; overflow-wrap: anywhere; }
+.public-links-panel label { display: block; margin: 10px 0; }

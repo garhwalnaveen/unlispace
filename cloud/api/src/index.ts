@@ -13,6 +13,7 @@ import * as K from "./access-keys";
 import * as B from "./billing";
 import * as T from "./teams";
 import * as AI from "./ai";
+import * as P from "./public-links";
 
 const routes: Route[] = [
 	open("GET", "/healthz", () => json({ ok: true })),
@@ -20,6 +21,12 @@ const routes: Route[] = [
 	open("GET", "/billing/catalog", (ctx) => B.getCatalog(ctx)),
 	open("POST", "/webhooks/dodo", (ctx) => B.webhook(ctx)),
 	...authRoutes,
+	open("GET", "/public/link", (ctx) => P.info(ctx, P.bearer(ctx))),
+	open("GET", "/public/shards/:hash", (ctx, [hash]) => P.shard(ctx, P.bearer(ctx), hash!)),
+	open("POST", "/public/upload", (ctx) => P.upload(ctx, P.bearer(ctx))),
+	authed("GET", "/drives/:drive/links", (ctx, a, [drive]) => P.list(ctx, a, drive!)),
+	authed("POST", "/drives/:drive/links", (ctx, a, [drive]) => P.create(ctx, a, drive!)),
+	authed("DELETE", "/drives/:drive/links/:link", (ctx, a, [drive, link]) => P.revoke(ctx, a, drive!, link!)),
 
 	authed("GET", "/me", (ctx, a) => R.getMe(ctx, a)),
 	authed("PATCH", "/me", (ctx, a) => R.patchMe(ctx, a)),

@@ -1,3 +1,4 @@
+import { LinkManager } from "../PublicLinks";
 import { Download, Ellipsis, FolderOpen, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DriveApi, FileStat, Version } from "../api";
@@ -107,9 +108,9 @@ function History({ api, writeApi, transfers, file, name, onRestored }: {
 }
 
 /** The right-hand panel for one file: what it is, a preview, and its history. A full-screen sheet on small screens. */
-export function DetailsPanel({ api, writeApi, transfers, driveId, path, onClose, onChanged, onAction }: {
+export function DetailsPanel({ api, writeApi, transfers, driveId, path, onClose, onChanged, onAction, sharingAllowed }: {
   api: DriveApi; writeApi: DriveApi | null; transfers: Transfers; driveId: string; path: string;
-  onClose: () => void; onChanged: () => void; onAction: (kind: "rename" | "move" | "delete", item: Item) => void;
+  sharingAllowed: boolean; onClose: () => void; onChanged: () => void; onAction: (kind: "rename" | "move" | "delete", item: Item) => void;
 }) {
   const name = baseName(path);
   const load = useCallback(() => api.stat(path), [api, path]);
@@ -142,6 +143,7 @@ export function DetailsPanel({ api, writeApi, transfers, driveId, path, onClose,
       {file && !isFile && <p className="muted">This is a folder. Close this panel and open it from the list.</p>}
       {file && isFile && <>
         <FilePreview api={api} file={file} name={name} />
+        {sharingAllowed && <LinkManager key={`${driveId}:${path}`} driveId={driveId} folder="" file={path} canWrite={false} />}
         <div className="fb-details-actions">
           <Button onClick={() => transfers.download(path, file.size)}><Download />Download</Button>
           <Button variant="ghost" asChild><a href={finderLink(driveId, path)}><FolderOpen />Open in Finder</a></Button>

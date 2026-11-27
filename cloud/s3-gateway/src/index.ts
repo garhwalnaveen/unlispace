@@ -4,7 +4,7 @@ import { DataPlane, Ed25519TokenMinter, type FetchBinding, type InternalTokenMin
 import { errorResponse, S3Error, tag, xml } from "./errors";
 import { listObjects, listVersions } from "./listing";
 import { abortUpload, completeUpload, createUpload, listParts, listUploads, uploadPart } from "./multipart";
-import { copyObject, deleteKey, deleteObject, editObject, getObject, putObject, renameObject, restoreObject, type ObjectContext } from "./objects";
+import { copyObject, deleteKey, deleteObject, editObject, getObject, notFound, putObject, renameObject, restoreObject, type ObjectContext } from "./objects";
 import { BoundState, WorkspaceState, type VersionAnnotation, type StateStore } from "./state";
 import { control, keyResolver, type ControlPlane, type SessionAPI } from "./control-plane";
 import { etag } from "./data-plane";
@@ -248,7 +248,7 @@ async function listBuckets(deps: Deps, auth: Auth): Promise<Response> {
 async function objectVersions(c: ObjectContext): Promise<Response> {
   const versions = await c.dp.versions(c.key);
   if (!versions.length) throw new S3Error(404, "NoSuchKey");
-  const head = await c.dp.stat(c.key);
+  const head = await c.dp.stat(c.key).catch(e => { if (notFound(e)) return null; throw e; });
   const entries = [];
   const annotationDrives = [c.dp.drive];
   for (let depth = 0; depth < 8; depth++) {
@@ -256,10 +256,10 @@ async function objectVersions(c: ObjectContext): Promise<Response> {
     if (!parent || annotationDrives.includes(parent)) break;
     annotationDrives.push(parent);
   }
-  const current = versions.find(v => v.versionId === head.versionId);
+  const current = versions.find(v => v.versionId === head?.versionId);
   const latestContent = current?.op === "rename"
     ? versions.filter(v => !["rename", "delete", "mkdir"].includes(v.op)).at(-1)?.versionId
-    : head.versionId;
+    : head?.versionId;
   for (const v of versions) {
     let saved: VersionAnnotation | undefined;
     for (const drive of annotationDrives) {

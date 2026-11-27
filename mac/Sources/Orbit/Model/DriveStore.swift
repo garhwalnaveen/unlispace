@@ -100,7 +100,11 @@ final class DriveStore {
     func unmount(_ drive: DriveInfo) { run(drive.driveId) { try await $0.unmount(driveId: drive.driveId) } }
 
     func setPin(driveId: String, path: String, pinned: Bool) {
-        run(driveId) { try await $0.pin(driveId: driveId, path: path, pinned: pinned) }
+        let needsMount = pinned && drive(id: driveId)?.mountState != .mounted
+        run(driveId) { client in
+            if needsMount { try await client.mount(driveId: driveId) }
+            try await client.pin(driveId: driveId, path: path, pinned: pinned)
+        }
     }
 
     /// "Open in Finder" for any drive: one that is not in Finder yet is put there first.

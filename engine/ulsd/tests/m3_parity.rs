@@ -11,6 +11,15 @@ use ulsd::protocol::parse_request;
 
 struct Adapter { paths: Arc<Mutex<Vec<PathBuf>>> }
 struct Handle;
+struct CaptureAdapter { vfs: Arc<Mutex<Option<uls_vfs::Vfs>>> }
+#[async_trait]
+impl MountAdapter for CaptureAdapter {
+    fn access(&self)->NeedAccess {NeedAccess::Read}
+    async fn mount(&self,req:MountRequest)->Result<Arc<dyn MountHandle>,MountError> {
+        *self.vfs.lock().unwrap() = Some(req.vfs);
+        Ok(Arc::new(Handle))
+    }
+}
 #[async_trait]
 impl MountHandle for Handle { async fn unmount(&self)->Result<(),MountError> {Ok(())} }
 #[async_trait]
@@ -27,10 +36,14 @@ fn config(dir:&std::path::Path,endpoint:String)->EngineConfig {
 }
 #[test]
 fn cli_shapes_and_legacy_mount_flags() {
-    for args in [vec!["uls","drives","--json"],vec!["uls","use","Acme"],vec!["uls","mount","Demo"],vec!["uls","mount","Demo","/tmp/demo","--read-only","--state-dir","/tmp/state"],vec!["uls","mounts","--json"],vec!["uls","unmount","/tmp/demo"],vec!["uls","status"],vec!["uls","uploads","--watch","--json"],vec!["uls","pin","d","/a"],vec!["uls","unpin","d","/a"],vec!["uls","history","d","a","--json"],vec!["uls","show","d","a","--at","2026-01-01T00:00:00Z"],vec!["uls","restore","d","a","v_1"],vec!["uls","restore","d","a/","--at","2026-01-01T00:00:00Z","--dry-run"],vec!["uls","fork","d","new"],vec!["uls","keys"],vec!["uls","keys","create","--name","test","--org","org","--access","write"],vec!["uls","keys","revoke","k1"],vec!["uls","daemon","start"],vec!["uls","daemon","stop"],vec!["uls","daemon","status","--json"],vec!["uls","upload","a","b","d:/folder"]] {
+    for args in [vec!["uls","drives","--json"],vec!["uls","use","Acme"],vec!["uls","mount","Demo"],vec!["uls","mount","Demo","/tmp/demo","--read-only","--state-dir","/tmp/state"],vec!["uls","mounts","--json"],vec!["uls","unmount","/tmp/demo"],vec!["uls","status"],vec!["uls","uploads","--watch","--json"],vec!["uls","pin","d","/a"],vec!["uls","unpin","d","/a"],vec!["uls","history","d","a","--json"],vec!["uls","show","d","a","--at","2026-01-01T00:00:00Z"],vec!["uls","restore","d","a","v_1"],vec!["uls","restore","d","a/","--at","2026-01-01T00:00:00Z","--dry-run"],vec!["uls","fork","d","new"],vec!["uls","keys"],vec!["uls","keys","create","--name","test","--org","org","--drive","d","--access","write"],vec!["uls","keys","create","--name","test","--org","org","--all-drives"],vec!["uls","keys","revoke","k1"],vec!["uls","daemon","start"],vec!["uls","daemon","stop"],vec!["uls","daemon","status","--json"],vec!["uls","upload","a","b","d:/folder"]] {
         assert!(ulsd::cli::Cli::try_parse_from(&args).is_ok(),"{args:?}");
     }
     assert!(ulsd::cli::Cli::try_parse_from(["uls","show","d","a","--at","T","--version","v"]).is_err());
+    for scope in [&[][..], &["--drive", "d", "--all-drives"][..]] {
+        let args = ["uls", "keys", "create", "--name", "test", "--org", "org"].into_iter().chain(scope.iter().copied());
+        assert!(ulsd::cli::Cli::try_parse_from(args).is_err());
+    }
 }
 #[test]
 fn name_alias_id_workspace_and_ambiguity() {
@@ -77,6 +90,26 @@ async fn pins_mount_options_uploads_and_cap() {
     assert_eq!(state["mounts"][0]["mountPath"],json!(point));assert_eq!(state["mounts"][0]["readOnly"],true);
     // auth.set/config.set restoration uses the remembered path rather than a generated root.
     assert_eq!(paths.lock().unwrap().last(),Some(&point));
+}
+#[tokio::test]
+async fn mounted_pin_can_read_and_list_without_network() {
+    let server=uls_mock::MockServer::start("local").await;
+    let client=Client::builder(server.url(),"local").build().unwrap();
+    client.create_drive("drive",None).await.unwrap();
+    let dir=tempfile::tempdir_in("/tmp").unwrap();
+    let local=dir.path().join("source"); std::fs::write(&local,b"offline contents").unwrap();
+    client.upload_file("drive",&local,"folder/file",None).await.unwrap();
+    let captured=Arc::new(Mutex::new(None));
+    let engine=Engine::new(config(dir.path(),server.url()),Arc::new(CaptureAdapter{vfs:captured.clone()}));
+    call(&engine,"config.set",json!({"token":"local"})).await;
+    call(&engine,"drive.mount",json!({"driveId":"drive"})).await;
+    call(&engine,"drive.pin",json!({"driveId":"drive","path":"/folder","pinned":true})).await;
+    let vfs=captured.lock().unwrap().clone().unwrap();
+    drop(server);
+    let read=tokio::time::timeout(std::time::Duration::from_secs(3),vfs.read("folder/file",0,100)).await.unwrap().unwrap();
+    assert_eq!(read.as_ref(),b"offline contents");
+    assert!(vfs.readdir("folder").await.unwrap().iter().any(|entry|entry.name=="file"));
+    engine.shutdown().await;
 }
 #[tokio::test]
 async fn historical_selection_and_subtree_restore_is_one_commit() {
@@ -136,13 +169,14 @@ async fn socket_cli_read_commands_fork_keys_and_workspace() {
     Mock::given(method("POST")).and(path("/drives/drive/fork")).and(body_json(json!({"name":"Branch"}))).respond_with(ResponseTemplate::new(201).set_body_json(json!({"id":"child","name":"Branch"}))).expect(1).mount(&api).await;
     Mock::given(method("GET")).and(path("/keys")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"keys":[]}))).mount(&api).await;
     Mock::given(method("POST")).and(path("/keys")).and(body_json(json!({"label":"test","workspaceId":"o1","access":"write","drives":null}))).respond_with(ResponseTemplate::new(201).set_body_json(json!({"accessKeyId":"K1"}))).expect(1).mount(&api).await;
+    Mock::given(method("POST")).and(path("/keys")).and(body_json(json!({"label":"agent","workspaceId":"o1","access":"read","drives":["drive"]}))).respond_with(ResponseTemplate::new(201).set_body_json(json!({"accessKeyId":"K2"}))).expect(1).mount(&api).await;
     Mock::given(method("DELETE")).and(path("/keys/K1")).respond_with(ResponseTemplate::new(204)).expect(1).mount(&api).await;
     let e=Engine::new(config(dir.path(),"http://127.0.0.1:1".into()),Arc::new(Adapter{paths:Default::default()}));
     let exp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()+900;
     let access=format!("e30.{}.sig",URL_SAFE_NO_PAD.encode(json!({"sub":"u1","email":"a@b.c","exp":exp}).to_string()));
     call(&e,"auth.set",json!({"apiEndpoint":api.uri(),"accessToken":access,"refreshToken":"local-refresh"})).await;
     let (listener,uid)=ulsd::server::bind(&socket).unwrap();let serving=tokio::spawn(ulsd::server::serve(listener,uid,e.clone()));
-    for args in [vec!["drives","--json"],vec!["mounts","--json"],vec!["status","--json"],vec!["uploads","--json"],vec!["use","acme","--json"],vec!["fork","ALIAS","Branch","--json"],vec!["keys","list","--json"],vec!["keys","create","--name","test","--org","o1","--access","write","--json"],vec!["keys","revoke","K1","--json"],vec!["stat","ALIAS","file","--json"],vec!["ls","drive","--json"],vec!["history","drive","file","--json"],vec!["show","drive","file","--json"]] {
+    for args in [vec!["drives","--json"],vec!["mounts","--json"],vec!["status","--json"],vec!["uploads","--json"],vec!["use","acme","--json"],vec!["fork","ALIAS","Branch","--json"],vec!["keys","list","--json"],vec!["keys","create","--name","test","--org","o1","--all-drives","--access","write","--json"],vec!["keys","create","--name","agent","--org","o1","--drive","drive","--json"],vec!["keys","revoke","K1","--json"],vec!["stat","ALIAS","file","--json"],vec!["ls","drive","--json"],vec!["history","drive","file","--json"],vec!["show","drive","file","--json"]] {
         let output=tokio::process::Command::new(env!("CARGO_BIN_EXE_ulsd")).args(&args).env("ULS_SOCKET",&socket).env_remove("ULS_DEV_TOKEN").output().await.unwrap();
         assert!(output.status.success(),"{args:?}: {}",String::from_utf8_lossy(&output.stderr));
         let _:Value=serde_json::from_slice(&output.stdout).unwrap();

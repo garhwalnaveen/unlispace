@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Drive } from "../src/api";
+import type { KeySecret } from "../src/keys";
 import { s3Endpoint, snippet as s3Snippet } from "../src/settings/s3";
 const S3_ENDPOINT = s3Endpoint()!;
 import { noteSignIn, readOnboarding, startOnboarding, writeOnboarding } from "../src/onboarding/state";
@@ -13,7 +14,7 @@ vi.mock("../src/upload", async (original) => ({ ...(await original<typeof import
 const upload = vi.mocked(uploadFile);
 
 const DAY = 86_400_000;
-const secret = { accessKeyId: "ULS1ABCDEFGHIJKLMNOP", secretAccessKey: "s3cr3t/with+symbols", workspaceId: drive.orgId, label: "Getting started", access: "write", drives: [drive.id], parent: null, createdAt: 1, lastUsedAt: null, revokedAt: null };
+const secret: KeySecret = { accessKeyId: "ULS1ABCDEFGHIJKLMNOP", secretAccessKey: "s3cr3t/with+symbols", workspaceId: drive.orgId, label: "Getting started", access: "write", drives: [drive.id], parent: null, createdAt: 1, lastUsedAt: null, revokedAt: null };
 interface Options { drives?: Partial<Drive>[]; role?: string; keys?: () => Response; orgs?: () => Response | undefined }
 function welcomeFetch({ drives = [drive], role = "owner", keys = () => json(secret, 201), orgs = () => undefined }: Options = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
@@ -99,6 +100,9 @@ describe("with an agent or S3 tool", () => {
     await user.click(await choose(/agent or S3 tool/));
     expect(await screen.findByRole("heading", { level: 1, name: "Connect a tool or agent" })).toBeInTheDocument();
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    const write = screen.getByRole("checkbox", { name: /Allow uploading/ });
+    expect(write).not.toBeChecked();
+    await user.click(write);
     await user.click(screen.getByRole("button", { name: "Create access key" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Save your secret now" })).toBeInTheDocument();
     const request = fetcher.mock.calls.find(([url, init]) => url.endsWith("/keys") && init?.method === "POST");
@@ -135,6 +139,7 @@ describe("with an agent or S3 tool", () => {
     const user = userEvent.setup();
     renderApp("/welcome?path=tools");
     expect(await screen.findByText(/can then read its files/)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Allow uploading/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create access key" }));
     await screen.findByRole("heading", { level: 1, name: "Save your secret now" });
     const request = fetcher.mock.calls.find(([url, init]) => url.endsWith("/keys") && init?.method === "POST");
@@ -159,7 +164,7 @@ describe("with an agent or S3 tool", () => {
   });
 
   it("quotes every value so a pasted snippet cannot run something else", () => {
-    const key = { accessKeyId: "ULS1ID", secretAccessKey: "a'b; rm -rf ~" };
+    const key = { accessKeyId: "ULS1ID", secretAccessKey: "a'b; rm -rf ~", access: "read" as const };
     for (const kind of ["env", "aws", "rclone"] as const) {
       const snippet = s3Snippet(kind, { ...key, bucket: "bucket", endpoint: "https://s3.example" });
       expect(snippet).toContain("'a'\\''b; rm -rf ~'");

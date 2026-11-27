@@ -27,15 +27,16 @@ const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 export const ENDPOINT_PLACEHOLDER = "https://YOUR-ORBIT-S3-ENDPOINT";
 export const BUCKET_PLACEHOLDER = "YOUR-DRIVE";
 
-export interface SnippetInput { accessKeyId: string; secretAccessKey: string; endpoint: string | null; bucket: string | null }
+export interface SnippetInput { accessKeyId: string; secretAccessKey: string; endpoint: string | null; bucket: string | null; access: "read" | "write" | "admin" }
 export type SnippetKind = "env" | "aws" | "rclone";
 export const SNIPPET_LABELS: Record<SnippetKind, string> = { env: "Environment variables", aws: "AWS CLI", rclone: "rclone" };
 
-export function snippet(kind: SnippetKind, { accessKeyId, secretAccessKey, endpoint, bucket }: SnippetInput): string {
+export function snippet(kind: SnippetKind, { accessKeyId, secretAccessKey, endpoint, bucket, access }: SnippetInput): string {
   const url = endpoint ?? ENDPOINT_PLACEHOLDER, name = bucket ?? BUCKET_PLACEHOLDER;
   const credentials = `export AWS_ACCESS_KEY_ID=${quote(accessKeyId)}\nexport AWS_SECRET_ACCESS_KEY=${quote(secretAccessKey)}`;
   if (kind === "env") return `${credentials}\nexport AWS_ENDPOINT_URL=${quote(url)}\nexport AWS_DEFAULT_REGION=${quote(S3_REGION)}`;
   if (kind === "aws") return `${credentials}\naws s3 ls ${quote(`s3://${name}/`)} --endpoint-url ${quote(url)} --region ${S3_REGION}`;
   // The gateway's ETag is not an MD5 of the file, so rclone's after-transfer comparison has to be turned off.
-  return `rclone config create orbit s3 provider=Other access_key_id=${quote(accessKeyId)} secret_access_key=${quote(secretAccessKey)} endpoint=${quote(url)} region=${S3_REGION} force_path_style=true\nrclone ls ${quote(`orbit:${name}`)}\nrclone copy --ignore-checksum ./notes.txt ${quote(`orbit:${name}`)}`;
+  const listing = `rclone config create orbit s3 provider=Other access_key_id=${quote(accessKeyId)} secret_access_key=${quote(secretAccessKey)} endpoint=${quote(url)} region=${S3_REGION} force_path_style=true\nrclone ls ${quote(`orbit:${name}`)}`;
+  return access === "read" ? listing : `${listing}\nrclone copy --ignore-checksum ./notes.txt ${quote(`orbit:${name}`)}`;
 }

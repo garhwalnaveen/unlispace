@@ -133,6 +133,32 @@ export async function s3GatewayChecks(h) {
     assert(!versions.includes(restored.headers.get('x-amz-version-id')));
     await matches(bucket, payload); expected = payload;
   });
+  await check('m3 data plane + S3 share deleted and restored versions', async () => {
+    assert(session && drive, 'requires ready drive and session');
+    const key = 'cross-surface-recovery.txt', url = `/${bucket}/${key}`;
+    const data = `/v0/drives/${drive}`;
+    const { token } = await json(api, `/drives/${drive}/token`, { token: session.accessToken, body: { access: 'write' } });
+    secrets.push(token);
+    const bytes = Buffer.from('shared between the direct data plane and S3');
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const put = await request(endpoint, `${data}/shards/${digest}`, { token, method: 'PUT', body: bytes });
+    assert([200, 201].includes(put.status));
+    const created = await json(endpoint, `${data}/commit`, { token, body: { ops: [{ op: 'put', path: key, size: bytes.length, shards: [{ h: digest, n: bytes.length }] }] } });
+    const before = created.results[0].versionId;
+    assert.deepEqual((await ok('GET', url)).bytes, bytes);
+    await ok('DELETE', url);
+    assert.equal((await signed('GET', url)).status, 404);
+    const history = JSON.parse((await ok('GET', url + '?x-uls-versions')).text);
+    assert.deepEqual(history.versions.map(v => [v.versionId, v.isLatest]), [[before, false]]);
+    assert.deepEqual((await ok('GET', url + '?versionId=' + before)).bytes, bytes);
+    const restored = await ok('POST', url + '?x-uls-restore&versionId=' + before, { headers: { 'if-none-match': '*' } });
+    const after = restored.headers.get('x-amz-version-id');
+    assert(after && after !== before);
+    const manifest = await json(endpoint, `${data}/manifest?path=${key}`, { token });
+    assert.equal(manifest.versionId, after);
+    assert.deepEqual(manifest.shards.map(s => [s.h, s.n]), [[digest, bytes.length]]);
+    assert.deepEqual((await ok('GET', url)).bytes, bytes);
+  });
   await check('m3 fork snapshot + zero R2 growth + fork of fork + lineage guard', async () => {
     assert(initialVersion, 'requires upload');
     const before = await objectFiles(join(work, 'dp-state/v3/r2'));
