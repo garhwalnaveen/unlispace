@@ -371,6 +371,13 @@ async function cloudChecks() {
     assert.equal((await request(api, uploadPath, {method:'POST',token:upload.data.token,body:Buffer.from('received')})).status, 200);
     assert.equal((await request(api, uploadPath, {method:'POST',token:upload.data.token,body:Buffer.from('again')})).status, 404);
     assert.equal((await dp('/manifest?path=received.txt')).size, 8);
+    const pinned = await request(api, `/drives/${drive}/links`, {token:session.accessToken, body:{kind:'download',path:'received.txt',expiresAt}});
+    assert.equal(pinned.status, 201); secrets.push(pinned.data.token);
+    await dp('/commit', {body:{ops:[{op:'delete',path:'received.txt'}]}});
+    await dp('/commit', {body:{ops:[{op:'put',path:'received.txt',ifAbsent:true,size:body.length,shards:[{h:hash,n:body.length}]}]}});
+    assert.equal((await dp('/manifest?path=received.txt')).shards[0].h, hash);
+    assert.equal((await request(api, publicPath, {token:pinned.data.token})).status, 404, 'a reused path must never share its replacement');
+    assert.equal((await request(api, `/public/shards/${hash}`, {token:pinned.data.token})).status, 404);
     const conflict = await request(api, `/drives/${drive}/links`, {token:session.accessToken, body:{kind:'upload',path:'hello.txt',expiresAt}});
     assert.equal(conflict.status, 201); secrets.push(conflict.data.token);
     assert.equal((await request(api, '/public/upload', {method:'POST',token:conflict.data.token,body:Buffer.from('overwrite')})).status, 412);

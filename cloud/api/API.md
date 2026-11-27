@@ -22,7 +22,7 @@ families; drive tokens are scoped grants minted per drive. Migrations live in
 - `GET /me`, `PATCH /me`, `GET /me/access`.
 - `GET /orgs`.
 - `POST /orgs/{org}/drives`; `GET|PATCH|DELETE /drives/{id}`; `POST /drives/{id}/token` (mint read/write/admin drive token); `POST /drives/{id}/fork`.
-- `GET|POST /drives/{id}/links`; `DELETE /drives/{id}/links/{link}` — create, list, and revoke public links. Creation is limited to Individual workspaces and accepts `kind` (`download` or `upload`), exact file `path`, and `expiresAt` (epoch milliseconds, at most 30 days). The token is returned once. The web UI uses seven-day links. Moving or renaming a shared file may require a new link.
+- `GET|POST /drives/{id}/links`; `DELETE /drives/{id}/links/{link}` — create, list, and revoke public links. Creation is limited to Individual workspaces and accepts `kind` (`download` or `upload`), exact file `path`, and `expiresAt` (epoch milliseconds, at most 30 days). The token is returned once. The web UI uses seven-day links. A shared download never serves a replacement file. Moving, renaming, or reusing the path may require a new link. Existing links remain revocable after a workspace upgrades.
 - `GET|POST /keys`; `DELETE /keys/{id}` — S3 access keys (HMAC-derived secrets, parent scopes, transitive revocation). Listing never returns secrets.
 - `GET /orgs/{org}/billing`; `POST /orgs/{org}/billing/checkout`; `GET /orgs/{org}/billing/invoices`; `POST /orgs/{org}/billing/portal` — Dodo Payments.
 - `GET /orgs/{org}/members`; `PATCH|DELETE /orgs/{org}/members/{user}`; `POST /orgs/{org}/invites`; `DELETE /orgs/{org}/invites/{id}`; `POST /invites/{id}/accept` — teams.

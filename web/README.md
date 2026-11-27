@@ -89,6 +89,7 @@ server-side rendering is needed. [Cloudflare SPA routing](https://developers.clo
   In a personal workspace, use “Share file” in the details panel to create a public download link,
   or “Public links” in the folder toolbar to request one file (up to 16 MiB) without overwrite.
   Recipients do not need an account. Links expire after seven days and can be revoked from either panel.
+  Moving, renaming, or replacing a file with a separate file at the same path may require a new link.
   Downloads assemble shards in manifest order, checking sizes and SHA-256; files above 512 MiB direct
   users to the desktop app. Uploads use FastCDC 2020 normalization level 1 (256 KiB / 2 MiB / 16 MiB),
   verified against both Rust golden vectors, probe `/shards/missing` in batches of 1000 hashes, and PUT

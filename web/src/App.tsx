@@ -73,7 +73,7 @@ export function App() {
         )}
       </main>
     );
-  if (location.pathname === "/share") return <main id="main" className="focused"><PublicLinkPage /></main>;
+  if (location.pathname === "/share") return <main id="main" className="focused" tabIndex={-1}><PublicLinkPage key={location.hash} token={location.hash.slice(1)} /></main>;
   const sessionError = Boolean(error) && <>
     <ErrorNotice error={error} />
     <Button onClick={() => void auth.retry().catch(() => {})}>Retry session</Button>

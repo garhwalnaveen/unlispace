@@ -210,7 +210,7 @@ export function FolderView({ drive, driveName, api, writeApi, transfers, folder,
           {readOnly && <span className="fb-badge" title="You can open and download files here, but not change them."><Eye aria-hidden="true" />View only</span>}
         </div>
         <div className="fb-toolbar">
-          {sharingAllowed && <LinkManager key={`${drive.id}:${folder}`} driveId={drive.id} folder={folder} canWrite={canWrite} />}
+          <LinkManager key={`${drive.id}:${folder}`} driveId={drive.id} folder={folder} canWrite={canWrite} canCreate={sharingAllowed} />
           <div className="fb-search" role="search">
             <Search aria-hidden="true" />
             <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${driveName}`} aria-label={`Search ${driveName}`} aria-describedby="fb-search-scope" autoComplete="off" />
